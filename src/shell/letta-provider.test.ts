@@ -156,6 +156,26 @@ describe("LettaProvider", () => {
       expect(call.tools).toContain("archival_memory_search");
     });
 
+    it("merges custom tools with archival_memory_search", async () => {
+      const client = makeMockClient();
+      const provider = new LettaProvider(mockClientAs(client));
+
+      await provider.createAgent({
+        name: "repo-expert-my-app",
+        repoName: "my-app",
+        description: "Test",
+        tags: [],
+        model: "openai/gpt-4.1",
+        embedding: "openai/text-embedding-3-small",
+        memoryBlockLimit: 5000,
+        tools: ["send_message_to_agents_matching_all_tags"],
+      });
+
+      const call: CreateAgentCallArg = client.agents.create.mock.calls[0][0];
+      expect(call.tools).toContain("archival_memory_search");
+      expect(call.tools).toContain("send_message_to_agents_matching_all_tags");
+    });
+
     it("passes model, embedding, and tags through", async () => {
       const client = makeMockClient();
       const provider = new LettaProvider(mockClientAs(client));

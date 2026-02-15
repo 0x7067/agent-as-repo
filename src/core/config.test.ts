@@ -92,4 +92,23 @@ describe("parseConfig", () => {
     const config = parseConfig(raw);
     expect(config.repos["my-app"].persona).toBe("I am an expert on my-app.");
   });
+
+  it("includes optional tools when provided", () => {
+    const raw = {
+      ...validRaw,
+      repos: {
+        "my-app": {
+          ...validRaw.repos["my-app"],
+          tools: ["send_message_to_agents_matching_all_tags"],
+        },
+      },
+    };
+    const config = parseConfig(raw);
+    expect(config.repos["my-app"].tools).toEqual(["send_message_to_agents_matching_all_tags"]);
+  });
+
+  it("leaves tools undefined when omitted", () => {
+    const config = parseConfig(validRaw);
+    expect(config.repos["my-app"].tools).toBeUndefined();
+  });
 });

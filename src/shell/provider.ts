@@ -7,6 +7,7 @@ export interface CreateAgentParams {
   model: string;
   embedding: string;
   memoryBlockLimit: number;
+  tools?: string[];
 }
 
 export interface CreateAgentResult {

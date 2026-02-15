@@ -6,6 +6,7 @@ export interface RepoConfig {
   ignoreDirs: string[];
   tags: string[];
   persona?: string;
+  tools?: string[];
   maxFileSizeKb: number;
   memoryBlockLimit: number;
   bootstrapOnCreate: boolean;

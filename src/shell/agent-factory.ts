@@ -14,6 +14,7 @@ export async function createRepoAgent(
     description: repoConfig.description,
     persona: repoConfig.persona,
     tags: ["repo-expert", ...repoConfig.tags],
+    tools: repoConfig.tools,
     model: letta.model,
     embedding: letta.embedding,
     memoryBlockLimit: repoConfig.memoryBlockLimit,

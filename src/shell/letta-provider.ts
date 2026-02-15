@@ -39,7 +39,7 @@ export class LettaProvider implements AgentProvider {
       name: params.name,
       model: params.model,
       embedding: params.embedding,
-      tools: ["archival_memory_search"],
+      tools: ["archival_memory_search", ...(params.tools ?? [])],
       tags: params.tags,
       memory_blocks: [
         { label: "persona", value: persona, limit: params.memoryBlockLimit },
