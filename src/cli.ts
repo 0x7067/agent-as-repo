@@ -13,6 +13,7 @@ import { LettaProvider } from "./shell/letta-provider.js";
 import { chunkFile } from "./core/chunker.js";
 import { addAgentToState, updatePassageMap } from "./core/state.js";
 import { syncRepo } from "./shell/sync.js";
+import { getAgentStatus } from "./shell/status.js";
 import { execSync } from "child_process";
 
 const STATE_FILE = ".repo-expert-state.json";
@@ -218,6 +219,28 @@ program
       const passages = Object.values(agent.passages).flat().length;
       const bootstrap = agent.lastBootstrap ? "yes" : "no";
       console.log(`  ${name}: agent=${agent.agentId} files=${files} passages=${passages} bootstrapped=${bootstrap}`);
+    }
+  });
+
+program
+  .command("status")
+  .description("Show agent memory stats and health")
+  .option("--repo <name>", "Show status for a single repo")
+  .action(async (opts) => {
+    const state = await loadState(STATE_FILE);
+    const provider = new LettaProvider(new Letta());
+    const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
+
+    for (const repoName of repoNames) {
+      const agentInfo = state.agents[repoName];
+      if (!agentInfo) {
+        console.error(`No agent found for "${repoName}". Run "repo-expert setup" first.`);
+        process.exitCode = 1;
+        return;
+      }
+
+      const output = await getAgentStatus(provider, repoName, agentInfo);
+      console.log(output);
     }
   });
 
