@@ -73,7 +73,7 @@ Letta's three-tier memory maps to codebase knowledge:
 |---|---|---|
 | `persona` | Agent identity, repo description, role | 5,000 chars |
 | `architecture` | High-level architecture, key patterns, directory structure | 5,000 chars |
-| `conventions_and_apis` | Coding conventions, key APIs, dependencies, integration points | 5,000 chars |
+| `conventions` | Coding conventions, key APIs, dependencies, integration points | 5,000 chars |
 
 Agents populate these blocks during bootstrap (initial setup) and refine them over time through conversations. The block content is always in the LLM's context window, so it acts as persistent "working knowledge."
 
@@ -230,27 +230,28 @@ Before building the framework, validate the critical unknowns with a standalone 
 
 ### Phase 2: Sync & Reliability
 
-- [ ] Incremental sync via `git diff --name-only` — delete old passages by ID, insert new ones
+- [ ] Extend `AgentProvider` with `deletePassage(agentId, passageId)`, `listPassages(agentId)`, `getBlock(agentId, label)` — implement in `LettaProvider`
+- [ ] Incremental sync via `git diff --name-only` — delete old passages by ID, insert new ones (uses `deletePassage` + `storePassage`)
 - [ ] Fallback: if changed files > 500, trigger full re-index instead of incremental
 - [ ] CLI: `sync` subcommand with `--since`, `--full`, `--repo` flags
 - [ ] Concurrent passage ingestion with configurable parallelism (based on Phase 0 findings)
-- [ ] Handle Letta Cloud rate limits gracefully (retry with backoff)
-- [ ] Agent health check / status command showing memory stats and last sync time
+- [ ] Handle Letta Cloud rate limits gracefully (retry with backoff inside `LettaProvider`)
+- [ ] Agent health check / status command showing memory stats and last sync time (uses `getBlock` + `listPassages`)
 
 ### Phase 3: Extensibility
 
 - [ ] MCP exposure guide + helper script for Letta MCP Server setup
 - [ ] Plugin system for file collectors (e.g., tree-sitter AST chunking instead of raw files)
 - [ ] Support for monorepos: multiple "virtual repos" within a single git repo
-- [ ] `repo-expert export` — dump agent memory to markdown for debugging/inspection
-- [ ] Custom tools registry: let users define additional agent tools in config
+- [ ] `repo-expert export` — dump agent memory to markdown for debugging/inspection (uses `getBlock` + `listPassages` from Phase 2)
+- [ ] Custom tools registry: let users define additional agent tools in config — add optional `tools?: string[]` to `CreateAgentParams`, `LettaProvider` merges with `["archival_memory_search"]`
 
 ### Phase 4: Advanced Features
 
-- [ ] Smart routing: Groups API DynamicManager with an orchestrator agent that auto-routes queries
-- [ ] Sleep-time processing: Groups API SleeptimeManager for background memory refinement
-- [ ] PR review integration: agent comments on PRs via GitHub/GitLab webhooks
-- [ ] Onboarding mode: guided codebase walkthrough for new developers
+- [ ] Smart routing: Groups API DynamicManager with an orchestrator agent that auto-routes queries — requires separate `GroupProvider` interface (Groups API is a distinct surface from `AgentProvider`)
+- [ ] Sleep-time processing: Groups API SleeptimeManager for background memory refinement — same `GroupProvider` interface
+- [ ] PR review integration: agent comments on PRs via GitHub/GitLab webhooks (uses existing `sendMessage`)
+- [ ] Onboarding mode: guided codebase walkthrough for new developers (uses existing `sendMessage`)
 
 ## Technical Decisions & Constraints
 
@@ -258,7 +259,7 @@ Before building the framework, validate the critical unknowns with a standalone 
 - Self-hosted requires PostgreSQL with 42 tables — too much ops overhead
 - Cloud handles scaling, persistence, and model routing
 - Tradeoff: vendor dependency, no published pricing, potential cost at scale
-- Mitigation: keep an adapter-friendly interface so the backend could be swapped
+- Mitigation: `AgentProvider` interface abstracts the backend — `LettaProvider` is the current adapter, new backends implement the same 4-method interface
 
 **File loading strategy**
 - Load full file content with `FILE: <path>` prefix into archival passages
@@ -300,7 +301,7 @@ const agent = await client.agents.create({
   memoryBlocks: [
     { label: "persona", value: "I am an expert on the mobile app repository...", limit: 5000 },
     { label: "architecture", value: "Not yet analyzed.", limit: 5000 },
-    { label: "conventions_and_apis", value: "Not yet analyzed.", limit: 5000 },
+    { label: "conventions", value: "Not yet analyzed.", limit: 5000 },
   ],
   tools: ["send_message_to_agents_matching_all_tags"],
 });

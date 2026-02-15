@@ -8,6 +8,14 @@ function makeMockClient() {
       delete: vi.fn().mockResolvedValue(undefined),
       passages: {
         create: vi.fn().mockResolvedValue([{ id: "passage-1" }]),
+        delete: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([
+          { id: "p-1", text: "FILE: src/a.ts\ncontent" },
+          { id: "p-2", text: "FILE: src/b.ts\ncontent" },
+        ]),
+      },
+      blocks: {
+        retrieve: vi.fn().mockResolvedValue({ value: "Architecture summary.", label: "architecture", limit: 5000 }),
       },
       messages: {
         create: vi.fn().mockResolvedValue({
@@ -143,6 +151,54 @@ describe("LettaProvider", () => {
 
       expect(id).toBe("passage-1");
       expect(client.agents.passages.create).toHaveBeenCalledWith("agent-abc", { text: "some text" });
+    });
+  });
+
+  describe("deletePassage", () => {
+    it("delegates to client.agents.passages.delete with correct args", async () => {
+      const client = makeMockClient();
+      const provider = new LettaProvider(client as any);
+
+      await provider.deletePassage("agent-abc", "passage-1");
+
+      expect(client.agents.passages.delete).toHaveBeenCalledWith("passage-1", { agent_id: "agent-abc" });
+    });
+  });
+
+  describe("listPassages", () => {
+    it("returns passages with id and text", async () => {
+      const client = makeMockClient();
+      const provider = new LettaProvider(client as any);
+
+      const passages = await provider.listPassages("agent-abc");
+
+      expect(passages).toEqual([
+        { id: "p-1", text: "FILE: src/a.ts\ncontent" },
+        { id: "p-2", text: "FILE: src/b.ts\ncontent" },
+      ]);
+      expect(client.agents.passages.list).toHaveBeenCalledWith("agent-abc");
+    });
+
+    it("returns empty array when no passages", async () => {
+      const client = makeMockClient();
+      client.agents.passages.list.mockResolvedValue([]);
+      const provider = new LettaProvider(client as any);
+
+      const passages = await provider.listPassages("agent-abc");
+
+      expect(passages).toEqual([]);
+    });
+  });
+
+  describe("getBlock", () => {
+    it("returns block value and limit", async () => {
+      const client = makeMockClient();
+      const provider = new LettaProvider(client as any);
+
+      const block = await provider.getBlock("agent-abc", "architecture");
+
+      expect(block).toEqual({ value: "Architecture summary.", limit: 5000 });
+      expect(client.agents.blocks.retrieve).toHaveBeenCalledWith("architecture", { agent_id: "agent-abc" });
     });
   });
 

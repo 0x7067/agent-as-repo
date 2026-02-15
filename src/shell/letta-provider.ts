@@ -1,6 +1,6 @@
 import type Letta from "@letta-ai/letta-client";
 import { buildPersona } from "../core/prompts.js";
-import type { AgentProvider, CreateAgentParams, CreateAgentResult } from "./provider.js";
+import type { AgentProvider, CreateAgentParams, CreateAgentResult, Passage, MemoryBlock } from "./provider.js";
 
 export class LettaProvider implements AgentProvider {
   constructor(private client: Letta) {}
@@ -26,6 +26,20 @@ export class LettaProvider implements AgentProvider {
 
   async deleteAgent(agentId: string): Promise<void> {
     await this.client.agents.delete(agentId);
+  }
+
+  async deletePassage(agentId: string, passageId: string): Promise<void> {
+    await this.client.agents.passages.delete(passageId, { agent_id: agentId });
+  }
+
+  async listPassages(agentId: string): Promise<Passage[]> {
+    const list = await this.client.agents.passages.list(agentId);
+    return (list as any[]).map((p) => ({ id: p.id, text: p.text }));
+  }
+
+  async getBlock(agentId: string, label: string): Promise<MemoryBlock> {
+    const block = await this.client.agents.blocks.retrieve(label, { agent_id: agentId });
+    return { value: (block as any).value, limit: (block as any).limit };
   }
 
   async storePassage(agentId: string, text: string): Promise<string> {
