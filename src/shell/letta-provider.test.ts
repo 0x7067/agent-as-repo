@@ -227,4 +227,45 @@ describe("LettaProvider", () => {
       expect(reply).toBe("");
     });
   });
+
+  describe("retry on rate limit", () => {
+    it("retries on 429 and succeeds", async () => {
+      const client = makeMockClient();
+      const rateLimitError = Object.assign(new Error("Rate limited"), { statusCode: 429 });
+      client.agents.passages.create
+        .mockRejectedValueOnce(rateLimitError)
+        .mockResolvedValueOnce([{ id: "passage-1" }]);
+
+      const provider = new LettaProvider(client as any, 1);
+      const id = await provider.storePassage("agent-abc", "text");
+
+      expect(id).toBe("passage-1");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(2);
+    });
+
+    it("throws after max retries", async () => {
+      const client = makeMockClient();
+      const rateLimitError = Object.assign(new Error("Rate limited"), { statusCode: 429 });
+      client.agents.passages.create.mockImplementation(async () => {
+        throw rateLimitError;
+      });
+
+      const provider = new LettaProvider(client as any, 1);
+
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("Rate limited");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
+    });
+
+    it("does not retry on non-429 errors", async () => {
+      const client = makeMockClient();
+      client.agents.passages.create.mockImplementation(async () => {
+        throw new Error("Server error");
+      });
+
+      const provider = new LettaProvider(client as any, 1);
+
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("Server error");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(1);
+    });
+  });
 });

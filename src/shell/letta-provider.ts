@@ -2,8 +2,27 @@ import type Letta from "@letta-ai/letta-client";
 import { buildPersona } from "../core/prompts.js";
 import type { AgentProvider, CreateAgentParams, CreateAgentResult, Passage, MemoryBlock } from "./provider.js";
 
+function isRateLimitError(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as any).statusCode === 429;
+}
+
 export class LettaProvider implements AgentProvider {
-  constructor(private client: Letta) {}
+  constructor(private client: Letta, private retryBaseDelay = 1000) {}
+
+  private async withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        if (!isRateLimitError(err) || attempt === maxRetries) throw err;
+        lastError = err;
+        const delay = this.retryBaseDelay * Math.pow(2, attempt);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+    throw lastError;
+  }
 
   async createAgent(params: CreateAgentParams): Promise<CreateAgentResult> {
     const persona = buildPersona(params.repoName, params.description, params.persona);
@@ -29,28 +48,30 @@ export class LettaProvider implements AgentProvider {
   }
 
   async deletePassage(agentId: string, passageId: string): Promise<void> {
-    await this.client.agents.passages.delete(passageId, { agent_id: agentId });
+    await this.withRetry(() => this.client.agents.passages.delete(passageId, { agent_id: agentId }));
   }
 
   async listPassages(agentId: string): Promise<Passage[]> {
-    const list = await this.client.agents.passages.list(agentId);
+    const list = await this.withRetry(() => this.client.agents.passages.list(agentId));
     return (list as any[]).map((p) => ({ id: p.id, text: p.text }));
   }
 
   async getBlock(agentId: string, label: string): Promise<MemoryBlock> {
-    const block = await this.client.agents.blocks.retrieve(label, { agent_id: agentId });
+    const block = await this.withRetry(() => this.client.agents.blocks.retrieve(label, { agent_id: agentId }));
     return { value: (block as any).value, limit: (block as any).limit };
   }
 
   async storePassage(agentId: string, text: string): Promise<string> {
-    const result = await this.client.agents.passages.create(agentId, { text });
+    const result = await this.withRetry(() => this.client.agents.passages.create(agentId, { text }));
     return (result as any)[0].id;
   }
 
   async sendMessage(agentId: string, content: string): Promise<string> {
-    const resp = await this.client.agents.messages.create(agentId, {
-      messages: [{ role: "user", content }],
-    });
+    const resp = await this.withRetry(() =>
+      this.client.agents.messages.create(agentId, {
+        messages: [{ role: "user", content }],
+      }),
+    );
 
     for (const msg of resp.messages) {
       if ((msg as any).message_type === "assistant_message") {
