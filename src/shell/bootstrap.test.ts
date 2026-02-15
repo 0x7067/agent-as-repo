@@ -1,29 +1,26 @@
 import { describe, it, expect, vi } from "vitest";
 import { bootstrapAgent } from "./bootstrap.js";
+import type { AgentProvider } from "./provider.js";
 
-function makeMockClient() {
+function makeMockProvider(): AgentProvider {
   return {
-    agents: {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          messages: [{ message_type: "assistant_message", content: "Updated." }],
-        }),
-      },
-    },
+    createAgent: vi.fn().mockResolvedValue({ agentId: "agent-abc" }),
+    deleteAgent: vi.fn().mockResolvedValue(undefined),
+    storePassage: vi.fn().mockResolvedValue("passage-1"),
+    sendMessage: vi.fn().mockResolvedValue("Updated."),
   };
 }
 
 describe("bootstrapAgent", () => {
   it("sends architecture and conventions bootstrap prompts", async () => {
-    const client = makeMockClient();
-    await bootstrapAgent(client as any, "agent-123");
-    expect(client.agents.messages.create).toHaveBeenCalledTimes(2);
+    const provider = makeMockProvider();
+    await bootstrapAgent(provider, "agent-123");
+    const sendMessage = provider.sendMessage as ReturnType<typeof vi.fn>;
+    expect(sendMessage).toHaveBeenCalledTimes(2);
 
-    const call1 = client.agents.messages.create.mock.calls[0];
-    expect(call1[0]).toBe("agent-123");
-    expect(call1[1].messages[0].content).toContain("architecture");
+    expect(sendMessage.mock.calls[0][0]).toBe("agent-123");
+    expect(sendMessage.mock.calls[0][1]).toContain("architecture");
 
-    const call2 = client.agents.messages.create.mock.calls[1];
-    expect(call2[1].messages[0].content).toContain("conventions");
+    expect(sendMessage.mock.calls[1][1]).toContain("conventions");
   });
 });

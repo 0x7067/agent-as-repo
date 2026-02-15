@@ -1,15 +1,10 @@
-import type Letta from "@letta-ai/letta-client";
 import {
   architectureBootstrapPrompt,
   conventionsBootstrapPrompt,
 } from "../core/prompts.js";
+import type { AgentProvider } from "./provider.js";
 
-export async function bootstrapAgent(client: Letta, agentId: string): Promise<void> {
-  await client.agents.messages.create(agentId, {
-    messages: [{ role: "user", content: architectureBootstrapPrompt() }],
-  });
-
-  await client.agents.messages.create(agentId, {
-    messages: [{ role: "user", content: conventionsBootstrapPrompt() }],
-  });
+export async function bootstrapAgent(provider: AgentProvider, agentId: string): Promise<void> {
+  await provider.sendMessage(agentId, architectureBootstrapPrompt());
+  await provider.sendMessage(agentId, conventionsBootstrapPrompt());
 }

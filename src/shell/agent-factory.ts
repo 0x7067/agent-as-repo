@@ -1,31 +1,26 @@
 import pLimit from "p-limit";
-import type Letta from "@letta-ai/letta-client";
-import { buildPersona } from "../core/prompts.js";
 import type { RepoConfig, Config, Chunk, PassageMap, AgentState } from "../core/types.js";
+import type { AgentProvider } from "./provider.js";
 
 export async function createRepoAgent(
-  client: Letta,
+  provider: AgentProvider,
   repoName: string,
   repoConfig: RepoConfig,
   letta: Config["letta"],
 ): Promise<AgentState> {
-  const persona = buildPersona(repoName, repoConfig.description, repoConfig.persona);
-
-  const agent = await client.agents.create({
+  const { agentId } = await provider.createAgent({
     name: `repo-expert-${repoName}`,
+    repoName,
+    description: repoConfig.description,
+    persona: repoConfig.persona,
+    tags: ["repo-expert", ...repoConfig.tags],
     model: letta.model,
     embedding: letta.embedding,
-    tools: ["archival_memory_search"],
-    tags: ["repo-expert", ...repoConfig.tags],
-    memory_blocks: [
-      { label: "persona", value: persona, limit: repoConfig.memoryBlockLimit },
-      { label: "architecture", value: "Not yet analyzed.", limit: repoConfig.memoryBlockLimit },
-      { label: "conventions", value: "Not yet analyzed.", limit: repoConfig.memoryBlockLimit },
-    ],
+    memoryBlockLimit: repoConfig.memoryBlockLimit,
   });
 
   return {
-    agentId: agent.id,
+    agentId,
     repoName,
     passages: {},
     lastBootstrap: null,
@@ -34,7 +29,7 @@ export async function createRepoAgent(
 }
 
 export async function loadPassages(
-  client: Letta,
+  provider: AgentProvider,
   agentId: string,
   chunks: Chunk[],
   concurrency = 20,
@@ -45,8 +40,7 @@ export async function loadPassages(
   await Promise.all(
     chunks.map((chunk) =>
       limit(async () => {
-        const result = await client.agents.passages.create(agentId, { text: chunk.text });
-        const passageId = (result as any)[0].id;
+        const passageId = await provider.storePassage(agentId, chunk.text);
         if (!passageMap[chunk.sourcePath]) {
           passageMap[chunk.sourcePath] = [];
         }

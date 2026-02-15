@@ -1,44 +1,29 @@
 import { describe, it, expect, vi } from "vitest";
 import { queryAgent } from "./query.js";
+import type { AgentProvider } from "./provider.js";
 
-function makeMockClient(assistantContent: string) {
+function makeMockProvider(response: string): AgentProvider {
   return {
-    agents: {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          messages: [
-            { message_type: "tool_call_message", tool_call: { name: "archival_memory_search" } },
-            { message_type: "tool_return_message", tool_return: "some results" },
-            { message_type: "assistant_message", content: assistantContent },
-          ],
-        }),
-      },
-    },
+    createAgent: vi.fn().mockResolvedValue({ agentId: "agent-abc" }),
+    deleteAgent: vi.fn().mockResolvedValue(undefined),
+    storePassage: vi.fn().mockResolvedValue("passage-1"),
+    sendMessage: vi.fn().mockResolvedValue(response),
   };
 }
 
 describe("queryAgent", () => {
-  it("sends a question and extracts assistant response", async () => {
-    const client = makeMockClient("The auth uses JWT tokens.");
-    const answer = await queryAgent(client as any, "agent-123", "How does auth work?");
+  it("sends a question and returns provider response", async () => {
+    const provider = makeMockProvider("The auth uses JWT tokens.");
+    const answer = await queryAgent(provider, "agent-123", "How does auth work?");
     expect(answer).toBe("The auth uses JWT tokens.");
 
-    const call = client.agents.messages.create.mock.calls[0];
-    expect(call[0]).toBe("agent-123");
-    expect(call[1].messages[0].content).toBe("How does auth work?");
+    const sendMessage = provider.sendMessage as ReturnType<typeof vi.fn>;
+    expect(sendMessage).toHaveBeenCalledWith("agent-123", "How does auth work?");
   });
 
-  it("returns empty string when no assistant message", async () => {
-    const client = {
-      agents: {
-        messages: {
-          create: vi.fn().mockResolvedValue({
-            messages: [{ message_type: "tool_call_message" }],
-          }),
-        },
-      },
-    };
-    const answer = await queryAgent(client as any, "agent-123", "test");
+  it("returns empty string when provider returns empty", async () => {
+    const provider = makeMockProvider("");
+    const answer = await queryAgent(provider, "agent-123", "test");
     expect(answer).toBe("");
   });
 });

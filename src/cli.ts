@@ -9,6 +9,7 @@ import { loadState, saveState } from "./shell/state-store.js";
 import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
 import { bootstrapAgent } from "./shell/bootstrap.js";
 import { queryAgent } from "./shell/query.js";
+import { LettaProvider } from "./shell/letta-provider.js";
 import { chunkFile } from "./core/chunker.js";
 import { addAgentToState, updatePassageMap } from "./core/state.js";
 
@@ -25,7 +26,7 @@ program
   .action(async (opts) => {
     const configPath = path.resolve(opts.config);
     const config = await loadConfig(configPath);
-    const client = new Letta();
+    const provider = new LettaProvider(new Letta());
     let state = await loadState(STATE_FILE);
 
     const repoNames = opts.repo ? [opts.repo] : Object.keys(config.repos);
@@ -46,7 +47,7 @@ program
       console.log(`Setting up "${repoName}"...`);
 
       // Create agent
-      const agentState = await createRepoAgent(client, repoName, repoConfig, config.letta);
+      const agentState = await createRepoAgent(provider, repoName, repoConfig, config.letta);
       console.log(`  Agent created: ${agentState.agentId}`);
       state = addAgentToState(state, repoName, agentState.agentId);
 
@@ -57,14 +58,14 @@ program
 
       const chunks = files.flatMap((f) => chunkFile(f.path, f.content));
       console.log(`  Loading ${chunks.length} chunks...`);
-      const passageMap = await loadPassages(client, agentState.agentId, chunks);
+      const passageMap = await loadPassages(provider, agentState.agentId, chunks);
       state = updatePassageMap(state, repoName, passageMap);
       console.log(`  Passages loaded`);
 
       // Bootstrap
       if (repoConfig.bootstrapOnCreate) {
         console.log(`  Bootstrapping...`);
-        await bootstrapAgent(client, agentState.agentId);
+        await bootstrapAgent(provider, agentState.agentId);
         state = {
           ...state,
           agents: {
@@ -94,8 +95,8 @@ program
       return;
     }
 
-    const client = new Letta();
-    const answer = await queryAgent(client, agentInfo.agentId, question);
+    const provider = new LettaProvider(new Letta());
+    const answer = await queryAgent(provider, agentInfo.agentId, question);
     console.log(answer);
   });
 
@@ -125,7 +126,7 @@ program
   .option("--repo <name>", "Destroy a single repo agent")
   .action(async (opts) => {
     const state = await loadState(STATE_FILE);
-    const client = new Letta();
+    const provider = new LettaProvider(new Letta());
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
 
     for (const repoName of repoNames) {
@@ -136,7 +137,7 @@ program
       }
       console.log(`Deleting agent for "${repoName}" (${agentInfo.agentId})...`);
       try {
-        await client.agents.delete(agentInfo.agentId);
+        await provider.deleteAgent(agentInfo.agentId);
       } catch {
         console.warn(`  Warning: could not delete agent ${agentInfo.agentId} from Letta`);
       }
