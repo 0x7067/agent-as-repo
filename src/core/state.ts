@@ -18,6 +18,7 @@ export function addAgentToState(
         repoName,
         passages: {},
         lastBootstrap: null,
+        lastSyncCommit: null,
         createdAt: new Date().toISOString(),
       },
     },

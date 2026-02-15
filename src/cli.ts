@@ -12,6 +12,8 @@ import { queryAgent } from "./shell/query.js";
 import { LettaProvider } from "./shell/letta-provider.js";
 import { chunkFile } from "./core/chunker.js";
 import { addAgentToState, updatePassageMap } from "./core/state.js";
+import { syncRepo } from "./shell/sync.js";
+import { execSync } from "child_process";
 
 const STATE_FILE = ".repo-expert-state.json";
 
@@ -98,6 +100,105 @@ program
     const provider = new LettaProvider(new Letta());
     const answer = await queryAgent(provider, agentInfo.agentId, question);
     console.log(answer);
+  });
+
+program
+  .command("sync")
+  .description("Sync file changes to agents")
+  .option("--repo <name>", "Sync a single repo")
+  .option("--full", "Full re-index instead of incremental")
+  .option("--since <ref>", "Git ref to diff from (overrides stored commit)")
+  .option("--config <path>", "Config file path", "config.yaml")
+  .action(async (opts) => {
+    const configPath = path.resolve(opts.config);
+    const config = await loadConfig(configPath);
+    const provider = new LettaProvider(new Letta());
+    let state = await loadState(STATE_FILE);
+
+    const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
+
+    for (const repoName of repoNames) {
+      const agentInfo = state.agents[repoName];
+      if (!agentInfo) {
+        console.error(`No agent found for "${repoName}". Run "repo-expert setup" first.`);
+        process.exitCode = 1;
+        return;
+      }
+
+      const repoConfig = config.repos[repoName];
+      if (!repoConfig) {
+        console.error(`Repo "${repoName}" not found in config`);
+        process.exitCode = 1;
+        return;
+      }
+
+      const headCommit = execSync("git rev-parse HEAD", { cwd: repoConfig.path, encoding: "utf-8" }).trim();
+
+      let changedFiles: string[];
+      if (opts.full) {
+        // Full re-index: treat all files as changed
+        const files = await collectFiles(repoConfig);
+        changedFiles = files.map((f) => f.path);
+        console.log(`Syncing "${repoName}" (full re-index, ${changedFiles.length} files)...`);
+      } else {
+        const sinceRef = opts.since ?? agentInfo.lastSyncCommit;
+        if (!sinceRef) {
+          console.log(`No previous sync for "${repoName}". Use --full for initial sync, or run setup.`);
+          continue;
+        }
+        const diff = execSync(`git diff --name-only ${sinceRef}..HEAD`, {
+          cwd: repoConfig.path,
+          encoding: "utf-8",
+        }).trim();
+        changedFiles = diff ? diff.split("\n") : [];
+        console.log(`Syncing "${repoName}" (${changedFiles.length} changed files since ${sinceRef.slice(0, 7)})...`);
+      }
+
+      if (changedFiles.length === 0) {
+        console.log(`  No changes to sync.`);
+        state = {
+          ...state,
+          agents: { ...state.agents, [repoName]: { ...agentInfo, lastSyncCommit: headCommit } },
+        };
+        await saveState(STATE_FILE, state);
+        continue;
+      }
+
+      const result = await syncRepo({
+        provider,
+        agent: agentInfo,
+        repoConfig,
+        changedFiles,
+        collectFile: async (filePath) => {
+          const absPath = path.join(repoConfig.path, filePath);
+          try {
+            const fs = await import("fs/promises");
+            const content = await fs.readFile(absPath, "utf-8");
+            const stat = await fs.stat(absPath);
+            return { path: filePath, content, sizeKb: stat.size / 1024 };
+          } catch {
+            return null; // File was deleted
+          }
+        },
+        headCommit,
+      });
+
+      if (result.isFullReIndex) {
+        console.log(`  Warning: ${changedFiles.length} files changed — consider --full re-index`);
+      }
+
+      console.log(`  Deleted: ${result.filesDeleted} files, Re-indexed: ${result.filesReIndexed} files`);
+
+      state = {
+        ...state,
+        agents: {
+          ...state.agents,
+          [repoName]: { ...agentInfo, passages: result.passages, lastSyncCommit: result.lastSyncCommit },
+        },
+      };
+      await saveState(STATE_FILE, state);
+      console.log(`  Done.`);
+    }
   });
 
 program

@@ -47,6 +47,7 @@ export interface AgentState {
   repoName: string;
   passages: PassageMap;
   lastBootstrap: string | null;
+  lastSyncCommit: string | null;
   createdAt: string;
 }
 

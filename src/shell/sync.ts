@@ -1,0 +1,82 @@
+import pLimit from "p-limit";
+import type { AgentState, FileInfo, PassageMap, RepoConfig } from "../core/types.js";
+import { computeSyncPlan } from "../core/sync.js";
+import { chunkFile } from "../core/chunker.js";
+import type { AgentProvider } from "./provider.js";
+
+export interface SyncRepoParams {
+  provider: AgentProvider;
+  agent: AgentState;
+  repoConfig: RepoConfig;
+  changedFiles: string[];
+  collectFile: (filePath: string) => Promise<FileInfo | null>;
+  headCommit: string;
+  concurrency?: number;
+  fullReIndexThreshold?: number;
+}
+
+export interface SyncResult {
+  passages: PassageMap;
+  lastSyncCommit: string;
+  filesDeleted: number;
+  filesReIndexed: number;
+  isFullReIndex: boolean;
+}
+
+export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
+  const {
+    provider,
+    agent,
+    changedFiles,
+    collectFile,
+    headCommit,
+    concurrency = 20,
+    fullReIndexThreshold = 500,
+  } = params;
+
+  const plan = computeSyncPlan(agent.passages, changedFiles, fullReIndexThreshold);
+
+  // Delete old passages for changed files
+  const limit = pLimit(concurrency);
+  await Promise.all(
+    plan.passagesToDelete.map((passageId) =>
+      limit(() => provider.deletePassage(agent.agentId, passageId)),
+    ),
+  );
+
+  // Remove deleted passages from map
+  const updatedPassages: PassageMap = { ...agent.passages };
+  for (const file of changedFiles) {
+    delete updatedPassages[file];
+  }
+
+  // Re-index: collect files, chunk, store
+  let filesReIndexed = 0;
+  for (const filePath of plan.filesToReIndex) {
+    const fileInfo = await collectFile(filePath);
+    if (!fileInfo) continue;
+
+    const chunks = chunkFile(fileInfo.path, fileInfo.content);
+    const passageIds: string[] = [];
+
+    await Promise.all(
+      chunks.map((chunk) =>
+        limit(async () => {
+          const id = await provider.storePassage(agent.agentId, chunk.text);
+          passageIds.push(id);
+        }),
+      ),
+    );
+
+    updatedPassages[filePath] = passageIds;
+    filesReIndexed++;
+  }
+
+  return {
+    passages: updatedPassages,
+    lastSyncCommit: headCommit,
+    filesDeleted: changedFiles.length - filesReIndexed,
+    filesReIndexed,
+    isFullReIndex: plan.isFullReIndex,
+  };
+}
