@@ -4,3 +4,4 @@ node_modules/
 dist/
 .kaban/
 .mcp.json
+config.yaml
