@@ -88,4 +88,21 @@ describe("collectFiles", () => {
       },
     );
   });
+
+  it("scopes collection to basePath for monorepos", async () => {
+    await withTempRepo(
+      {
+        "packages/frontend/src/app.ts": "const app = true;",
+        "packages/backend/src/server.ts": "const server = true;",
+        "root.ts": "const root = true;",
+      },
+      async (repoPath) => {
+        const files = await collectFiles(makeConfig(repoPath, { basePath: "packages/frontend" }));
+        const paths = files.map((f) => f.path);
+        expect(paths).toContain("src/app.ts");
+        expect(paths).not.toContain("packages/backend/src/server.ts");
+        expect(paths).not.toContain("root.ts");
+      },
+    );
+  });
 });

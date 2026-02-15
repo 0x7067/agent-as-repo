@@ -14,6 +14,7 @@ const defaultsSchema = z.object({
 
 const repoRawSchema = z.object({
   path: z.string(),
+  base_path: z.string().optional(),
   description: z.string(),
   extensions: z.array(z.string()),
   ignore_dirs: z.array(z.string()),
@@ -52,6 +53,7 @@ export function parseConfig(raw: unknown): Config {
   for (const [name, repo] of Object.entries(parsed.repos)) {
     repos[name] = {
       path: repo.path,
+      basePath: repo.base_path,
       description: repo.description,
       extensions: repo.extensions,
       ignoreDirs: repo.ignore_dirs,

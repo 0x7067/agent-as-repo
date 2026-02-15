@@ -111,4 +111,23 @@ describe("parseConfig", () => {
     const config = parseConfig(validRaw);
     expect(config.repos["my-app"].tools).toBeUndefined();
   });
+
+  it("includes optional base_path for monorepo support", () => {
+    const raw = {
+      ...validRaw,
+      repos: {
+        "my-app": {
+          ...validRaw.repos["my-app"],
+          base_path: "packages/frontend",
+        },
+      },
+    };
+    const config = parseConfig(raw);
+    expect(config.repos["my-app"].basePath).toBe("packages/frontend");
+  });
+
+  it("leaves basePath undefined when omitted", () => {
+    const config = parseConfig(validRaw);
+    expect(config.repos["my-app"].basePath).toBeUndefined();
+  });
 });

@@ -5,11 +5,12 @@ import { shouldIncludeFile } from "../core/filter.js";
 import type { RepoConfig, FileInfo } from "../core/types.js";
 
 export async function collectFiles(config: RepoConfig): Promise<FileInfo[]> {
+  const cwd = config.basePath ? path.join(config.path, config.basePath) : config.path;
   const patterns = config.extensions.map((ext) => `**/*${ext}`);
   const ignore = config.ignoreDirs.map((dir) => `**/${dir}/**`);
 
   const entries = await fg(patterns, {
-    cwd: config.path,
+    cwd,
     ignore,
     absolute: false,
     dot: false,
@@ -17,7 +18,7 @@ export async function collectFiles(config: RepoConfig): Promise<FileInfo[]> {
 
   const files: FileInfo[] = [];
   for (const relPath of entries) {
-    const absPath = path.join(config.path, relPath);
+    const absPath = path.join(cwd, relPath);
     const stat = await fs.stat(absPath);
     const sizeKb = stat.size / 1024;
 

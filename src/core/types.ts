@@ -1,6 +1,7 @@
 /** Validated configuration for a single repo. */
 export interface RepoConfig {
   path: string;
+  basePath?: string;
   description: string;
   extensions: string[];
   ignoreDirs: string[];
