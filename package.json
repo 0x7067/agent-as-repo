@@ -4,16 +4,23 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "repo-expert": "tsx src/cli.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.20.0",
   "dependencies": {
-    "@letta-ai/letta-client": "^1.7.8"
+    "@letta-ai/letta-client": "^1.7.8",
+    "commander": "^14.0.3",
+    "fast-glob": "^3.3.3",
+    "js-yaml": "^4.1.1",
+    "p-limit": "^7.3.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.2.3",
     "dotenv": "^17.3.1",
     "tsx": "^4.21.0",

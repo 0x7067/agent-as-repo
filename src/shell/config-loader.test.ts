@@ -1,0 +1,56 @@
+import { describe, it, expect } from "vitest";
+import { loadConfig } from "./config-loader.js";
+import * as fs from "fs/promises";
+import * as path from "path";
+import * as os from "os";
+
+async function withTempConfig(yamlContent: string, fn: (filePath: string) => Promise<void>) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "config-test-"));
+  const filePath = path.join(dir, "config.yaml");
+  await fs.writeFile(filePath, yamlContent, "utf-8");
+  try {
+    await fn(filePath);
+  } finally {
+    await fs.rm(dir, { recursive: true });
+  }
+}
+
+const validYaml = `
+letta:
+  model: openai/gpt-4.1
+  embedding: openai/text-embedding-3-small
+
+repos:
+  my-app:
+    path: /home/user/repos/my-app
+    description: My application
+    extensions: [.ts, .tsx]
+    ignore_dirs: [node_modules, .git]
+    tags: [frontend]
+`;
+
+describe("loadConfig", () => {
+  it("loads and parses a valid YAML config file", async () => {
+    await withTempConfig(validYaml, async (filePath) => {
+      const config = await loadConfig(filePath);
+      expect(config.letta.model).toBe("openai/gpt-4.1");
+      expect(config.repos["my-app"].extensions).toEqual([".ts", ".tsx"]);
+    });
+  });
+
+  it("throws on non-existent file", async () => {
+    await expect(loadConfig("/tmp/nonexistent-config-xyz.yaml")).rejects.toThrow();
+  });
+
+  it("throws on invalid YAML content", async () => {
+    await withTempConfig("{{invalid yaml", async (filePath) => {
+      await expect(loadConfig(filePath)).rejects.toThrow();
+    });
+  });
+
+  it("throws on valid YAML but invalid schema", async () => {
+    await withTempConfig("foo: bar", async (filePath) => {
+      await expect(loadConfig(filePath)).rejects.toThrow();
+    });
+  });
+});

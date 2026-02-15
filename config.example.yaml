@@ -1,0 +1,33 @@
+# Repo Expert Agents — Configuration
+# Copy to config.yaml and customize for your repos.
+# API key: set LETTA_API_KEY in your .env file.
+
+letta:
+  model: openai/gpt-4.1
+  embedding: openai/text-embedding-3-small
+
+# Optional global defaults (all can be overridden per-repo)
+defaults:
+  max_file_size_kb: 50        # Skip files larger than this
+  memory_block_limit: 5000    # Max chars per core memory block
+  bootstrap_on_create: true   # Auto-analyze codebase on setup
+
+repos:
+  # Each key becomes the agent name (repo-expert-<key>)
+  my-app:
+    path: ~/repos/my-app                       # Absolute or ~ path to repo
+    description: "React Native mobile app"     # Used in agent persona
+    extensions: [.ts, .tsx, .js, .jsx, .json]  # File types to index
+    ignore_dirs: [node_modules, .git, dist]    # Directories to skip
+    tags: [frontend, mobile]                   # For cross-agent discovery
+    # Optional: custom persona (auto-generated from description if omitted)
+    # persona: |
+    #   I am an expert on the mobile app.
+    #   I know every screen, component, and navigation flow.
+
+  # backend:
+  #   path: ~/repos/backend
+  #   description: "Node.js backend API"
+  #   extensions: [.ts, .js, .sql, .yaml, .json]
+  #   ignore_dirs: [node_modules, .git, dist]
+  #   tags: [backend, api]
