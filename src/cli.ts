@@ -14,6 +14,7 @@ import { chunkFile } from "./core/chunker.js";
 import { addAgentToState, updatePassageMap } from "./core/state.js";
 import { syncRepo } from "./shell/sync.js";
 import { getAgentStatus } from "./shell/status.js";
+import { exportAgent } from "./shell/export.js";
 import { execSync } from "child_process";
 
 const STATE_FILE = ".repo-expert-state.json";
@@ -241,6 +242,28 @@ program
 
       const output = await getAgentStatus(provider, repoName, agentInfo);
       console.log(output);
+    }
+  });
+
+program
+  .command("export")
+  .description("Export agent memory to markdown")
+  .option("--repo <name>", "Export a single repo agent")
+  .action(async (opts) => {
+    const state = await loadState(STATE_FILE);
+    const provider = new LettaProvider(new Letta());
+    const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
+
+    for (const repoName of repoNames) {
+      const agentInfo = state.agents[repoName];
+      if (!agentInfo) {
+        console.error(`No agent found for "${repoName}". Run "repo-expert setup" first.`);
+        process.exitCode = 1;
+        return;
+      }
+
+      const md = await exportAgent(provider, repoName, agentInfo.agentId);
+      console.log(md);
     }
   });
 
