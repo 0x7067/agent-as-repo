@@ -1,8 +1,6 @@
 import type { AgentProvider } from "./provider.js";
-import type { AgentState } from "../core/types.js";
+import { BLOCK_LABELS, type AgentState } from "../core/types.js";
 import { formatAgentStatus, type BlockStatus } from "../core/status.js";
-
-const BLOCK_LABELS = ["persona", "architecture", "conventions"];
 
 export async function getAgentStatus(
   provider: AgentProvider,

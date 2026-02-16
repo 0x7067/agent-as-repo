@@ -1,10 +1,11 @@
 import * as path from "path";
 import * as fs from "fs/promises";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { loadState, saveState } from "./state-store.js";
 import { collectFiles } from "./file-collector.js";
 import { syncRepo } from "./sync.js";
 import { shouldSync, formatSyncLog } from "../core/watch.js";
+import { updateAgentField } from "../core/state.js";
 import type { AgentProvider } from "./provider.js";
 import type { Config, FileInfo } from "../core/types.js";
 
@@ -20,10 +21,10 @@ export interface WatchParams {
 
 function gitHeadCommit(cwd: string): string | null {
   try {
-    return execSync("git rev-parse HEAD", {
+    return execFileSync("git", ["rev-parse", "HEAD"], {
       cwd,
       encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 10_000,
     }).trim();
   } catch {
     return null;
@@ -32,10 +33,10 @@ function gitHeadCommit(cwd: string): string | null {
 
 function gitDiffFiles(cwd: string, sinceRef: string): string[] {
   try {
-    const diff = execSync(`git diff --name-only ${sinceRef}..HEAD`, {
+    const diff = execFileSync("git", ["diff", "--name-only", `${sinceRef}..HEAD`], {
       cwd,
       encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 10_000,
     }).trim();
     return diff ? diff.split("\n") : [];
   } catch {
@@ -92,13 +93,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
           // HEAD changed but no file diff (e.g., merge commit) — update state
           const freshState = await loadState(statePath);
           const now = new Date().toISOString();
-          await saveState(statePath, {
-            ...freshState,
-            agents: {
-              ...freshState.agents,
-              [repoName]: { ...freshState.agents[repoName], lastSyncCommit: currentHead, lastSyncAt: now },
-            },
-          });
+          await saveState(statePath, updateAgentField(freshState, repoName, { lastSyncCommit: currentHead, lastSyncAt: now }));
           log(formatSyncLog(repoName, agentInfo.lastSyncCommit, currentHead, 0, Date.now() - start));
           continue;
         }
@@ -106,7 +101,6 @@ export async function watchRepos(params: WatchParams): Promise<void> {
         const result = await syncRepo({
           provider,
           agent: agentInfo,
-          repoConfig,
           changedFiles,
           collectFile: (filePath) => collectFile(repoConfig.path, filePath),
           headCommit: currentHead,
@@ -115,18 +109,11 @@ export async function watchRepos(params: WatchParams): Promise<void> {
         // Re-read state (may have been updated by another command)
         const freshState = await loadState(statePath);
         const now = new Date().toISOString();
-        await saveState(statePath, {
-          ...freshState,
-          agents: {
-            ...freshState.agents,
-            [repoName]: {
-              ...freshState.agents[repoName],
-              passages: result.passages,
-              lastSyncCommit: result.lastSyncCommit,
-              lastSyncAt: now,
-            },
-          },
-        });
+        await saveState(statePath, updateAgentField(freshState, repoName, {
+          passages: result.passages,
+          lastSyncCommit: result.lastSyncCommit,
+          lastSyncAt: now,
+        }));
 
         log(formatSyncLog(repoName, agentInfo.lastSyncCommit, currentHead, changedFiles.length, Date.now() - start));
       } catch (err) {

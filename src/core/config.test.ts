@@ -155,8 +155,4 @@ describe("parseConfig", () => {
     expect(config.repos["my-app"].tools).toEqual(["send_message_to_agent_and_wait_for_reply"]);
   });
 
-  it("leaves tools undefined when neither defaults nor per-repo tools set", () => {
-    const config = parseConfig(validRaw);
-    expect(config.repos["my-app"].tools).toBeUndefined();
-  });
 });

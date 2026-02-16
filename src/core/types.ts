@@ -28,6 +28,12 @@ export interface Config {
   repos: Record<string, RepoConfig>;
 }
 
+/** Prefix prepended to each chunk's header to identify the source file. */
+export const FILE_PREFIX = "FILE: ";
+
+/** Standard memory block labels used across agents. */
+export const BLOCK_LABELS = ["persona", "architecture", "conventions"] as const;
+
 /** A file's metadata + content, ready for chunking. */
 export interface FileInfo {
   path: string;

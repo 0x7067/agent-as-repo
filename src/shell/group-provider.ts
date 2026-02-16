@@ -32,15 +32,7 @@ export interface SupervisorConfig {
   workerAgentIds: string[];
 }
 
-/** Dynamic: a router agent decides which agent handles each message. */
-export interface DynamicRouterConfig {
-  type: "dynamic";
-  routerAgentId: string;
-  agentIds: string[];
-  maxTurns: number;
-}
-
-export type OrchestrationConfig = RoundRobinConfig | SupervisorConfig | DynamicRouterConfig;
+export type OrchestrationConfig = RoundRobinConfig | SupervisorConfig;
 
 /**
  * Client-side round-robin: sends user content to each agent in sequence,

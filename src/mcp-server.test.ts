@@ -147,6 +147,14 @@ describe("MCP Server tools", () => {
       expect(data.name).toBe("Alice");
       expect(client.agents.retrieve).toHaveBeenCalledWith("agent-1");
     });
+
+    it("returns isError on failure", async () => {
+      client.agents.retrieve.mockRejectedValue(new Error("not found"));
+      const handler = extractToolHandler(server, "letta_get_agent");
+      const result = await handler({ agent_id: "bad-id" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("not found");
+    });
   });
 
   describe("letta_send_message", () => {
@@ -194,6 +202,14 @@ describe("MCP Server tools", () => {
       const result = await handler({ agent_id: "agent-1" });
       expect(JSON.parse(result.content[0].text)).toEqual([]);
     });
+
+    it("returns isError on failure", async () => {
+      client.agents.retrieve.mockRejectedValue(new Error("agent gone"));
+      const handler = extractToolHandler(server, "letta_get_core_memory");
+      const result = await handler({ agent_id: "bad-id" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("agent gone");
+    });
   });
 
   describe("letta_search_archival", () => {
@@ -209,6 +225,14 @@ describe("MCP Server tools", () => {
       const handler = extractToolHandler(server, "letta_search_archival");
       await handler({ agent_id: "agent-1", query: "auth", top_k: 5 });
       expect(client.agents.passages.search).toHaveBeenCalledWith("agent-1", { query: "auth", top_k: 5 });
+    });
+
+    it("returns isError on failure", async () => {
+      client.agents.passages.search.mockRejectedValue(new Error("search failed"));
+      const handler = extractToolHandler(server, "letta_search_archival");
+      const result = await handler({ agent_id: "agent-1", query: "auth" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("search failed");
     });
   });
 

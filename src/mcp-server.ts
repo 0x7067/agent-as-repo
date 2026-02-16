@@ -16,31 +16,37 @@ export function createClient(): Letta {
   });
 }
 
+type ToolResult = { content: Array<{ type: "text"; text: string }>; isError?: boolean };
+
+async function handleTool(fn: () => Promise<string>): Promise<ToolResult> {
+  try {
+    const text = await fn();
+    return { content: [{ type: "text", text }] };
+  } catch (err) {
+    return { content: [{ type: "text", text: errorMessage(err) }], isError: true };
+  }
+}
+
 export function registerTools(server: McpServer, client: Letta): void {
-  server.tool("letta_list_agents", "List all Letta agents", {}, async () => {
-    try {
+  server.tool("letta_list_agents", "List all Letta agents", {}, () =>
+    handleTool(async () => {
       const summary: Array<{ id: string; name: string; description?: string | null; model?: string | null }> = [];
       for await (const a of client.agents.list()) {
         summary.push({ id: a.id, name: a.name, description: a.description, model: a.model ?? null });
       }
-      return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
-    } catch (err) {
-      return { content: [{ type: "text", text: errorMessage(err) }], isError: true };
-    }
-  });
+      return JSON.stringify(summary, null, 2);
+    }),
+  );
 
   server.tool(
     "letta_get_agent",
     "Get full details for a Letta agent",
     { agent_id: z.string().describe("The agent ID") },
-    async ({ agent_id }) => {
-      try {
+    ({ agent_id }) =>
+      handleTool(async () => {
         const agent = await client.agents.retrieve(agent_id);
-        return { content: [{ type: "text", text: JSON.stringify(agent, null, 2) }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: errorMessage(err) }], isError: true };
-      }
-    },
+        return JSON.stringify(agent, null, 2);
+      }),
   );
 
   server.tool(
@@ -50,41 +56,35 @@ export function registerTools(server: McpServer, client: Letta): void {
       agent_id: z.string().describe("The agent ID"),
       content: z.string().describe("The message content"),
     },
-    async ({ agent_id, content }) => {
-      try {
+    ({ agent_id, content }) =>
+      handleTool(async () => {
         const resp = await client.agents.messages.create(agent_id, {
           messages: [{ role: "user", content }],
         });
         for (const msg of resp.messages) {
           if (msg.message_type === "assistant_message") {
             const text = (msg as AssistantMessage).content;
-            return { content: [{ type: "text", text: typeof text === "string" ? text : "" }] };
+            return typeof text === "string" ? text : "";
           }
         }
-        return { content: [{ type: "text", text: "" }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: errorMessage(err) }], isError: true };
-      }
-    },
+        return "";
+      }),
   );
 
   server.tool(
     "letta_get_core_memory",
     "Get all memory blocks for a Letta agent",
     { agent_id: z.string().describe("The agent ID") },
-    async ({ agent_id }) => {
-      try {
+    ({ agent_id }) =>
+      handleTool(async () => {
         const agent = await client.agents.retrieve(agent_id);
         const summary = (agent.blocks ?? []).map((b) => ({
           label: b.label,
           value: b.value,
           limit: b.limit,
         }));
-        return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: errorMessage(err) }], isError: true };
-      }
-    },
+        return JSON.stringify(summary, null, 2);
+      }),
   );
 
   server.tool(
@@ -95,15 +95,11 @@ export function registerTools(server: McpServer, client: Letta): void {
       query: z.string().describe("Search query"),
       top_k: z.number().optional().describe("Max results to return"),
     },
-    async (args) => {
-      const { agent_id, query, top_k } = args as { agent_id: string; query: string; top_k?: number };
-      try {
+    ({ agent_id, query, top_k }) =>
+      handleTool(async () => {
         const results = await client.agents.passages.search(agent_id, { query, top_k });
-        return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: errorMessage(err) }], isError: true };
-      }
-    },
+        return JSON.stringify(results, null, 2);
+      }),
   );
 
   server.tool(
@@ -113,14 +109,11 @@ export function registerTools(server: McpServer, client: Letta): void {
       agent_id: z.string().describe("The agent ID"),
       text: z.string().describe("The passage text to store"),
     },
-    async ({ agent_id, text }) => {
-      try {
+    ({ agent_id, text }) =>
+      handleTool(async () => {
         const result = await client.agents.passages.create(agent_id, { text });
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: errorMessage(err) }], isError: true };
-      }
-    },
+        return JSON.stringify(result, null, 2);
+      }),
   );
 
   server.tool(
@@ -130,14 +123,11 @@ export function registerTools(server: McpServer, client: Letta): void {
       agent_id: z.string().describe("The agent ID"),
       passage_id: z.string().describe("The passage ID to delete"),
     },
-    async ({ agent_id, passage_id }) => {
-      try {
+    ({ agent_id, passage_id }) =>
+      handleTool(async () => {
         await client.agents.passages.delete(passage_id, { agent_id });
-        return { content: [{ type: "text", text: "Deleted" }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: errorMessage(err) }], isError: true };
-      }
-    },
+        return "Deleted";
+      }),
   );
 
   server.tool(
@@ -148,17 +138,11 @@ export function registerTools(server: McpServer, client: Letta): void {
       label: z.string().describe("Block label (e.g. persona, human)"),
       value: z.string().describe("New block value"),
     },
-    async ({ agent_id, label, value }) => {
-      try {
-        const block = await client.agents.blocks.update(label, {
-          agent_id,
-          value,
-        });
-        return { content: [{ type: "text", text: JSON.stringify(block, null, 2) }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: errorMessage(err) }], isError: true };
-      }
-    },
+    ({ agent_id, label, value }) =>
+      handleTool(async () => {
+        const block = await client.agents.blocks.update(label, { agent_id, value });
+        return JSON.stringify(block, null, 2);
+      }),
   );
 }
 

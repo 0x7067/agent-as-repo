@@ -1,5 +1,5 @@
 import pLimit from "p-limit";
-import type { AgentState, FileInfo, PassageMap, RepoConfig } from "../core/types.js";
+import type { AgentState, FileInfo, PassageMap } from "../core/types.js";
 import { computeSyncPlan } from "../core/sync.js";
 import { chunkFile } from "../core/chunker.js";
 import type { AgentProvider } from "./provider.js";
@@ -7,7 +7,6 @@ import type { AgentProvider } from "./provider.js";
 export interface SyncRepoParams {
   provider: AgentProvider;
   agent: AgentState;
-  repoConfig: RepoConfig;
   changedFiles: string[];
   collectFile: (filePath: string) => Promise<FileInfo | null>;
   headCommit: string;
@@ -57,13 +56,13 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
     if (!fileInfo) continue;
 
     const chunks = chunkFile(fileInfo.path, fileInfo.content);
-    const passageIds: string[] = [];
+    const passageIds: string[] = new Array(chunks.length);
 
     await Promise.all(
-      chunks.map((chunk) =>
+      chunks.map((chunk, i) =>
         limit(async () => {
           const id = await provider.storePassage(agent.agentId, chunk.text);
-          passageIds.push(id);
+          passageIds[i] = id;
         }),
       ),
     );

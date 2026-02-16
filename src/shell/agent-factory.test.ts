@@ -2,22 +2,18 @@ import { describe, it, expect, vi } from "vitest";
 import { createRepoAgent, loadPassages } from "./agent-factory.js";
 import type { RepoConfig, Config } from "../core/types.js";
 import type { AgentProvider } from "./provider.js";
+import { makeMockProvider as makeBase } from "./__test__/mock-provider.js";
 
 function makeMockProvider(): AgentProvider & { _passageIds: string[] } {
   const passageIds: string[] = [];
   let passageCounter = 0;
   return {
-    createAgent: vi.fn().mockResolvedValue({ agentId: "agent-abc" }),
-    deleteAgent: vi.fn().mockResolvedValue(undefined),
-    deletePassage: vi.fn().mockResolvedValue(undefined),
-    listPassages: vi.fn().mockResolvedValue([]),
-    getBlock: vi.fn().mockResolvedValue({ value: "", limit: 5000 }),
+    ...makeBase(),
     storePassage: vi.fn().mockImplementation(async () => {
       const id = `passage-${++passageCounter}`;
       passageIds.push(id);
       return id;
     }),
-    sendMessage: vi.fn().mockResolvedValue("Done."),
     _passageIds: passageIds,
   };
 }

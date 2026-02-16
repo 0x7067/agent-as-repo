@@ -1,7 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import fg from "fast-glob";
-import { shouldIncludeFile } from "../core/filter.js";
 import type { RepoConfig, FileInfo } from "../core/types.js";
 
 export async function collectFiles(config: RepoConfig): Promise<FileInfo[]> {
@@ -9,6 +8,7 @@ export async function collectFiles(config: RepoConfig): Promise<FileInfo[]> {
   const patterns = config.extensions.map((ext) => `**/*${ext}`);
   const ignore = config.ignoreDirs.map((dir) => `**/${dir}/**`);
 
+  // fast-glob handles extension and ignoreDirs filtering; we only need the size check
   const entries = await fg(patterns, {
     cwd,
     ignore,
@@ -22,13 +22,7 @@ export async function collectFiles(config: RepoConfig): Promise<FileInfo[]> {
     const stat = await fs.stat(absPath);
     const sizeKb = stat.size / 1024;
 
-    if (
-      shouldIncludeFile(relPath, sizeKb, {
-        extensions: config.extensions,
-        ignoreDirs: config.ignoreDirs,
-        maxFileSizeKb: config.maxFileSizeKb,
-      })
-    ) {
+    if (sizeKb <= config.maxFileSizeKb) {
       const content = await fs.readFile(absPath, "utf-8");
       files.push({ path: relPath, content, sizeKb });
     }

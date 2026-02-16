@@ -1,10 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { AgentProvider } from "./provider.js";
 import type { Config, AppState } from "../core/types.js";
 
 // Mock child_process and fs before importing watch module
 vi.mock("child_process", () => ({
-  execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }));
 
 vi.mock("./state-store.js", () => ({
@@ -20,27 +19,18 @@ vi.mock("./sync.js", () => ({
   syncRepo: vi.fn(),
 }));
 
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { loadState, saveState } from "./state-store.js";
 import { syncRepo } from "./sync.js";
 import { watchRepos } from "./watch.js";
 
-const mockedExecSync = vi.mocked(execSync);
+const mockedExecFileSync = vi.mocked(execFileSync);
 const mockedLoadState = vi.mocked(loadState);
 const mockedSaveState = vi.mocked(saveState);
 const mockedSyncRepo = vi.mocked(syncRepo);
 
-function makeMockProvider(): AgentProvider {
-  return {
-    createAgent: vi.fn().mockResolvedValue({ agentId: "agent-abc" }),
-    deleteAgent: vi.fn().mockResolvedValue(undefined),
-    deletePassage: vi.fn().mockResolvedValue(undefined),
-    listPassages: vi.fn().mockResolvedValue([]),
-    getBlock: vi.fn().mockResolvedValue({ value: "", limit: 5000 }),
-    storePassage: vi.fn().mockResolvedValue("p-new"),
-    sendMessage: vi.fn().mockResolvedValue("Done."),
-  };
-}
+// Import shared mock after vi.mock calls
+import { makeMockProvider } from "./__test__/mock-provider.js";
 
 const testConfig: Config = {
   letta: { model: "letta-free", embedding: "letta-free" },
@@ -88,9 +78,9 @@ describe("watchRepos", () => {
   it("triggers sync when HEAD changes", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecSync.mockImplementation((cmd: string) => {
-      if (typeof cmd === "string" && cmd.includes("rev-parse")) return "def456\n";
-      if (typeof cmd === "string" && cmd.includes("diff --name-only")) return "src/a.ts\n";
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "def456\n";
+      if (args?.includes("--name-only")) return "src/a.ts\n";
       return "";
     });
     mockedSyncRepo.mockResolvedValue({
@@ -132,8 +122,8 @@ describe("watchRepos", () => {
   it("skips when HEAD is unchanged", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecSync.mockImplementation((cmd: string) => {
-      if (typeof cmd === "string" && cmd.includes("rev-parse")) return "abc123\n";
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "abc123\n";
       return "";
     });
 
@@ -162,9 +152,9 @@ describe("watchRepos", () => {
   it("logs error without crashing on sync failure", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecSync.mockImplementation((cmd: string) => {
-      if (typeof cmd === "string" && cmd.includes("rev-parse")) return "def456\n";
-      if (typeof cmd === "string" && cmd.includes("diff --name-only")) return "src/a.ts\n";
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "def456\n";
+      if (args?.includes("--name-only")) return "src/a.ts\n";
       return "";
     });
     mockedSyncRepo.mockRejectedValue(new Error("Letta API down"));
@@ -194,8 +184,8 @@ describe("watchRepos", () => {
   it("respects AbortSignal for graceful shutdown", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecSync.mockImplementation((cmd: string) => {
-      if (typeof cmd === "string" && cmd.includes("rev-parse")) return "abc123\n";
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "abc123\n";
       return "";
     });
 
@@ -224,13 +214,13 @@ describe("watchRepos", () => {
   it("runs subsequent ticks on interval", async () => {
     let callCount = 0;
     mockedLoadState.mockResolvedValue(makeState("abc123"));
-    mockedExecSync.mockImplementation((cmd: string) => {
-      if (typeof cmd === "string" && cmd.includes("rev-parse")) {
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) {
         callCount++;
         // HEAD changes on second tick
         return callCount <= 1 ? "abc123\n" : "def456\n";
       }
-      if (typeof cmd === "string" && cmd.includes("diff --name-only")) return "src/a.ts\n";
+      if (args?.includes("--name-only")) return "src/a.ts\n";
       return "";
     });
     mockedSyncRepo.mockResolvedValue({

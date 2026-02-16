@@ -1,4 +1,4 @@
-import type { AppState, PassageMap } from "./types.js";
+import type { AgentState, AppState, PassageMap } from "./types.js";
 
 export function createEmptyState(): AppState {
   return { agents: {} };
@@ -8,6 +8,7 @@ export function addAgentToState(
   state: AppState,
   repoName: string,
   agentId: string,
+  createdAt: string,
 ): AppState {
   return {
     ...state,
@@ -20,7 +21,7 @@ export function addAgentToState(
         lastBootstrap: null,
         lastSyncCommit: null,
         lastSyncAt: null,
-        createdAt: new Date().toISOString(),
+        createdAt,
       },
     },
   };
@@ -39,6 +40,23 @@ export function updatePassageMap(
     agents: {
       ...state.agents,
       [repoName]: { ...existing, passages },
+    },
+  };
+}
+
+export function updateAgentField(
+  state: AppState,
+  repoName: string,
+  updates: Partial<Omit<AgentState, "agentId" | "repoName" | "createdAt">>,
+): AppState {
+  const existing = state.agents[repoName];
+  if (!existing) throw new Error(`No agent found for repo: ${repoName}`);
+
+  return {
+    ...state,
+    agents: {
+      ...state.agents,
+      [repoName]: { ...existing, ...updates },
     },
   };
 }

@@ -1,22 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
 import { onboardAgent } from "./onboard.js";
-import type { AgentProvider } from "./provider.js";
-
-function makeMockProvider(): AgentProvider {
-  return {
-    createAgent: vi.fn().mockResolvedValue({ agentId: "agent-abc" }),
-    deleteAgent: vi.fn().mockResolvedValue(undefined),
-    deletePassage: vi.fn().mockResolvedValue(undefined),
-    listPassages: vi.fn().mockResolvedValue([]),
-    getBlock: vi.fn().mockResolvedValue({ value: "", limit: 5000 }),
-    storePassage: vi.fn().mockResolvedValue("p-new"),
-    sendMessage: vi.fn().mockResolvedValue("Welcome! Here is your onboarding guide..."),
-  };
-}
+import { makeMockProvider } from "./__test__/mock-provider.js";
 
 describe("onboardAgent", () => {
   it("sends onboarding prompt and returns response", async () => {
-    const provider = makeMockProvider();
+    const provider = makeMockProvider({
+      sendMessage: vi.fn().mockResolvedValue("Welcome! Here is your onboarding guide..."),
+    });
 
     const result = await onboardAgent(provider, "my-app", "agent-abc");
 

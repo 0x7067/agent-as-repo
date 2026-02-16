@@ -42,19 +42,25 @@ export async function loadPassages(
   const passageMap: PassageMap = {};
   let loaded = 0;
 
+  const results: { sourcePath: string; passageId: string }[] = new Array(chunks.length);
+
   await Promise.all(
-    chunks.map((chunk) =>
+    chunks.map((chunk, i) =>
       limit(async () => {
         const passageId = await provider.storePassage(agentId, chunk.text);
-        if (!passageMap[chunk.sourcePath]) {
-          passageMap[chunk.sourcePath] = [];
-        }
-        passageMap[chunk.sourcePath].push(passageId);
+        results[i] = { sourcePath: chunk.sourcePath, passageId };
         loaded++;
         onProgress?.(loaded, chunks.length);
       }),
     ),
   );
+
+  for (const { sourcePath, passageId } of results) {
+    if (!passageMap[sourcePath]) {
+      passageMap[sourcePath] = [];
+    }
+    passageMap[sourcePath].push(passageId);
+  }
 
   return passageMap;
 }

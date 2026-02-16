@@ -1,13 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { getAgentStatus } from "./status.js";
-import type { AgentProvider } from "./provider.js";
 import type { AgentState } from "../core/types.js";
+import { makeMockProvider } from "./__test__/mock-provider.js";
 
-function makeMockProvider(): AgentProvider {
-  return {
-    createAgent: vi.fn().mockResolvedValue({ agentId: "agent-abc" }),
-    deleteAgent: vi.fn().mockResolvedValue(undefined),
-    deletePassage: vi.fn().mockResolvedValue(undefined),
+function makeStatusProvider() {
+  return makeMockProvider({
     listPassages: vi.fn().mockResolvedValue([
       { id: "p-1", text: "file content" },
       { id: "p-2", text: "file content" },
@@ -20,9 +17,7 @@ function makeMockProvider(): AgentProvider {
       };
       return blocks[label] ?? { value: "", limit: 5000 };
     }),
-    storePassage: vi.fn().mockResolvedValue("p-new"),
-    sendMessage: vi.fn().mockResolvedValue("Done."),
-  };
+  });
 }
 
 const testAgent: AgentState = {
@@ -37,7 +32,7 @@ const testAgent: AgentState = {
 
 describe("getAgentStatus", () => {
   it("fetches blocks and passages and returns formatted status", async () => {
-    const provider = makeMockProvider();
+    const provider = makeStatusProvider();
 
     const output = await getAgentStatus(provider, "my-app", testAgent);
 

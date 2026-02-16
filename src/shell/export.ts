@@ -1,8 +1,6 @@
 import type { AgentProvider } from "./provider.js";
 import { formatExport } from "../core/export.js";
-
-const BLOCK_LABELS = ["persona", "architecture", "conventions"];
-const FILE_PREFIX = "FILE: ";
+import { BLOCK_LABELS, FILE_PREFIX } from "../core/types.js";
 
 export async function exportAgent(
   provider: AgentProvider,

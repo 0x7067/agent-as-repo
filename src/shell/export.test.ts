@@ -1,12 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { exportAgent } from "./export.js";
-import type { AgentProvider } from "./provider.js";
+import { makeMockProvider } from "./__test__/mock-provider.js";
 
-function makeMockProvider(): AgentProvider {
-  return {
-    createAgent: vi.fn().mockResolvedValue({ agentId: "agent-abc" }),
-    deleteAgent: vi.fn().mockResolvedValue(undefined),
-    deletePassage: vi.fn().mockResolvedValue(undefined),
+function makeExportProvider() {
+  return makeMockProvider({
     listPassages: vi.fn().mockResolvedValue([
       { id: "p-1", text: "FILE: src/index.ts\nconst x = 1;" },
       { id: "p-2", text: "FILE: src/app.tsx\nexport default App;" },
@@ -20,14 +17,12 @@ function makeMockProvider(): AgentProvider {
       };
       return blocks[label] ?? { value: "", limit: 5000 };
     }),
-    storePassage: vi.fn().mockResolvedValue("p-new"),
-    sendMessage: vi.fn().mockResolvedValue("Done."),
-  };
+  });
 }
 
 describe("exportAgent", () => {
   it("fetches blocks and passages, returns formatted markdown", async () => {
-    const provider = makeMockProvider();
+    const provider = makeExportProvider();
 
     const md = await exportAgent(provider, "my-app", "agent-abc");
 
@@ -44,7 +39,7 @@ describe("exportAgent", () => {
   });
 
   it("deduplicates file paths from multiple passages", async () => {
-    const provider = makeMockProvider();
+    const provider = makeExportProvider();
 
     const md = await exportAgent(provider, "my-app", "agent-abc");
 

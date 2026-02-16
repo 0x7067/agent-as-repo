@@ -1,19 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { roundRobin, supervisorFanOut, broadcastAsk } from "./group-provider.js";
-import type { AgentProvider } from "./provider.js";
 import type { RoundRobinConfig, SupervisorConfig } from "./group-provider.js";
-
-function makeMockProvider(): AgentProvider {
-  return {
-    createAgent: vi.fn().mockResolvedValue({ agentId: "agent-abc" }),
-    deleteAgent: vi.fn().mockResolvedValue(undefined),
-    deletePassage: vi.fn().mockResolvedValue(undefined),
-    listPassages: vi.fn().mockResolvedValue([]),
-    getBlock: vi.fn().mockResolvedValue({ value: "", limit: 5000 }),
-    storePassage: vi.fn().mockResolvedValue("p-new"),
-    sendMessage: vi.fn().mockResolvedValue("response"),
-  };
-}
+import { makeMockProvider } from "./__test__/mock-provider.js";
 
 describe("roundRobin", () => {
   it("sends message to each agent up to maxTurns", async () => {

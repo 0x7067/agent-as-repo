@@ -1,31 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
 import { syncRepo } from "./sync.js";
-import type { AgentProvider } from "./provider.js";
-import type { AgentState, RepoConfig } from "../core/types.js";
+import type { AgentState } from "../core/types.js";
+import { makeMockProvider as makeBase } from "./__test__/mock-provider.js";
 
-function makeMockProvider(): AgentProvider {
+function makeMockProvider() {
   let passageCounter = 0;
-  return {
-    createAgent: vi.fn().mockResolvedValue({ agentId: "agent-abc" }),
-    deleteAgent: vi.fn().mockResolvedValue(undefined),
-    deletePassage: vi.fn().mockResolvedValue(undefined),
-    listPassages: vi.fn().mockResolvedValue([]),
-    getBlock: vi.fn().mockResolvedValue({ value: "", limit: 5000 }),
+  return makeBase({
     storePassage: vi.fn().mockImplementation(async () => `passage-${++passageCounter}`),
-    sendMessage: vi.fn().mockResolvedValue("Done."),
-  };
+  });
 }
-
-const testConfig: RepoConfig = {
-  path: "/tmp/test-repo",
-  description: "Test repo",
-  extensions: [".ts"],
-  ignoreDirs: ["node_modules"],
-  tags: ["frontend"],
-  maxFileSizeKb: 50,
-  memoryBlockLimit: 5000,
-  bootstrapOnCreate: true,
-};
 
 const testAgent: AgentState = {
   agentId: "agent-abc",
@@ -46,7 +29,6 @@ describe("syncRepo", () => {
     const result = await syncRepo({
       provider,
       agent: testAgent,
-      repoConfig: testConfig,
       changedFiles: ["src/a.ts"],
       collectFile: async (path) => ({ path, content: "new content", sizeKb: 1 }),
       headCommit: "def456",
@@ -67,7 +49,6 @@ describe("syncRepo", () => {
     const result = await syncRepo({
       provider,
       agent: testAgent,
-      repoConfig: testConfig,
       changedFiles: ["src/a.ts"],
       collectFile: async () => null,
       headCommit: "def456",
@@ -86,7 +67,6 @@ describe("syncRepo", () => {
     const result = await syncRepo({
       provider,
       agent: testAgent,
-      repoConfig: testConfig,
       changedFiles: ["src/new.ts"],
       collectFile: async (path) => ({ path, content: "brand new", sizeKb: 1 }),
       headCommit: "def456",
@@ -102,7 +82,6 @@ describe("syncRepo", () => {
     const result = await syncRepo({
       provider,
       agent: testAgent,
-      repoConfig: testConfig,
       changedFiles: [],
       collectFile: async () => null,
       headCommit: "def456",

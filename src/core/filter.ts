@@ -1,5 +1,3 @@
-import * as path from "path";
-
 export interface FilterOptions {
   extensions: string[];
   ignoreDirs: string[];
@@ -11,12 +9,13 @@ export function shouldIncludeFile(
   fileSizeKb: number,
   options: FilterOptions,
 ): boolean {
-  const ext = path.extname(filePath);
+  const dotIdx = filePath.lastIndexOf(".");
+  const ext = dotIdx >= 0 ? filePath.slice(dotIdx) : "";
   if (!options.extensions.includes(ext)) return false;
 
   if (fileSizeKb > options.maxFileSizeKb) return false;
 
-  const segments = filePath.split(path.sep);
+  const segments = filePath.split("/");
   for (const segment of segments) {
     if (options.ignoreDirs.includes(segment)) return false;
   }

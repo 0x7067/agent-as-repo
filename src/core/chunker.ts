@@ -1,4 +1,4 @@
-import type { Chunk } from "./types.js";
+import { FILE_PREFIX, type Chunk } from "./types.js";
 
 export function chunkFile(
   filePath: string,
@@ -7,22 +7,23 @@ export function chunkFile(
 ): Chunk[] {
   if (!content.trim()) return [];
 
+  const header = `${FILE_PREFIX}${filePath}`;
   const sections = content.split(/\n\n+/);
   const chunks: Chunk[] = [];
-  let current = `FILE: ${filePath}\n\n`;
+  let current = `${header}\n\n`;
 
   for (const section of sections) {
     if (
       current.length + section.length > maxChars &&
-      current.length > `FILE: ${filePath}\n\n`.length
+      current.length > header.length + 2
     ) {
       chunks.push({ text: current.trim(), sourcePath: filePath });
-      current = `FILE: ${filePath} (continued)\n\n`;
+      current = `${header} (continued)\n\n`;
     }
     current += section + "\n\n";
   }
 
-  if (current.trim().length > `FILE: ${filePath}`.length) {
+  if (current.trim().length > header.length) {
     chunks.push({ text: current.trim(), sourcePath: filePath });
   }
 

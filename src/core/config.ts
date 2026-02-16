@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import type { Config, RepoConfig } from "./types.js";
 
 const BUILT_IN_DEFAULTS = {
   maxFileSizeKb: 50,
@@ -35,10 +36,6 @@ const rawConfigSchema = z.object({
   defaults: defaultsSchema.optional(),
   repos: z.record(z.string(), repoRawSchema),
 });
-
-export type RawConfig = z.infer<typeof rawConfigSchema>;
-
-import type { Config, RepoConfig } from "./types.js";
 
 export function parseConfig(raw: unknown): Config {
   const parsed = rawConfigSchema.parse(raw);

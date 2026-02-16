@@ -1,4 +1,4 @@
-import type Letta from "@letta-ai/letta-client";
+import type { Letta } from "@letta-ai/letta-client";
 import type { Passage as LettaPassage } from "@letta-ai/letta-client/resources/passages.js";
 import type { BlockResponse } from "@letta-ai/letta-client/resources/blocks/blocks.js";
 import type { AssistantMessage, LettaResponse } from "@letta-ai/letta-client/resources/agents/messages.js";

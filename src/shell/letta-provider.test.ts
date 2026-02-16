@@ -77,21 +77,23 @@ function mockClientAs(client: MockLettaClient): ConstructorParameters<typeof Let
   return client as unknown as ConstructorParameters<typeof LettaProvider>[0];
 }
 
+const defaultCreateParams = {
+  name: "repo-expert-my-app",
+  repoName: "my-app",
+  description: "Test repo",
+  tags: ["repo-expert"],
+  model: "openai/gpt-4.1",
+  embedding: "openai/text-embedding-3-small",
+  memoryBlockLimit: 5000,
+};
+
 describe("LettaProvider", () => {
   describe("createAgent", () => {
     it("returns agentId from Letta response", async () => {
       const client = makeMockClient();
       const provider = new LettaProvider(mockClientAs(client));
 
-      const result = await provider.createAgent({
-        name: "repo-expert-my-app",
-        repoName: "my-app",
-        description: "Test repo",
-        tags: ["repo-expert", "frontend"],
-        model: "openai/gpt-4.1",
-        embedding: "openai/text-embedding-3-small",
-        memoryBlockLimit: 5000,
-      });
+      const result = await provider.createAgent({ ...defaultCreateParams, tags: ["repo-expert", "frontend"] });
 
       expect(result.agentId).toBe("agent-abc");
     });
@@ -100,15 +102,7 @@ describe("LettaProvider", () => {
       const client = makeMockClient();
       const provider = new LettaProvider(mockClientAs(client));
 
-      await provider.createAgent({
-        name: "repo-expert-my-app",
-        repoName: "my-app",
-        description: "Test repo",
-        tags: ["repo-expert"],
-        model: "openai/gpt-4.1",
-        embedding: "openai/text-embedding-3-small",
-        memoryBlockLimit: 5000,
-      });
+      await provider.createAgent(defaultCreateParams);
 
       const call: CreateAgentCallArg = client.agents.create.mock.calls[0][0];
       const labels = call.memory_blocks.map((b) => b.label);
@@ -122,16 +116,7 @@ describe("LettaProvider", () => {
       const client = makeMockClient();
       const provider = new LettaProvider(mockClientAs(client));
 
-      await provider.createAgent({
-        name: "repo-expert-my-app",
-        repoName: "my-app",
-        description: "A test repo",
-        persona: "I am custom.",
-        tags: ["repo-expert"],
-        model: "openai/gpt-4.1",
-        embedding: "openai/text-embedding-3-small",
-        memoryBlockLimit: 5000,
-      });
+      await provider.createAgent({ ...defaultCreateParams, description: "A test repo", persona: "I am custom." });
 
       const call: CreateAgentCallArg = client.agents.create.mock.calls[0][0];
       const personaBlock = call.memory_blocks.find((b) => b.label === "persona");
@@ -142,15 +127,7 @@ describe("LettaProvider", () => {
       const client = makeMockClient();
       const provider = new LettaProvider(mockClientAs(client));
 
-      await provider.createAgent({
-        name: "repo-expert-my-app",
-        repoName: "my-app",
-        description: "Test",
-        tags: [],
-        model: "openai/gpt-4.1",
-        embedding: "openai/text-embedding-3-small",
-        memoryBlockLimit: 5000,
-      });
+      await provider.createAgent({ ...defaultCreateParams, tags: [] });
 
       const call: CreateAgentCallArg = client.agents.create.mock.calls[0][0];
       expect(call.tools).toContain("archival_memory_search");
@@ -161,13 +138,8 @@ describe("LettaProvider", () => {
       const provider = new LettaProvider(mockClientAs(client));
 
       await provider.createAgent({
-        name: "repo-expert-my-app",
-        repoName: "my-app",
-        description: "Test",
+        ...defaultCreateParams,
         tags: [],
-        model: "openai/gpt-4.1",
-        embedding: "openai/text-embedding-3-small",
-        memoryBlockLimit: 5000,
         tools: ["send_message_to_agents_matching_tags"],
       });
 
@@ -180,15 +152,7 @@ describe("LettaProvider", () => {
       const client = makeMockClient();
       const provider = new LettaProvider(mockClientAs(client));
 
-      await provider.createAgent({
-        name: "repo-expert-my-app",
-        repoName: "my-app",
-        description: "Test",
-        tags: ["repo-expert", "mobile"],
-        model: "openai/gpt-4.1",
-        embedding: "openai/text-embedding-3-small",
-        memoryBlockLimit: 5000,
-      });
+      await provider.createAgent({ ...defaultCreateParams, tags: ["repo-expert", "mobile"] });
 
       const call: CreateAgentCallArg = client.agents.create.mock.calls[0][0];
       expect(call.name).toBe("repo-expert-my-app");

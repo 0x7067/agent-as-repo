@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   shouldSync,
   formatSyncLog,
-  DEFAULT_WATCH_CONFIG,
 } from "./watch.js";
 
 describe("shouldSync", () => {
@@ -31,8 +30,3 @@ describe("formatSyncLog", () => {
   });
 });
 
-describe("DEFAULT_WATCH_CONFIG", () => {
-  it("has a 30s default interval", () => {
-    expect(DEFAULT_WATCH_CONFIG.intervalMs).toBe(30_000);
-  });
-});

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import "dotenv/config";
 import { Command } from "commander";
-import Letta from "@letta-ai/letta-client";
+import { Letta } from "@letta-ai/letta-client";
 import * as path from "path";
 import * as readline from "readline/promises";
 import { execSync } from "child_process";
@@ -10,10 +10,9 @@ import { collectFiles } from "./shell/file-collector.js";
 import { loadState, saveState } from "./shell/state-store.js";
 import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
 import { bootstrapAgent } from "./shell/bootstrap.js";
-import { queryAgent } from "./shell/query.js";
 import { LettaProvider } from "./shell/letta-provider.js";
 import { chunkFile } from "./core/chunker.js";
-import { addAgentToState, updatePassageMap } from "./core/state.js";
+import { addAgentToState, removeAgentFromState, updateAgentField, updatePassageMap } from "./core/state.js";
 import { syncRepo } from "./shell/sync.js";
 import { getAgentStatus } from "./shell/status.js";
 import { exportAgent } from "./shell/export.js";
@@ -21,7 +20,7 @@ import { onboardAgent } from "./shell/onboard.js";
 import { broadcastAsk } from "./shell/group-provider.js";
 import { watchRepos } from "./shell/watch.js";
 import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
-import type { Config } from "./core/types.js";
+import type { AgentState, AppState, Config } from "./core/types.js";
 
 const STATE_FILE = ".repo-expert-state.json";
 
@@ -58,6 +57,21 @@ function gitHeadCommit(cwd: string): string | null {
   } catch {
     return null;
   }
+}
+
+function requireAgent(state: AppState, repoName: string): AgentState | null {
+  const agentInfo = state.agents[repoName];
+  if (!agentInfo) {
+    console.error(`No agent found for "${repoName}". Run "repo-expert setup" first.`);
+    process.exitCode = 1;
+    return null;
+  }
+  return agentInfo;
+}
+
+function parseIntOrDefault(value: string, fallback: number): number {
+  const n = parseInt(value, 10);
+  return Number.isNaN(n) ? fallback : n;
 }
 
 function printProgress(loaded: number, total: number): void {
@@ -99,7 +113,7 @@ program
 
       const agentState = await createRepoAgent(provider, repoName, repoConfig, config.letta);
       console.log(`  Agent created: ${agentState.agentId}`);
-      state = addAgentToState(state, repoName, agentState.agentId);
+      state = addAgentToState(state, repoName, agentState.agentId, new Date().toISOString());
 
       console.log(`  Collecting files from ${repoConfig.path}...`);
       const files = await collectFiles(repoConfig);
@@ -114,25 +128,13 @@ program
       // Store HEAD commit so incremental sync works immediately
       const headCommit = gitHeadCommit(repoConfig.path);
       if (headCommit) {
-        state = {
-          ...state,
-          agents: {
-            ...state.agents,
-            [repoName]: { ...state.agents[repoName], lastSyncCommit: headCommit },
-          },
-        };
+        state = updateAgentField(state, repoName, { lastSyncCommit: headCommit });
       }
 
       if (repoConfig.bootstrapOnCreate) {
         console.log(`  Bootstrapping...`);
         await bootstrapAgent(provider, agentState.agentId);
-        state = {
-          ...state,
-          agents: {
-            ...state.agents,
-            [repoName]: { ...state.agents[repoName], lastBootstrap: new Date().toISOString() },
-          },
-        };
+        state = updateAgentField(state, repoName, { lastBootstrap: new Date().toISOString() });
         console.log(`  Bootstrap complete`);
       }
 
@@ -201,7 +203,7 @@ program
             continue;
           }
 
-          const answer = await queryAgent(provider, agentInfo.agentId, q);
+          const answer = await provider.sendMessage(agentInfo.agentId, q);
           console.log(`\n${answer}\n`);
         }
       } finally {
@@ -232,7 +234,7 @@ program
 
       console.log(`Broadcasting to ${agents.length} agents...`);
       const results = await broadcastAsk(provider, agents, actualQuestion, {
-        timeoutMs: parseInt(opts.timeout, 10),
+        timeoutMs: parseIntOrDefault(opts.timeout, 30_000),
       });
 
       for (const result of results) {
@@ -256,15 +258,11 @@ program
     }
 
     const state = await loadState(STATE_FILE);
-    const agentInfo = state.agents[repo];
-    if (!agentInfo) {
-      console.error(`No agent found for "${repo}". Run "repo-expert setup" first.`);
-      process.exitCode = 1;
-      return;
-    }
+    const agentInfo = requireAgent(state, repo);
+    if (!agentInfo) return;
 
     const provider = createProvider();
-    const answer = await queryAgent(provider, agentInfo.agentId, question);
+    const answer = await provider.sendMessage(agentInfo.agentId, question);
     console.log(answer);
   });
 
@@ -284,12 +282,8 @@ program
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
 
     for (const repoName of repoNames) {
-      const agentInfo = state.agents[repoName];
-      if (!agentInfo) {
-        console.error(`No agent found for "${repoName}". Run "repo-expert setup" first.`);
-        process.exitCode = 1;
-        return;
-      }
+      const agentInfo = requireAgent(state, repoName);
+      if (!agentInfo) return;
 
       const repoConfig = config.repos[repoName];
       if (!repoConfig) {
@@ -335,10 +329,7 @@ program
 
       if (changedFiles.length === 0) {
         console.log(`  No changes to sync.`);
-        state = {
-          ...state,
-          agents: { ...state.agents, [repoName]: { ...agentInfo, lastSyncCommit: headCommit } },
-        };
+        state = updateAgentField(state, repoName, { lastSyncCommit: headCommit });
         await saveState(STATE_FILE, state);
         continue;
       }
@@ -346,7 +337,6 @@ program
       const result = await syncRepo({
         provider,
         agent: agentInfo,
-        repoConfig,
         changedFiles,
         collectFile: async (filePath) => {
           const absPath = path.join(repoConfig.path, filePath);
@@ -368,13 +358,7 @@ program
 
       console.log(`  Deleted: ${result.filesDeleted} files, Re-indexed: ${result.filesReIndexed} files`);
 
-      state = {
-        ...state,
-        agents: {
-          ...state.agents,
-          [repoName]: { ...agentInfo, passages: result.passages, lastSyncCommit: result.lastSyncCommit },
-        },
-      };
+      state = updateAgentField(state, repoName, { passages: result.passages, lastSyncCommit: result.lastSyncCommit });
       await saveState(STATE_FILE, state);
       console.log(`  Done.`);
     }
@@ -410,12 +394,8 @@ program
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
 
     for (const repoName of repoNames) {
-      const agentInfo = state.agents[repoName];
-      if (!agentInfo) {
-        console.error(`No agent found for "${repoName}". Run "repo-expert setup" first.`);
-        process.exitCode = 1;
-        return;
-      }
+      const agentInfo = requireAgent(state, repoName);
+      if (!agentInfo) return;
 
       const output = await getAgentStatus(provider, repoName, agentInfo);
       console.log(output);
@@ -432,12 +412,8 @@ program
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
 
     for (const repoName of repoNames) {
-      const agentInfo = state.agents[repoName];
-      if (!agentInfo) {
-        console.error(`No agent found for "${repoName}". Run "repo-expert setup" first.`);
-        process.exitCode = 1;
-        return;
-      }
+      const agentInfo = requireAgent(state, repoName);
+      if (!agentInfo) return;
 
       const md = await exportAgent(provider, repoName, agentInfo.agentId);
       console.log(md);
@@ -449,12 +425,8 @@ program
   .description("Guided codebase walkthrough for new developers")
   .action(async (repo: string) => {
     const state = await loadState(STATE_FILE);
-    const agentInfo = state.agents[repo];
-    if (!agentInfo) {
-      console.error(`No agent found for "${repo}". Run "repo-expert setup" first.`);
-      process.exitCode = 1;
-      return;
-    }
+    const agentInfo = requireAgent(state, repo);
+    if (!agentInfo) return;
 
     const provider = createProvider();
     const walkthrough = await onboardAgent(provider, repo, agentInfo.agentId);
@@ -500,8 +472,7 @@ program
 
     let newState = state;
     for (const repoName of existing) {
-      const { [repoName]: _, ...rest } = newState.agents;
-      newState = { ...newState, agents: rest };
+      newState = removeAgentFromState(newState, repoName);
     }
     await saveState(STATE_FILE, newState);
     console.log("Done.");
@@ -526,11 +497,7 @@ program
     }
 
     for (const name of repoNames) {
-      if (!state.agents[name]) {
-        console.error(`No agent found for "${name}". Run "repo-expert setup" first.`);
-        process.exitCode = 1;
-        return;
-      }
+      if (!requireAgent(state, name)) return;
       if (!config.repos[name]) {
         console.error(`Repo "${name}" not found in config`);
         process.exitCode = 1;
@@ -538,7 +505,7 @@ program
       }
     }
 
-    const intervalMs = Math.max(1, parseInt(opts.interval, 10)) * 1000;
+    const intervalMs = Math.max(1, parseIntOrDefault(opts.interval, DEFAULT_WATCH_CONFIG.intervalMs / 1000)) * 1000;
     const provider = createProvider();
     const ac = new AbortController();
 
