@@ -1,24 +1,29 @@
 # Exposing Letta Agents via MCP
 
-This repo includes a built-in MCP server (`src/mcp-server.ts`) that exposes 8 tightly-typed Letta tools over stdio. No external packages needed.
+This repo includes a built-in MCP server (`src/mcp-server.ts`) that exposes 8 tightly-typed Letta tools over stdio. No external packages needed beyond `tsx` (dev dependency).
+
+## Why this wrapper exists
+
+The official `letta-mcp` server exposes hub-style tools where a single `operation` string param multiplexes many actions, with everything else optional. LLMs routinely get the required params wrong. This wrapper exposes **individual tools with strict schemas** — `agent_id` is required where needed, not optional.
 
 ## Prerequisites
 
 - Letta Cloud API key (`LETTA_API_KEY`)
-- `tsx` installed (already a dev dependency)
+- `tsx` installed (already a dev dependency of this repo)
 
 ## Configure for Claude Code
 
-Add to `~/.claude.json` (or project `.mcp.json`):
+Add to `~/.claude.json` under the top-level `mcpServers` key (global, all projects):
 
 ```json
 {
   "mcpServers": {
     "letta": {
-      "command": "tsx",
-      "args": ["/path/to/agent-as-repo/src/mcp-server.ts"],
+      "command": "npx",
+      "args": ["tsx", "/path/to/agent-as-repo/src/mcp-server.ts"],
+      "timeout": 300,
       "env": {
-        "LETTA_BASE_URL": "https://api.letta.com/v1",
+        "LETTA_BASE_URL": "https://api.letta.com",
         "LETTA_API_KEY": "<your key>"
       }
     }
@@ -26,20 +31,24 @@ Add to `~/.claude.json` (or project `.mcp.json`):
 }
 ```
 
+Or per-project in `.mcp.json` (same format inside `"mcpServers"`).
+
 ## Configure for Codex
 
 Add to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.letta]
-command = "tsx"
-args = ["/path/to/agent-as-repo/src/mcp-server.ts"]
+command = "npx"
+args = ["tsx", "/path/to/agent-as-repo/src/mcp-server.ts"]
 tool_timeout_sec = 300
 
 [mcp_servers.letta.env]
-LETTA_BASE_URL = "https://api.letta.com/v1"
+LETTA_BASE_URL = "https://api.letta.com"
 LETTA_API_KEY = "<your key>"
 ```
+
+Codex uses `LETTA_PASSWORD` as an alias for `LETTA_API_KEY` — the server accepts both.
 
 ## Configure for Cursor
 
@@ -49,10 +58,10 @@ Add to `.cursor/mcp.json` in your project root:
 {
   "mcpServers": {
     "letta": {
-      "command": "tsx",
-      "args": ["/path/to/agent-as-repo/src/mcp-server.ts"],
+      "command": "npx",
+      "args": ["tsx", "/path/to/agent-as-repo/src/mcp-server.ts"],
       "env": {
-        "LETTA_BASE_URL": "https://api.letta.com/v1",
+        "LETTA_BASE_URL": "https://api.letta.com",
         "LETTA_API_KEY": "<your key>"
       }
     }
@@ -77,13 +86,53 @@ Add to `.cursor/mcp.json` in your project root:
 
 ```bash
 # MCP handshake
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0.1.0"}}}' | tsx src/mcp-server.ts
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0.1.0"}}}' \
+  | LETTA_BASE_URL=https://api.letta.com LETTA_API_KEY=<your-key> npx tsx src/mcp-server.ts
 ```
 
 Should return `serverInfo: { name: "letta-tools" }` with 8 tools.
 
 ## Troubleshooting
 
-- **"Authentication failed"**: Verify `LETTA_API_KEY` is set correctly in the env block
-- **Agents not found**: Run `pnpm repo-expert list` to confirm agents exist
-- **Timeouts**: Letta API calls can take 30s+; increase `tool_timeout_sec` in Codex or wait in Claude Code
+### `404 {"detail":"Not Found"}`
+
+**Most likely: double `/v1` in the base URL.** The `@letta-ai/letta-client` SDK appends `/v1` to all requests automatically. If you set `LETTA_BASE_URL=https://api.letta.com/v1`, the actual requests hit `https://api.letta.com/v1/v1/agents` → 404.
+
+**Fix:** Use `https://api.letta.com` (no `/v1` suffix).
+
+Quick check:
+```bash
+# This should return 200
+curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer <your-key>" \
+  "https://api.letta.com/v1/agents"
+
+# This returns 404 (double /v1)
+curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer <your-key>" \
+  "https://api.letta.com/v1/v1/agents"
+```
+
+### "Authentication failed" or 401
+
+- Verify `LETTA_API_KEY` is set in the `env` block of your MCP config (not just in `.env`)
+- MCP servers run as separate processes — they don't inherit your shell's `.env` file
+- For Codex, the env var can also be named `LETTA_PASSWORD` (the server accepts both)
+
+### Server fails to start / "Failed to reconnect"
+
+- Use `npx tsx`, not bare `tsx`. Bare `tsx` may not be on `PATH` in the MCP subprocess environment
+- Verify the path to `src/mcp-server.ts` is absolute
+- Test manually: `LETTA_BASE_URL=https://api.letta.com LETTA_API_KEY=<key> npx tsx src/mcp-server.ts` — should hang waiting for stdin (that's correct)
+
+### Agents not found
+
+Run `pnpm repo-expert list` to confirm agents exist, or use the MCP handshake above.
+
+### Timeouts
+
+Letta API calls can take 30s+ for complex agent responses. Set `timeout: 300` (Claude Code) or `tool_timeout_sec = 300` (Codex).
+
+### Per-project vs global config
+
+Prefer **global** config (`~/.claude.json` top-level `mcpServers`, `~/.codex/config.toml`) so the tools are available in every project. Per-project configs (`.mcp.json`, worktree-specific) lead to duplicated entries that drift out of sync.
