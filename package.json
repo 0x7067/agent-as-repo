@@ -3,9 +3,13 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "bin": {
+    "letta-tools": "./src/mcp-server.ts"
+  },
   "scripts": {
     "test": "vitest run",
-    "repo-expert": "tsx src/cli.ts"
+    "repo-expert": "tsx src/cli.ts",
+    "mcp-server": "tsx src/mcp-server.ts"
   },
   "keywords": [],
   "author": "",
@@ -13,6 +17,7 @@
   "packageManager": "pnpm@10.20.0",
   "dependencies": {
     "@letta-ai/letta-client": "^1.7.8",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "commander": "^14.0.3",
     "fast-glob": "^3.3.3",
     "js-yaml": "^4.1.1",
