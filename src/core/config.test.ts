@@ -130,4 +130,33 @@ describe("parseConfig", () => {
     const config = parseConfig(validRaw);
     expect(config.repos["my-app"].basePath).toBeUndefined();
   });
+
+  it("applies defaults.tools to repos without per-repo tools", () => {
+    const raw = {
+      ...validRaw,
+      defaults: { tools: ["send_message_to_agents_matching_all_tags"] },
+    };
+    const config = parseConfig(raw);
+    expect(config.repos["my-app"].tools).toEqual(["send_message_to_agents_matching_all_tags"]);
+  });
+
+  it("per-repo tools override defaults.tools", () => {
+    const raw = {
+      ...validRaw,
+      defaults: { tools: ["send_message_to_agents_matching_all_tags"] },
+      repos: {
+        "my-app": {
+          ...validRaw.repos["my-app"],
+          tools: ["send_message_to_agent_and_wait_for_reply"],
+        },
+      },
+    };
+    const config = parseConfig(raw);
+    expect(config.repos["my-app"].tools).toEqual(["send_message_to_agent_and_wait_for_reply"]);
+  });
+
+  it("leaves tools undefined when neither defaults nor per-repo tools set", () => {
+    const config = parseConfig(validRaw);
+    expect(config.repos["my-app"].tools).toBeUndefined();
+  });
 });

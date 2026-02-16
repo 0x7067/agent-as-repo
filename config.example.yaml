@@ -11,6 +11,8 @@ defaults:
   max_file_size_kb: 50        # Skip files larger than this
   memory_block_limit: 5000    # Max chars per core memory block
   bootstrap_on_create: true   # Auto-analyze codebase on setup
+  # tools:                    # Letta tools for all agents (per-repo overrides)
+  #   - send_message_to_agents_matching_all_tags  # Cross-agent broadcast
 
 repos:
   # Each key becomes the agent name (repo-expert-<key>)

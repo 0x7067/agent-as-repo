@@ -23,6 +23,7 @@ export interface Config {
     maxFileSizeKb: number;
     memoryBlockLimit: number;
     bootstrapOnCreate: boolean;
+    tools?: string[];
   };
   repos: Record<string, RepoConfig>;
 }

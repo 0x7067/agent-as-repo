@@ -10,6 +10,7 @@ const defaultsSchema = z.object({
   max_file_size_kb: z.number().optional(),
   memory_block_limit: z.number().optional(),
   bootstrap_on_create: z.boolean().optional(),
+  tools: z.array(z.string()).optional(),
 });
 
 const repoRawSchema = z.object({
@@ -59,7 +60,7 @@ export function parseConfig(raw: unknown): Config {
       ignoreDirs: repo.ignore_dirs,
       tags: repo.tags ?? [],
       persona: repo.persona,
-      tools: repo.tools,
+      tools: repo.tools ?? userDefaults.tools,
       maxFileSizeKb: repo.max_file_size_kb ?? defaults.maxFileSizeKb,
       memoryBlockLimit: repo.memory_block_limit ?? defaults.memoryBlockLimit,
       bootstrapOnCreate: repo.bootstrap_on_create ?? defaults.bootstrapOnCreate,
