@@ -82,6 +82,50 @@ Add to `.cursor/mcp.json` in your project root:
 | `letta_delete_passage` | `agent_id`, `passage_id` | Delete a passage |
 | `letta_update_block` | `agent_id`, `label`, `value` | Update a memory block |
 
+## Bring Your Own Key (BYOK)
+
+By default, agents use Letta-managed model providers (e.g. `openai/gpt-4.1`), which are billed through your Letta Cloud subscription. You can register your own LLM provider API keys in Letta Cloud so that requests are billed directly by the provider instead.
+
+### Register a provider key
+
+1. Go to the [Letta Cloud models page](https://app.letta.com/models)
+2. Click "Add your own LLM API keys" and connect a provider (OpenAI, Anthropic, Z.ai, ChatGPT Plus, etc.)
+3. Note the provider handle that appears (e.g. `chatgpt-plus-pro`, `lc-zai`)
+
+### Use BYOK models in config.yaml
+
+Set the `model` field to a handle from your BYOK provider, not the managed provider:
+
+```yaml
+letta:
+  # Letta-managed (billed through Letta):
+  # model: openai/gpt-4.1
+
+  # BYOK (billed directly by provider):
+  model: chatgpt-plus-pro/gpt-5.1
+```
+
+Run `repo-expert setup` to create new agents with the BYOK model. Existing agents keep their old model until you re-create them or update via the Letta API.
+
+Not every model listed under a BYOK provider will work — some providers only support a subset. List the models available for your provider before choosing:
+
+```bash
+# List models for a specific BYOK provider (replace with your handle)
+PROVIDER=chatgpt-plus-pro
+curl -s -H "Authorization: Bearer $LETTA_API_KEY" \
+  "https://api.letta.com/v1/models" \
+  | python3 -c "
+import json, sys, os
+prefix = os.environ['PROVIDER'] + '/'
+for m in json.load(sys.stdin):
+    h = m.get('handle', '')
+    if h.startswith(prefix):
+        print(h)
+"
+```
+
+Replace `chatgpt-plus-pro` with your provider handle (e.g. `lc-zai`). Models under `openai/`, `anthropic/`, etc. (without your provider prefix) use Letta's managed keys and are billed through Letta.
+
 ## Verify
 
 ```bash
