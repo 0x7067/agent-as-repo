@@ -1,39 +1,81 @@
 /**
- * GroupProvider interface — placeholder for Letta Groups API.
+ * Multi-agent orchestration — client-side patterns.
  *
- * Implementation blocked until @letta-ai/letta-client exposes the Groups API.
- * See idea.md Phase 4 for planned usage (DynamicManager, SleeptimeManager).
+ * The Letta Groups API is **deprecated** in the v1.0 SDK and absent from
+ * @letta-ai/letta-client. The recommended alternatives are:
+ *
+ *   1. **Built-in messaging tools** (already supported via `tools` config):
+ *      - `send_message_to_agent_and_wait_for_reply` — synchronous cross-agent query
+ *      - `send_message_to_agent_async` — fire-and-forget messaging
+ *      - `send_message_to_agents_matching_all_tags` — broadcast to tagged agents
+ *      Attach ONE of sync/async per agent (not both). Tag-based discovery is preferred.
+ *
+ *   2. **Client-side orchestration** — application code manages turn-taking,
+ *      routing, and aggregation using the existing `AgentProvider.sendMessage`.
+ *
+ * The types below define client-side orchestration patterns that can be
+ * implemented on top of `AgentProvider` without any Groups API dependency.
  */
 
-export interface DynamicManagerConfig {
-  managerAgentId: string;
-  terminationToken: string;
+import type { AgentProvider } from "./provider.js";
+
+/** Round-robin: cycle through agents in order. */
+export interface RoundRobinConfig {
+  type: "round_robin";
+  agentIds: string[];
   maxTurns: number;
 }
 
-export interface SleeptimeManagerConfig {
+/** Supervisor: a manager fans out to workers and aggregates results. */
+export interface SupervisorConfig {
+  type: "supervisor";
   managerAgentId: string;
-  sleeptimeAgentFrequency: number;
+  workerAgentIds: string[];
 }
 
-export type ManagerConfig =
-  | { type: "dynamic"; config: DynamicManagerConfig }
-  | { type: "sleeptime"; config: SleeptimeManagerConfig }
-  | { type: "round_robin" }
-  | { type: "supervisor"; config: { managerAgentId: string } };
-
-export interface CreateGroupParams {
+/** Dynamic: a router agent decides which agent handles each message. */
+export interface DynamicRouterConfig {
+  type: "dynamic";
+  routerAgentId: string;
   agentIds: string[];
-  description: string;
-  managerConfig: ManagerConfig;
+  maxTurns: number;
 }
 
-export interface CreateGroupResult {
-  groupId: string;
+export type OrchestrationConfig = RoundRobinConfig | SupervisorConfig | DynamicRouterConfig;
+
+/**
+ * Client-side round-robin: sends user content to each agent in sequence,
+ * collecting all responses.
+ */
+export async function roundRobin(
+  provider: AgentProvider,
+  config: RoundRobinConfig,
+  content: string,
+): Promise<string[]> {
+  const responses: string[] = [];
+  const turns = Math.min(config.maxTurns, config.agentIds.length);
+  for (let i = 0; i < turns; i++) {
+    const agentId = config.agentIds[i % config.agentIds.length];
+    const resp = await provider.sendMessage(agentId, content);
+    responses.push(resp);
+  }
+  return responses;
 }
 
-export interface GroupProvider {
-  createGroup(params: CreateGroupParams): Promise<CreateGroupResult>;
-  deleteGroup(groupId: string): Promise<void>;
-  sendToGroup(groupId: string, content: string): Promise<string>;
+/**
+ * Client-side supervisor: sends content to all workers in parallel,
+ * then has the manager summarize/aggregate the worker responses.
+ */
+export async function supervisorFanOut(
+  provider: AgentProvider,
+  config: SupervisorConfig,
+  content: string,
+): Promise<string> {
+  const workerResponses = await Promise.all(
+    config.workerAgentIds.map((id) => provider.sendMessage(id, content)),
+  );
+
+  const summary = workerResponses.map((r, i) => `[Agent ${i + 1}]: ${r}`).join("\n\n");
+  const managerPrompt = `You received the following responses from worker agents:\n\n${summary}\n\nSummarize and synthesize their findings.`;
+  return provider.sendMessage(config.managerAgentId, managerPrompt);
 }

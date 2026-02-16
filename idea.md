@@ -94,34 +94,20 @@ Letta provides three built-in tools for agent-to-agent messaging:
 
 Primary discovery mechanism: **tag-based**. All agents get `["repo-expert"]` tag plus repo-specific tags (e.g., `["backend", "api"]`). No need to store peer agent IDs in memory blocks.
 
-### Groups API (Phase 4)
+### Multi-Agent Orchestration (Phase 4)
 
-Letta's Groups API provides four orchestration patterns for advanced multi-agent setups:
+> **Groups API deprecated.** The Letta Groups API (DynamicManager, SleeptimeManager, etc.) is deprecated in the v1.0 SDK and absent from `@letta-ai/letta-client`. See https://docs.letta.com/guides/agents/groups
 
-```typescript
-// Dynamic Orchestrator — auto-routes queries to the right agent
-const group = await client.groups.create({
-  agentIds: [agent1.id, agent2.id, agent3.id],
-  description: "Repo expert group with smart routing",
-  managerConfig: {
-    managerType: "dynamic",
-    managerAgentId: orchestrator.id,
-    terminationToken: "DONE!",
-    maxTurns: 10,
-  },
-});
+**Current approach: built-in messaging tools + client-side orchestration.**
 
-// Sleeptime — background agents process memory periodically
-const sleepGroup = await client.groups.create({
-  agentIds: [summaryAgent.id],
-  description: "Background memory processing",
-  managerConfig: {
-    managerType: "sleeptime",
-    managerAgentId: mainAgent.id,
-    sleeptimeAgentFrequency: 3,
-  },
-});
-```
+Agents communicate via built-in tools configured in `config.yaml`:
+- `send_message_to_agent_and_wait_for_reply` — synchronous cross-agent query
+- `send_message_to_agent_async` — fire-and-forget messaging
+- `send_message_to_agents_matching_all_tags` — broadcast to tagged agents
+
+Attach only ONE of sync/async per agent (not both). Tag-based discovery via `["repo-expert", ...repoTags]` is preferred.
+
+For orchestration patterns (round-robin, supervisor fan-out), see `src/shell/group-provider.ts` which implements client-side coordination on top of `AgentProvider.sendMessage`.
 
 ## Configuration Design
 
@@ -248,10 +234,11 @@ Before building the framework, validate the critical unknowns with a standalone 
 
 ### Phase 4: Advanced Features
 
-- [ ] Smart routing: Groups API DynamicManager with an orchestrator agent that auto-routes queries — requires separate `GroupProvider` interface (Groups API is a distinct surface from `AgentProvider`)
-- [ ] Sleep-time processing: Groups API SleeptimeManager for background memory refinement — same `GroupProvider` interface
+- [x] Onboarding mode: guided codebase walkthrough for new developers (uses existing `sendMessage`)
+- [x] Multi-agent orchestration: client-side round-robin and supervisor fan-out patterns using `AgentProvider.sendMessage` (Groups API deprecated in v1.0 SDK — replaced with client-side orchestration + built-in messaging tools)
 - [ ] PR review integration: agent comments on PRs via GitHub/GitLab webhooks (uses existing `sendMessage`)
-- [ ] Onboarding mode: guided codebase walkthrough for new developers (uses existing `sendMessage`)
+
+> **Note:** The Letta Groups API (DynamicManager, SleeptimeManager, etc.) is deprecated in the v1.0 SDK and absent from `@letta-ai/letta-client`. Multi-agent coordination uses built-in messaging tools (`send_message_to_agent_and_wait_for_reply`, `send_message_to_agents_matching_all_tags`) configured via `tools` in config.yaml, plus client-side orchestration in `src/shell/group-provider.ts`.
 
 ## Technical Decisions & Constraints
 
