@@ -192,43 +192,43 @@ repo-expert destroy --repo mobile-app
 
 Before building the framework, validate the critical unknowns with a standalone script:
 
-- [ ] **SDK smoke test**: Create an agent with 3 custom memory blocks, insert a passage, send a message, read a block back. Confirm all method signatures match.
-- [ ] **Ingestion speed**: Insert 100, 1,000, and 5,000 passages into a single agent. Measure wall-clock time. Test with concurrent requests (p-limit) to find max parallelism Letta tolerates.
-- [ ] **Retrieval quality**: After loading a real repo (~1,000 files), test 10 known-answer queries. Does archival search find the right files? What's the hit rate?
-- [ ] **Passage lifecycle**: Test passage deletion by ID. Confirm the full create → query → delete → re-create cycle works for incremental sync.
-- [ ] **Bootstrap viability**: Prompt an agent to self-analyze its archival memory and populate core memory blocks. Does the output quality justify the approach?
+- [x] **SDK smoke test**: Create an agent with 3 custom memory blocks, insert a passage, send a message, read a block back. Confirm all method signatures match.
+- [x] **Ingestion speed**: Insert 100, 1,000, and 5,000 passages into a single agent. Measure wall-clock time. Test with concurrent requests (p-limit) to find max parallelism Letta tolerates.
+- [x] **Retrieval quality**: After loading a real repo (~1,000 files), test 10 known-answer queries. Does archival search find the right files? What's the hit rate?
+- [x] **Passage lifecycle**: Test passage deletion by ID. Confirm the full create → query → delete → re-create cycle works for incremental sync.
+- [x] **Bootstrap viability**: Prompt an agent to self-analyze its archival memory and populate core memory blocks. Does the output quality justify the approach?
 
 **Exit criteria**: All 5 checks pass, or we identify specific workarounds needed.
 
 ### Phase 1: Core Framework (MVP)
 
-- [ ] Project setup: package.json, tsconfig.json, tsx for running TS directly
-- [ ] Config loader with YAML parsing and validation (zod schemas)
-- [ ] File collector: walk repos with `fs/promises` + glob, filter by extension/ignore/size
-- [ ] Agent factory: create Letta agent from config with 3 core memory blocks + archival loading
-- [ ] State persistence: save agent IDs and `{ filePath: passageId }` maps to `.repo-expert-state.json`
-- [ ] Bootstrap: prompt agent to self-analyze and populate core memory blocks
-- [ ] Tag-based agent registration: all agents get `["repo-expert", ...repoTags]`
-- [ ] CLI: `setup`, `ask`, `list` subcommands (commander or yargs)
-- [ ] `config.example.yaml` with well-documented options
+- [x] Project setup: package.json, tsconfig.json, tsx for running TS directly
+- [x] Config loader with YAML parsing and validation (zod schemas)
+- [x] File collector: walk repos with `fs/promises` + glob, filter by extension/ignore/size
+- [x] Agent factory: create Letta agent from config with 3 core memory blocks + archival loading
+- [x] State persistence: save agent IDs and `{ filePath: passageId }` maps to `.repo-expert-state.json`
+- [x] Bootstrap: prompt agent to self-analyze and populate core memory blocks
+- [x] Tag-based agent registration: all agents get `["repo-expert", ...repoTags]`
+- [x] CLI: `setup`, `ask`, `list` subcommands (commander or yargs)
+- [x] `config.example.yaml` with well-documented options
 
 ### Phase 2: Sync & Reliability
 
-- [ ] Extend `AgentProvider` with `deletePassage(agentId, passageId)`, `listPassages(agentId)`, `getBlock(agentId, label)` — implement in `LettaProvider`
-- [ ] Incremental sync via `git diff --name-only` — delete old passages by ID, insert new ones (uses `deletePassage` + `storePassage`)
-- [ ] Fallback: if changed files > 500, trigger full re-index instead of incremental
-- [ ] CLI: `sync` subcommand with `--since`, `--full`, `--repo` flags
-- [ ] Concurrent passage ingestion with configurable parallelism (based on Phase 0 findings)
-- [ ] Handle Letta Cloud rate limits gracefully (retry with backoff inside `LettaProvider`)
-- [ ] Agent health check / status command showing memory stats and last sync time (uses `getBlock` + `listPassages`)
+- [x] Extend `AgentProvider` with `deletePassage(agentId, passageId)`, `listPassages(agentId)`, `getBlock(agentId, label)` — implement in `LettaProvider`
+- [x] Incremental sync via `git diff --name-only` — delete old passages by ID, insert new ones (uses `deletePassage` + `storePassage`)
+- [x] Fallback: if changed files > 500, trigger full re-index instead of incremental
+- [x] CLI: `sync` subcommand with `--since`, `--full`, `--repo` flags
+- [x] Concurrent passage ingestion with configurable parallelism (based on Phase 0 findings)
+- [x] Handle Letta Cloud rate limits gracefully (retry with backoff inside `LettaProvider`)
+- [x] Agent health check / status command showing memory stats and last sync time (uses `getBlock` + `listPassages`)
 
 ### Phase 3: Extensibility
 
-- [ ] MCP exposure guide + helper script for Letta MCP Server setup
+- [x] MCP exposure guide + helper script for Letta MCP Server setup
 - [ ] Plugin system for file collectors (e.g., tree-sitter AST chunking instead of raw files)
-- [ ] Support for monorepos: multiple "virtual repos" within a single git repo
-- [ ] `repo-expert export` — dump agent memory to markdown for debugging/inspection (uses `getBlock` + `listPassages` from Phase 2)
-- [ ] Custom tools registry: let users define additional agent tools in config — add optional `tools?: string[]` to `CreateAgentParams`, `LettaProvider` merges with `["archival_memory_search"]`
+- [x] Support for monorepos: multiple "virtual repos" within a single git repo
+- [x] `repo-expert export` — dump agent memory to markdown for debugging/inspection (uses `getBlock` + `listPassages` from Phase 2)
+- [x] Custom tools registry: let users define additional agent tools in config — add optional `tools?: string[]` to `CreateAgentParams`, `LettaProvider` merges with `["archival_memory_search"]`
 
 ### Phase 4: Advanced Features
 
