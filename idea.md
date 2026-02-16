@@ -269,59 +269,9 @@ Before building the framework, validate the critical unknowns with a standalone 
 - Threshold: >500 changed files → fallback to full re-index
 - Store last synced commit SHA per repo in state file
 
-## Letta SDK Patterns (TypeScript)
+## Letta SDK Patterns
 
-The framework uses `@letta-ai/letta-client` (npm). Key patterns:
-
-```typescript
-import { LettaClient } from "@letta-ai/letta-client";
-
-const client = new LettaClient({ token: process.env.LETTA_API_KEY });
-
-// Create agent with custom memory blocks
-const agent = await client.agents.create({
-  name: "mobile-app-expert",
-  model: "openai/gpt-4.1",
-  embedding: "openai/text-embedding-3-small",
-  memoryBlocks: [
-    { label: "persona", value: "I am an expert on the mobile app repository...", limit: 5000 },
-    { label: "architecture", value: "Not yet analyzed.", limit: 5000 },
-    { label: "conventions", value: "Not yet analyzed.", limit: 5000 },
-  ],
-  tools: ["send_message_to_agents_matching_tags"],
-});
-
-// Load files into archival memory (passages)
-const passage = await client.agents.passages.create(agent.id, {
-  text: "FILE: src/index.ts\n\n<file content>",
-});
-// Store passage.id in state file for later deletion during sync
-
-// Query agent
-const response = await client.agents.messages.create(agent.id, {
-  messages: [
-    { role: "user", content: "How does auth work?" },
-  ],
-});
-
-for (const message of response.messages) {
-  console.log(message);
-}
-
-// Read a specific memory block
-const archBlock = await client.agents.blocks.retrieve(agent.id, "architecture");
-console.log(archBlock.value);
-
-// Modify a block
-await client.agents.blocks.modify(agent.id, "architecture", {
-  value: "Updated architecture summary...",
-});
-```
-
-**SDK caveats:**
-- The Letta SDK evolves frequently. Always check [docs.letta.com](https://docs.letta.com) and the [TypeScript SDK repo](https://github.com/letta-ai/letta-node) for current API shape.
-- Pin the exact SDK version in `package.json`. Run integration tests on every SDK update.
-- Base tools (archival_memory_search, core_memory_replace, etc.) appear to be included by default — no `include_base_tools` flag needed.
+See `memory/letta-sdk.md` for verified API signatures against `@letta-ai/letta-client@1.7.8`. The examples that were here previously had incorrect class names, parameter casing, and method paths — they were corrected during Phase 0. See `phase-0-findings.md` for the full corrections table.
 
 ## Tech Stack
 
@@ -348,8 +298,7 @@ await client.agents.blocks.modify(agent.id, "architecture", {
 
 ## Relevant Ecosystem
 
-- **Letta Groups API**: Supervisor-Worker, Dynamic Orchestrator, Sleeptime, Round-Robin patterns for multi-agent coordination
-- **Letta MCP Server**: Expose agents to Claude Code, Cursor, etc. via MCP protocol
+- **Letta MCP Server**: Built-in at `src/mcp-server.ts` — 8 typed tools over stdio (see `docs/mcp-setup.md`)
 - **Greptile**: Alternative for pure code Q&A ($0.15/query API) — no persistence or cross-repo
 - **Aider repo map**: tree-sitter + PageRank for compressed codebase understanding — worth stealing for file collector / core memory
 - **Existing code MCP servers**: RagCode MCP, Claude Context MCP (Zilliz) — reference implementations

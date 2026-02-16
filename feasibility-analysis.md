@@ -2,24 +2,9 @@
 
 ## 1. Letta SDK Reality Check
 
-**Finding:** The spec's code examples use incorrect class names, parameter casing, and method paths. The actual TypeScript SDK exports `LettaClient` (not `Letta`), uses `{ token: "..." }` (not `{ apiKey: "..." }`), uses camelCase (`memoryBlocks`, `enableSleeptime`, `agentIds`) throughout, and archival memory insertion is via `client.agents.passages.create(agentId, { text })` — not `agents.archival_memory.create`. The env var convention is also likely `LETTA_API_KEY` mapped to the `token` constructor param.
+**Finding:** The spec's code examples used incorrect class names, parameter casing, and method paths. This was fully resolved during Phase 0.
 
-**Verified methods and actual signatures:**
-
-| Spec assumed | Actual SDK |
-|---|---|
-| `new Letta({ apiKey })` | `new LettaClient({ token })` |
-| `agents.create({ memory_blocks, include_base_tools })` | `agents.create({ memoryBlocks, tools, model, embedding })` |
-| `agents.archival_memory.create(id, { text })` | `agents.passages.create(id, { text })` |
-| `agents.messages.create(id, { input: "..." })` | `agents.messages.create(id, { messages: [{ role, content }] })` |
-| `agents.blocks.retrieve("label", { agent_id })` | `agents.blocks.retrieve(agentId, "label")` |
-| `blocks.create({ label, value })` | Unverified in Node SDK — may use block templates |
-
-`include_base_tools` and `block_ids` parameters were **not found** in any documentation reviewed. The tools array takes tool name strings (e.g., `["web_search", "run_code"]`), and base tools (archival memory search, memory edit) appear to be included by default.
-
-**Verdict: PARTIALLY VALID**
-
-**Recommendation:** Before writing any code, install `@letta-ai/letta-client`, inspect the TypeScript types (`node_modules/@letta-ai/letta-client/dist`), and write a small spike script that creates an agent, inserts a passage, queries it, and reads a block. This will take 30 minutes and prevent days of rework.
+**Verdict: RESOLVED** — See `phase-0-findings.md` for the corrections table and `memory/letta-sdk.md` for verified signatures against `@letta-ai/letta-client@1.7.8`.
 
 ---
 
@@ -56,7 +41,9 @@ However, 3,000 characters per block is **very tight** for meaningful codebase su
 
 > **Note:** `send_message_to_agent_async` does NOT exist in Letta Cloud (verified via spike).
 
-Additionally, Letta now has a **Groups API** with four orchestration patterns (Supervisor-Worker, Dynamic Orchestrator, Sleeptime, Round-Robin) that is more powerful than the spec acknowledges. The tag-based broadcast tool means agents can discover peers by tags **without needing stored agent IDs**.
+The tag-based broadcast tool means agents can discover peers by tags **without needing stored agent IDs**.
+
+> **Update:** The Letta Groups API (Supervisor-Worker, Dynamic Orchestrator, etc.) is deprecated in the v1.0 SDK and absent from `@letta-ai/letta-client`. Multi-agent coordination uses built-in messaging tools + client-side orchestration.
 
 Critical caveats: (a) Letta docs recommend attaching only ONE of sync/async tools per agent, not both. (b) There is **no configurable timeout** on synchronous calls — if the target agent hangs, the caller blocks indefinitely. (c) Each synchronous cross-agent call adds at least one full LLM inference round-trip (2-10+ seconds).
 
@@ -114,19 +101,14 @@ The unique value proposition of this project is: **persistent, self-updating mem
 
 ## Summary
 
-The project is **feasible but needs corrections before coding begins**. The core concept — persistent AI agents per repo with cross-agent communication via Letta — is sound and the SDK capabilities mostly exist. However:
+> **Note:** This analysis was written pre-implementation. All critical path items below have been resolved through Phase 0 spikes and subsequent development. Kept for historical context.
 
-**Critical path items:**
-1. The spec's SDK code examples are wrong (class names, parameter casing, method paths). Write a spike script first.
-2. Archival memory ingestion speed and retrieval quality are the biggest unknowns. Test with a real repo at scale before building the framework around it.
-3. The SDK is a moving target. Pin versions and build integration tests early.
+The project is **feasible**. The core concept — persistent AI agents per repo with cross-agent communication via Letta — is sound and the SDK capabilities exist.
 
-**What should change before writing code:**
-- Fix all SDK references to match actual `LettaClient` API (camelCase, `passages` not `archival_memory`, `token` not `apiKey`)
-- Replace the "store peer agent IDs in memory blocks" design with tag-based discovery (`send_message_to_agents_matching_tags`)
-- Use the Groups API for orchestration patterns instead of building custom routing
-- Add a passage-to-file-path mapping in the state file for incremental sync
-- Reduce core memory blocks from 5 to 3-4 with higher character limits
-- Plan for the ingestion speed problem: concurrency, relevance filtering, or tree-sitter summarization
-
-The honest question to answer first: **is the target user someone who needs persistent, evolving agent memory and cross-repo reasoning?** If yes, proceed — Letta is the right tool and this framework fills a real gap. If the target user just wants better codebase Q&A, a simpler RAG approach or Greptile integration would deliver value faster with less risk.
+**Resolved during Phase 0–2:**
+- SDK references corrected (see `phase-0-findings.md`)
+- Tag-based discovery replaced "store peer agent IDs" design
+- Groups API deprecated — replaced with client-side orchestration
+- Passage-to-file mapping implemented in state file
+- Core memory reduced to 3 blocks with 5000-char limits
+- Ingestion uses p=20 concurrency (~126ms/passage)

@@ -1,35 +1,44 @@
-# Exposing Repo Expert Agents via MCP
+# Exposing Letta Agents via MCP
 
-This guide explains how to make your repo-expert agents accessible to AI tools (Claude Code, Cursor, etc.) through the [Letta MCP Server](https://github.com/oculairmedia/Letta-MCP-server).
+This repo includes a built-in MCP server (`src/mcp-server.ts`) that exposes 8 tightly-typed Letta tools over stdio. No external packages needed.
 
 ## Prerequisites
 
-- Repo-expert agents created via `repo-expert setup`
-- Letta Cloud API key (`LETTA_API_KEY` in `.env`)
-
-## Install Letta MCP Server
-
-```bash
-npm install -g letta-mcp-server
-```
+- Letta Cloud API key (`LETTA_API_KEY`)
+- `tsx` installed (already a dev dependency)
 
 ## Configure for Claude Code
 
-Add to your `~/.claude/settings.json` or project `.claude/settings.json`:
+Add to `~/.claude.json` (or project `.mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "letta": {
-      "command": "letta-mcp",
-      "args": [],
+      "command": "tsx",
+      "args": ["/path/to/agent-as-repo/src/mcp-server.ts"],
       "env": {
         "LETTA_BASE_URL": "https://api.letta.com/v1",
-        "LETTA_PASSWORD": "<your LETTA_API_KEY>"
+        "LETTA_API_KEY": "<your key>"
       }
     }
   }
 }
+```
+
+## Configure for Codex
+
+Add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.letta]
+command = "tsx"
+args = ["/path/to/agent-as-repo/src/mcp-server.ts"]
+tool_timeout_sec = 300
+
+[mcp_servers.letta.env]
+LETTA_BASE_URL = "https://api.letta.com/v1"
+LETTA_API_KEY = "<your key>"
 ```
 
 ## Configure for Cursor
@@ -40,47 +49,41 @@ Add to `.cursor/mcp.json` in your project root:
 {
   "mcpServers": {
     "letta": {
-      "command": "letta-mcp",
+      "command": "tsx",
+      "args": ["/path/to/agent-as-repo/src/mcp-server.ts"],
       "env": {
         "LETTA_BASE_URL": "https://api.letta.com/v1",
-        "LETTA_PASSWORD": "<your LETTA_API_KEY>"
+        "LETTA_API_KEY": "<your key>"
       }
     }
   }
 }
 ```
 
-## Helper Script
+## Available Tools
 
-Generate the MCP config automatically:
+| Tool | Params | Description |
+|------|--------|-------------|
+| `letta_list_agents` | _(none)_ | List all agents |
+| `letta_get_agent` | `agent_id` | Full agent details |
+| `letta_send_message` | `agent_id`, `content` | Send message, get response |
+| `letta_get_core_memory` | `agent_id` | All memory blocks |
+| `letta_search_archival` | `agent_id`, `query`, `top_k?` | Semantic passage search |
+| `letta_insert_passage` | `agent_id`, `text` | Insert into archival memory |
+| `letta_delete_passage` | `agent_id`, `passage_id` | Delete a passage |
+| `letta_update_block` | `agent_id`, `label`, `value` | Update a memory block |
+
+## Verify
 
 ```bash
-pnpm tsx scripts/generate-mcp-config.ts
+# MCP handshake
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0.1.0"}}}' | tsx src/mcp-server.ts
 ```
 
-This reads your `.env` file and outputs the JSON config block ready to paste.
-
-## Usage
-
-Once configured, your AI tool can:
-
-- **List agents**: discover all repo-expert agents
-- **Prompt agents**: ask questions about any indexed repo
-- **Read memory**: inspect agent core memory blocks
-- **Search passages**: query the agent's archival memory directly
-
-## Agent Discovery
-
-All repo-expert agents are tagged with `["repo-expert", ...repoTags]`. Use these tags to find the right agent:
-
-| Tag Pattern | Meaning |
-|---|---|
-| `repo-expert` | All repo-expert agents |
-| `repo-expert` + `frontend` | Frontend repo agents |
-| `repo-expert` + `backend` | Backend repo agents |
+Should return `serverInfo: { name: "letta-tools" }` with 8 tools.
 
 ## Troubleshooting
 
-- **"Connection refused"**: Ensure `letta-mcp` is installed globally and accessible in PATH
-- **"Authentication failed"**: Verify `LETTA_PASSWORD` matches your `LETTA_API_KEY`
-- **Agents not found**: Run `repo-expert list` to confirm agents exist
+- **"Authentication failed"**: Verify `LETTA_API_KEY` is set correctly in the env block
+- **Agents not found**: Run `pnpm repo-expert list` to confirm agents exist
+- **Timeouts**: Letta API calls can take 30s+; increase `tool_timeout_sec` in Codex or wait in Claude Code
