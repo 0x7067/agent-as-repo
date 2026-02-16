@@ -15,6 +15,7 @@ import { addAgentToState, updatePassageMap } from "./core/state.js";
 import { syncRepo } from "./shell/sync.js";
 import { getAgentStatus } from "./shell/status.js";
 import { exportAgent } from "./shell/export.js";
+import { onboardAgent } from "./shell/onboard.js";
 import { execSync } from "child_process";
 
 const STATE_FILE = ".repo-expert-state.json";
@@ -265,6 +266,23 @@ program
       const md = await exportAgent(provider, repoName, agentInfo.agentId);
       console.log(md);
     }
+  });
+
+program
+  .command("onboard <repo>")
+  .description("Guided codebase walkthrough for new developers")
+  .action(async (repo: string) => {
+    const state = await loadState(STATE_FILE);
+    const agentInfo = state.agents[repo];
+    if (!agentInfo) {
+      console.error(`No agent found for "${repo}". Run "repo-expert setup" first.`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const provider = new LettaProvider(new Letta());
+    const walkthrough = await onboardAgent(provider, repo, agentInfo.agentId);
+    console.log(walkthrough);
   });
 
 program
