@@ -16,6 +16,7 @@ import { syncRepo } from "./shell/sync.js";
 import { getAgentStatus } from "./shell/status.js";
 import { exportAgent } from "./shell/export.js";
 import { onboardAgent } from "./shell/onboard.js";
+import { broadcastAsk } from "./shell/group-provider.js";
 import { execSync } from "child_process";
 
 const STATE_FILE = ".repo-expert-state.json";
@@ -103,6 +104,38 @@ program
     const provider = new LettaProvider(new Letta());
     const answer = await queryAgent(provider, agentInfo.agentId, question);
     console.log(answer);
+  });
+
+program
+  .command("ask-all <question>")
+  .description("Ask all agents a question and collect responses")
+  .option("--timeout <ms>", "Per-agent timeout in milliseconds", "30000")
+  .action(async (question: string, opts: { timeout: string }) => {
+    const state = await loadState(STATE_FILE);
+    const entries = Object.entries(state.agents);
+
+    if (entries.length === 0) {
+      console.error('No agents. Run "repo-expert setup" first.');
+      process.exitCode = 1;
+      return;
+    }
+
+    const provider = new LettaProvider(new Letta());
+    const agents = entries.map(([repoName, agent]) => ({ repoName, agentId: agent.agentId }));
+
+    console.log(`Broadcasting to ${agents.length} agents...`);
+    const results = await broadcastAsk(provider, agents, question, {
+      timeoutMs: parseInt(opts.timeout, 10),
+    });
+
+    for (const result of results) {
+      console.log(`\n--- ${result.repoName} ---`);
+      if (result.error) {
+        console.error(`  Error: ${result.error}`);
+      } else {
+        console.log(result.response);
+      }
+    }
   });
 
 program

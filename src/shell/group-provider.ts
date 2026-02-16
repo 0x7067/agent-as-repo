@@ -66,6 +66,51 @@ export async function roundRobin(
  * Client-side supervisor: sends content to all workers in parallel,
  * then has the manager summarize/aggregate the worker responses.
  */
+export interface BroadcastAgent {
+  repoName: string;
+  agentId: string;
+}
+
+export interface BroadcastResult {
+  repoName: string;
+  response: string | null;
+  error: string | null;
+}
+
+export interface BroadcastOptions {
+  timeoutMs?: number;
+}
+
+/**
+ * Broadcast a question to multiple agents in parallel with per-agent timeout.
+ * Returns results for all agents, including those that timed out or errored.
+ */
+export async function broadcastAsk(
+  provider: AgentProvider,
+  agents: BroadcastAgent[],
+  question: string,
+  options: BroadcastOptions = {},
+): Promise<BroadcastResult[]> {
+  const timeoutMs = options.timeoutMs ?? 30_000;
+
+  return Promise.all(
+    agents.map(async ({ repoName, agentId }): Promise<BroadcastResult> => {
+      try {
+        const response = await Promise.race([
+          provider.sendMessage(agentId, question),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Agent "${repoName}" timed out after ${timeoutMs}ms`)), timeoutMs),
+          ),
+        ]);
+        return { repoName, response, error: null };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { repoName, response: null, error: message };
+      }
+    }),
+  );
+}
+
 export async function supervisorFanOut(
   provider: AgentProvider,
   config: SupervisorConfig,
