@@ -5,6 +5,8 @@ import { registerTools } from "./mcp-server.js";
 
 interface MockPassages {
   search: Mock;
+  create: Mock;
+  delete: Mock;
 }
 
 interface MockBlocks {
@@ -55,6 +57,8 @@ function makeMockClient(): MockLettaClient {
       }),
       passages: {
         search: vi.fn().mockResolvedValue({ count: 1, results: [{ id: "p-1", content: "found it", timestamp: "2026-01-01" }] }),
+        create: vi.fn().mockResolvedValue([{ id: "p-new", text: "new passage" }]),
+        delete: vi.fn().mockResolvedValue(undefined),
       },
       blocks: {
         update: vi.fn().mockResolvedValue({ id: "block-1", label: "persona", value: "Updated.", limit: 5000 }),
@@ -95,12 +99,14 @@ describe("MCP Server tools", () => {
     registerTools(server, client as unknown as Parameters<typeof registerTools>[1]);
   });
 
-  it("registers all 6 tools", () => {
+  it("registers all 8 tools", () => {
     const tools = (server as unknown as { _registeredTools: Record<string, unknown> })._registeredTools;
-    expect(Object.keys(tools).length).toBe(6);
+    expect(Object.keys(tools).length).toBe(8);
     expect(Object.keys(tools).sort()).toEqual([
+      "letta_delete_passage",
       "letta_get_agent",
       "letta_get_core_memory",
+      "letta_insert_passage",
       "letta_list_agents",
       "letta_search_archival",
       "letta_send_message",
@@ -196,7 +202,48 @@ describe("MCP Server tools", () => {
       const result = await handler({ agent_id: "agent-1", query: "auth" });
       const data = JSON.parse(result.content[0].text);
       expect(data.count).toBe(1);
-      expect(client.agents.passages.search).toHaveBeenCalledWith("agent-1", { query: "auth" });
+      expect(client.agents.passages.search).toHaveBeenCalledWith("agent-1", { query: "auth", top_k: undefined });
+    });
+
+    it("passes top_k when provided", async () => {
+      const handler = extractToolHandler(server, "letta_search_archival");
+      await handler({ agent_id: "agent-1", query: "auth", top_k: 5 });
+      expect(client.agents.passages.search).toHaveBeenCalledWith("agent-1", { query: "auth", top_k: 5 });
+    });
+  });
+
+  describe("letta_insert_passage", () => {
+    it("inserts and returns the passage", async () => {
+      const handler = extractToolHandler(server, "letta_insert_passage");
+      const result = await handler({ agent_id: "agent-1", text: "new passage" });
+      const data = JSON.parse(result.content[0].text);
+      expect(data[0].id).toBe("p-new");
+      expect(client.agents.passages.create).toHaveBeenCalledWith("agent-1", { text: "new passage" });
+    });
+
+    it("returns isError on failure", async () => {
+      client.agents.passages.create.mockRejectedValue(new Error("quota exceeded"));
+      const handler = extractToolHandler(server, "letta_insert_passage");
+      const result = await handler({ agent_id: "agent-1", text: "x" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("quota exceeded");
+    });
+  });
+
+  describe("letta_delete_passage", () => {
+    it("deletes a passage", async () => {
+      const handler = extractToolHandler(server, "letta_delete_passage");
+      const result = await handler({ agent_id: "agent-1", passage_id: "p-1" });
+      expect(result.content[0].text).toBe("Deleted");
+      expect(client.agents.passages.delete).toHaveBeenCalledWith("p-1", { agent_id: "agent-1" });
+    });
+
+    it("returns isError on failure", async () => {
+      client.agents.passages.delete.mockRejectedValue(new Error("not found"));
+      const handler = extractToolHandler(server, "letta_delete_passage");
+      const result = await handler({ agent_id: "agent-1", passage_id: "p-x" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("not found");
     });
   });
 

@@ -93,11 +93,47 @@ export function registerTools(server: McpServer, client: Letta): void {
     {
       agent_id: z.string().describe("The agent ID"),
       query: z.string().describe("Search query"),
+      top_k: z.number().optional().describe("Max results to return"),
     },
-    async ({ agent_id, query }) => {
+    async (args) => {
+      const { agent_id, query, top_k } = args as { agent_id: string; query: string; top_k?: number };
       try {
-        const results = await client.agents.passages.search(agent_id, { query });
+        const results = await client.agents.passages.search(agent_id, { query, top_k });
         return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: errorMessage(err) }], isError: true };
+      }
+    },
+  );
+
+  server.tool(
+    "letta_insert_passage",
+    "Insert a passage into an agent's archival memory",
+    {
+      agent_id: z.string().describe("The agent ID"),
+      text: z.string().describe("The passage text to store"),
+    },
+    async ({ agent_id, text }) => {
+      try {
+        const result = await client.agents.passages.create(agent_id, { text });
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: errorMessage(err) }], isError: true };
+      }
+    },
+  );
+
+  server.tool(
+    "letta_delete_passage",
+    "Delete a passage from an agent's archival memory. To update a passage, delete it and insert a new one.",
+    {
+      agent_id: z.string().describe("The agent ID"),
+      passage_id: z.string().describe("The passage ID to delete"),
+    },
+    async ({ agent_id, passage_id }) => {
+      try {
+        await client.agents.passages.delete(passage_id, { agent_id });
+        return { content: [{ type: "text", text: "Deleted" }] };
       } catch (err) {
         return { content: [{ type: "text", text: errorMessage(err) }], isError: true };
       }
