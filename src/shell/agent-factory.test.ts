@@ -76,4 +76,24 @@ describe("loadPassages", () => {
     expect(passageMap).toEqual({});
     expect(provider.storePassage as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
   });
+
+  it("calls onProgress callback during loading", async () => {
+    const provider = makeMockProvider();
+    const chunks = [
+      { text: "FILE: src/a.ts\ncontent a", sourcePath: "src/a.ts" },
+      { text: "FILE: src/b.ts\ncontent b", sourcePath: "src/b.ts" },
+    ];
+
+    const calls: Array<[number, number]> = [];
+    await loadPassages(provider, "agent-abc", chunks, 1, (loaded, total) => {
+      calls.push([loaded, total]);
+    });
+
+    expect(calls).toHaveLength(2);
+    expect(calls[calls.length - 1]).toEqual([2, 2]);
+    // All calls should report total = 2
+    for (const [, total] of calls) {
+      expect(total).toBe(2);
+    }
+  });
 });

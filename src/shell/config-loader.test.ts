@@ -53,4 +53,45 @@ describe("loadConfig", () => {
       await expect(loadConfig(filePath)).rejects.toThrow();
     });
   });
+
+  it("resolves tilde paths to absolute paths", async () => {
+    const yamlWithTilde = `
+letta:
+  model: openai/gpt-4.1
+  embedding: openai/text-embedding-3-small
+
+repos:
+  my-app:
+    path: ~/repos/my-app
+    description: My application
+    extensions: [.ts]
+    ignore_dirs: [node_modules]
+`;
+    await withTempConfig(yamlWithTilde, async (filePath) => {
+      const config = await loadConfig(filePath);
+      const resolvedPath = config.repos["my-app"].path;
+      expect(resolvedPath).not.toContain("~");
+      expect(path.isAbsolute(resolvedPath)).toBe(true);
+      expect(resolvedPath).toBe(path.join(os.homedir(), "repos/my-app"));
+    });
+  });
+
+  it("resolves relative paths to absolute paths", async () => {
+    const yamlWithRelative = `
+letta:
+  model: openai/gpt-4.1
+  embedding: openai/text-embedding-3-small
+
+repos:
+  my-app:
+    path: ./repos/my-app
+    description: My application
+    extensions: [.ts]
+    ignore_dirs: [node_modules]
+`;
+    await withTempConfig(yamlWithRelative, async (filePath) => {
+      const config = await loadConfig(filePath);
+      expect(path.isAbsolute(config.repos["my-app"].path)).toBe(true);
+    });
+  });
 });

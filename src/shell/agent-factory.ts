@@ -35,9 +35,11 @@ export async function loadPassages(
   agentId: string,
   chunks: Chunk[],
   concurrency = 20,
+  onProgress?: (loaded: number, total: number) => void,
 ): Promise<PassageMap> {
   const limit = pLimit(concurrency);
   const passageMap: PassageMap = {};
+  let loaded = 0;
 
   await Promise.all(
     chunks.map((chunk) =>
@@ -47,6 +49,8 @@ export async function loadPassages(
           passageMap[chunk.sourcePath] = [];
         }
         passageMap[chunk.sourcePath].push(passageId);
+        loaded++;
+        onProgress?.(loaded, chunks.length);
       }),
     ),
   );
