@@ -34,7 +34,7 @@ function requireApiKey(): void {
 
 function createProvider(): LettaProvider {
   requireApiKey();
-  return new LettaProvider(new Letta());
+  return new LettaProvider(new Letta({ timeout: 5 * 60 * 1000 }));
 }
 
 async function loadConfigSafe(configPath: string): Promise<Config> {
