@@ -25,13 +25,25 @@ Global `~/.claude/CLAUDE.md` applies (think before coding, simplicity, surgical 
 
 - Package manager: pnpm (never npm or yarn)
 - Dev execution: `pnpm tsx <file>`
+- Run CLI: `pnpm repo-expert <command>` (or `tsx src/cli.ts`)
+- Run MCP server: `pnpm mcp-server` (or `tsx src/mcp-server.ts`)
+- Run tests: `pnpm test` (vitest)
 - TypeScript strict mode, ES2022 target
 - Letta SDK import: `import { Letta } from "@letta-ai/letta-client"` (not LettaClient)
+- Zod import: `import { z } from "zod/v4"` (not `"zod"` — project uses Zod v4 path)
 - Always attach `archival_memory_search` tool explicitly to agents
 - Chunk files at ~2KB, split on `\n\n`, prefix with `FILE: <path>`
 - Never override Letta system prompt — use `persona` block for agent instructions
 - State persistence: `.repo-expert-state.json` (gitignored)
 - API key: `LETTA_API_KEY` in `.env`
+
+## Key Files
+
+- `src/cli.ts` — CLI entry point (commander-based, all subcommands)
+- `src/mcp-server.ts` — MCP server entry point
+- `src/shell/provider.ts` — `AgentProvider` interface (all Letta SDK calls go through this)
+- `src/core/types.ts` — Shared type definitions
+- `config.yaml` — Repo configuration (gitignored)
 
 ## Pre-PR Checklist
 

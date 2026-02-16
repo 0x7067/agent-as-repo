@@ -5,3 +5,4 @@ dist/
 .kaban/
 .mcp.json
 config.yaml
+.claude.local.md
