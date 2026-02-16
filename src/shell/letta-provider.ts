@@ -33,7 +33,7 @@ export class LettaProvider implements AgentProvider {
   }
 
   async createAgent(params: CreateAgentParams): Promise<CreateAgentResult> {
-    const persona = buildPersona(params.repoName, params.description, params.persona);
+    const persona = buildPersona(params.repoName, params.description, params.persona, params.tools);
 
     const agent = await this.client.agents.create({
       name: params.name,

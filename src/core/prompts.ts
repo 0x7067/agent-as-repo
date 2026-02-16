@@ -1,21 +1,37 @@
 const NO_TAGS_WARNING =
   "IMPORTANT: When using archival_memory_search, do NOT pass tags — just use the query parameter.";
 
+const CROSS_AGENT_TOOLS = [
+  "send_message_to_agents_matching_all_tags",
+  "send_message_to_agent_and_wait_for_reply",
+  "send_message_to_agent_async",
+];
+
 export function buildPersona(
   repoName: string,
   description: string,
   customPersona?: string,
+  tools?: string[],
 ): string {
   const base = customPersona
     ? customPersona
     : `I am a codebase expert for the "${repoName}" repository. ${description}.`;
 
-  return [
+  const lines = [
     base,
     "All project source files are stored in my archival memory.",
     "I always search archival memory to answer questions about the codebase.",
     NO_TAGS_WARNING,
-  ].join("\n");
+  ];
+
+  const hasCrossAgent = tools?.some((t) => CROSS_AGENT_TOOLS.includes(t));
+  if (hasCrossAgent) {
+    lines.push(
+      "If a question requires knowledge from another repository, query other repo-expert agents by their tags using send_message_to_agents_matching_all_tags.",
+    );
+  }
+
+  return lines.join("\n");
 }
 
 export function architectureBootstrapPrompt(): string {

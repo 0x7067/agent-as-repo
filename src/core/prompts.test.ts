@@ -19,6 +19,24 @@ describe("buildPersona", () => {
     expect(persona).toContain(custom);
     expect(persona).toContain("do NOT pass tags");
   });
+
+  it("includes cross-repo instruction when cross-agent tools are configured", () => {
+    const persona = buildPersona("my-app", "A mobile app", undefined, [
+      "send_message_to_agents_matching_all_tags",
+    ]);
+    expect(persona).toContain("query other repo-expert agents");
+    expect(persona).toContain("send_message_to_agents_matching_all_tags");
+  });
+
+  it("omits cross-repo instruction when no cross-agent tools configured", () => {
+    const persona = buildPersona("my-app", "A mobile app");
+    expect(persona).not.toContain("query other repo-expert agents");
+  });
+
+  it("omits cross-repo instruction when tools has no messaging tools", () => {
+    const persona = buildPersona("my-app", "A mobile app", undefined, ["some_other_tool"]);
+    expect(persona).not.toContain("query other repo-expert agents");
+  });
 });
 
 describe("bootstrap prompts", () => {
