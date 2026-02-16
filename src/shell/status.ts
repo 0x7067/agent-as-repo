@@ -27,5 +27,6 @@ export async function getAgentStatus(
     blocks: blockStatuses,
     lastBootstrap: agent.lastBootstrap,
     lastSyncCommit: agent.lastSyncCommit,
+    lastSyncAt: agent.lastSyncAt,
   });
 }

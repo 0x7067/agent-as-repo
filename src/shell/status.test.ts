@@ -31,6 +31,7 @@ const testAgent: AgentState = {
   passages: { "src/a.ts": ["p-1"], "src/b.ts": ["p-2"] },
   lastBootstrap: "2026-01-01T00:00:00.000Z",
   lastSyncCommit: "abc1234",
+  lastSyncAt: "2026-01-01T00:00:00.000Z",
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 

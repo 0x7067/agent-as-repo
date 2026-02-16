@@ -11,6 +11,7 @@ export interface AgentStatusData {
   blocks: BlockStatus[];
   lastBootstrap: string | null;
   lastSyncCommit: string | null;
+  lastSyncAt: string | null;
 }
 
 export function formatAgentStatus(data: AgentStatusData): string {
@@ -29,6 +30,7 @@ export function formatAgentStatus(data: AgentStatusData): string {
 
   lines.push(`  last bootstrap: ${data.lastBootstrap ?? "never"}`);
   lines.push(`  last sync: ${data.lastSyncCommit ?? "never"}`);
+  lines.push(`  last sync at: ${data.lastSyncAt ?? "never"}`);
 
   return lines.join("\n");
 }

@@ -26,6 +26,7 @@ export async function createRepoAgent(
     passages: {},
     lastBootstrap: null,
     lastSyncCommit: null,
+    lastSyncAt: null,
     createdAt: new Date().toISOString(),
   };
 }

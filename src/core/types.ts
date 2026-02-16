@@ -51,6 +51,7 @@ export interface AgentState {
   passages: PassageMap;
   lastBootstrap: string | null;
   lastSyncCommit: string | null;
+  lastSyncAt: string | null;
   createdAt: string;
 }
 

@@ -5,13 +5,14 @@ import type { AssistantMessage, LettaResponse } from "@letta-ai/letta-client/res
 import { buildPersona } from "../core/prompts.js";
 import type { AgentProvider, CreateAgentParams, CreateAgentResult, Passage, MemoryBlock } from "./provider.js";
 
+function isHttpStatus(err: unknown, code: number): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const obj = err as Record<string, unknown>;
+  return obj.status === code || obj.statusCode === code;
+}
+
 function isRateLimitError(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "statusCode" in err &&
-    (err as { statusCode: unknown }).statusCode === 429
-  );
+  return isHttpStatus(err, 429);
 }
 
 export class LettaProvider implements AgentProvider {
@@ -56,7 +57,12 @@ export class LettaProvider implements AgentProvider {
   }
 
   async deletePassage(agentId: string, passageId: string): Promise<void> {
-    await this.withRetry(() => this.client.agents.passages.delete(passageId, { agent_id: agentId }));
+    try {
+      await this.withRetry(() => this.client.agents.passages.delete(passageId, { agent_id: agentId }));
+    } catch (err) {
+      if (isHttpStatus(err, 404)) return; // Already deleted — treat as success
+      throw err;
+    }
   }
 
   async listPassages(agentId: string): Promise<Passage[]> {

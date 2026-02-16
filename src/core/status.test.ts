@@ -14,6 +14,7 @@ describe("formatAgentStatus", () => {
       ],
       lastBootstrap: "2026-01-15T10:00:00.000Z",
       lastSyncCommit: "abc1234",
+      lastSyncAt: "2026-01-15T10:05:00.000Z",
     };
 
     const lines = formatAgentStatus(data);
@@ -26,6 +27,7 @@ describe("formatAgentStatus", () => {
     expect(lines).toContain("architecture");
     expect(lines).toContain("3200/5000");
     expect(lines).toContain("abc1234");
+    expect(lines).toContain("2026-01-15T10:05:00.000Z");
   });
 
   it("shows 'never' for null bootstrap and sync", () => {
@@ -36,6 +38,7 @@ describe("formatAgentStatus", () => {
       blocks: [],
       lastBootstrap: null,
       lastSyncCommit: null,
+      lastSyncAt: null,
     };
 
     const lines = formatAgentStatus(data);

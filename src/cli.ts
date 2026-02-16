@@ -19,6 +19,8 @@ import { getAgentStatus } from "./shell/status.js";
 import { exportAgent } from "./shell/export.js";
 import { onboardAgent } from "./shell/onboard.js";
 import { broadcastAsk } from "./shell/group-provider.js";
+import { watchRepos } from "./shell/watch.js";
+import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import type { Config } from "./core/types.js";
 
 const STATE_FILE = ".repo-expert-state.json";
@@ -503,6 +505,59 @@ program
     }
     await saveState(STATE_FILE, newState);
     console.log("Done.");
+  });
+
+program
+  .command("watch")
+  .description("Watch repos and auto-sync on new commits")
+  .option("--repo <name>", "Watch a single repo")
+  .option("--interval <seconds>", "Poll interval in seconds", String(DEFAULT_WATCH_CONFIG.intervalMs / 1000))
+  .option("--config <path>", "Config file path", "config.yaml")
+  .action(async (opts) => {
+    const configPath = path.resolve(opts.config);
+    const config = await loadConfigSafe(configPath);
+    const state = await loadState(STATE_FILE);
+    const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
+
+    if (repoNames.length === 0) {
+      console.error('No agents. Run "repo-expert setup" first.');
+      process.exitCode = 1;
+      return;
+    }
+
+    for (const name of repoNames) {
+      if (!state.agents[name]) {
+        console.error(`No agent found for "${name}". Run "repo-expert setup" first.`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!config.repos[name]) {
+        console.error(`Repo "${name}" not found in config`);
+        process.exitCode = 1;
+        return;
+      }
+    }
+
+    const intervalMs = Math.max(1, parseInt(opts.interval, 10)) * 1000;
+    const provider = createProvider();
+    const ac = new AbortController();
+
+    const shutdown = () => ac.abort();
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+
+    console.log(`Watching ${repoNames.length} repo(s) (every ${intervalMs / 1000}s). Press Ctrl+C to stop.`);
+
+    await watchRepos({
+      provider,
+      config,
+      repoNames,
+      statePath: STATE_FILE,
+      intervalMs,
+      signal: ac.signal,
+    });
+
+    console.log("Watch stopped.");
   });
 
 program.parse();

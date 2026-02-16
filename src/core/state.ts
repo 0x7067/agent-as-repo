@@ -19,6 +19,7 @@ export function addAgentToState(
         passages: {},
         lastBootstrap: null,
         lastSyncCommit: null,
+        lastSyncAt: null,
         createdAt: new Date().toISOString(),
       },
     },
