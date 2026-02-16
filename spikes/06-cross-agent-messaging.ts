@@ -1,11 +1,11 @@
 /**
  * Phase 4 — Spike #6: Cross-Agent Messaging
  *
- * Validates: built-in `send_message_to_agents_matching_all_tags` tool
+ * Validates: built-in `send_message_to_agents_matching_tags` tool
  * works for agent-to-agent communication via tag-based discovery.
  *
  * Creates two agents (Agent A and Agent B), both tagged ["spike-test"].
- * Agent A has `send_message_to_agents_matching_all_tags` tool attached.
+ * Agent A has `send_message_to_agents_matching_tags` tool attached.
  * Sends a message to Agent A asking it to query other agents tagged "spike-test".
  * Measures latency of the cross-agent round-trip.
  *
@@ -44,11 +44,11 @@ async function main() {
       memory_blocks: [
         {
           label: "persona",
-          value: `I am a frontend expert. If I need information about other repositories, I use my send_message_to_agents_matching_all_tags tool with tags ["${tag}"] to ask other agents.`,
+          value: `I am a frontend expert. If I need information about other repositories, I use my send_message_to_agents_matching_tags tool with tags ["${tag}"] to ask other agents.`,
           limit: 5000,
         },
       ],
-      tools: ["send_message_to_agents_matching_all_tags"],
+      tools: ["send_message_to_agents_matching_tags"],
       tags: [tag],
     });
     agentIds.push(agentA.id);
@@ -56,7 +56,7 @@ async function main() {
 
     // 3. Send a cross-repo question to Agent A
     console.log("\n3. Sending cross-repo question to Agent A...");
-    const question = `I need to know about the backend API. Use your send_message_to_agents_matching_all_tags tool with tags ["${tag}"] to ask the other agent: "What is the main API endpoint and how does authentication work?"`;
+    const question = `I need to know about the backend API. Use your send_message_to_agents_matching_tags tool with tags ["${tag}"] to ask the other agent: "What is the main API endpoint and how does authentication work?"`;
 
     const startMs = Date.now();
     const response = await client.agents.messages.create(agentA.id, {
@@ -93,7 +93,7 @@ async function main() {
     console.log(`   Total latency: ${elapsed}ms`);
 
     if (hasToolCall && hasToolReturn) {
-      console.log("\n   PASS: Cross-agent messaging works via send_message_to_agents_matching_all_tags");
+      console.log("\n   PASS: Cross-agent messaging works via send_message_to_agents_matching_tags");
     } else {
       console.log("\n   INCONCLUSIVE: Agent may not have used the cross-agent tool.");
       console.log("   This could mean the LLM chose to answer directly without consulting peers.");

@@ -168,12 +168,12 @@ describe("LettaProvider", () => {
         model: "openai/gpt-4.1",
         embedding: "openai/text-embedding-3-small",
         memoryBlockLimit: 5000,
-        tools: ["send_message_to_agents_matching_all_tags"],
+        tools: ["send_message_to_agents_matching_tags"],
       });
 
       const call: CreateAgentCallArg = client.agents.create.mock.calls[0][0];
       expect(call.tools).toContain("archival_memory_search");
-      expect(call.tools).toContain("send_message_to_agents_matching_all_tags");
+      expect(call.tools).toContain("send_message_to_agents_matching_tags");
     });
 
     it("passes model, embedding, and tags through", async () => {

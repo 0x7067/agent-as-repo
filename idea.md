@@ -59,7 +59,7 @@ repo-expert-agents/
                │          │        │
                └──────────┼────────┘
               Tag-based discovery
-              (send_message_to_agents_matching_all_tags)
+              (send_message_to_agents_matching_tags)
 ```
 
 Letta's three-tier memory maps to codebase knowledge:
@@ -84,13 +84,12 @@ Letta provides three built-in tools for agent-to-agent messaging:
 | Tool | Behavior | Use case |
 |---|---|---|
 | `send_message_to_agent_and_wait_for_reply` | Synchronous, blocking. Returns target's response. | Targeted cross-repo queries |
-| `send_message_to_agent_async` | Fire-and-forget with reply receipt. | Notifications, non-blocking updates |
-| `send_message_to_agents_matching_all_tags` | Broadcasts to all agents matching tags. Returns list of responses. | Cross-repo queries ("which repo handles X?") |
+| `send_message_to_agents_matching_tags` | Broadcasts to all agents matching tags. Returns list of responses. | Cross-repo queries ("which repo handles X?") |
 
 **Important constraints:**
-- Attach only ONE of sync/async tools per agent (attaching both confuses the agent)
 - No built-in timeout on synchronous calls — add application-level timeouts
 - Each sync call = one full LLM inference round-trip (2-10+ seconds per hop)
+- `send_message_to_agent_async` does NOT exist in Letta Cloud (verified via spike)
 
 Primary discovery mechanism: **tag-based**. All agents get `["repo-expert"]` tag plus repo-specific tags (e.g., `["backend", "api"]`). No need to store peer agent IDs in memory blocks.
 
@@ -102,10 +101,9 @@ Primary discovery mechanism: **tag-based**. All agents get `["repo-expert"]` tag
 
 Agents communicate via built-in tools configured in `config.yaml`:
 - `send_message_to_agent_and_wait_for_reply` — synchronous cross-agent query
-- `send_message_to_agent_async` — fire-and-forget messaging
-- `send_message_to_agents_matching_all_tags` — broadcast to tagged agents
+- `send_message_to_agents_matching_tags` — broadcast to tagged agents
 
-Attach only ONE of sync/async per agent (not both). Tag-based discovery via `["repo-expert", ...repoTags]` is preferred.
+Tag-based discovery via `["repo-expert", ...repoTags]` is preferred.
 
 For orchestration patterns (round-robin, supervisor fan-out), see `src/shell/group-provider.ts` which implements client-side coordination on top of `AgentProvider.sendMessage`.
 
@@ -238,7 +236,7 @@ Before building the framework, validate the critical unknowns with a standalone 
 - [x] Multi-agent orchestration: client-side round-robin and supervisor fan-out patterns using `AgentProvider.sendMessage` (Groups API deprecated in v1.0 SDK — replaced with client-side orchestration + built-in messaging tools)
 - [ ] PR review integration: agent comments on PRs via GitHub/GitLab webhooks (uses existing `sendMessage`)
 
-> **Note:** The Letta Groups API (DynamicManager, SleeptimeManager, etc.) is deprecated in the v1.0 SDK and absent from `@letta-ai/letta-client`. Multi-agent coordination uses built-in messaging tools (`send_message_to_agent_and_wait_for_reply`, `send_message_to_agents_matching_all_tags`) configured via `tools` in config.yaml, plus client-side orchestration in `src/shell/group-provider.ts`.
+> **Note:** The Letta Groups API (DynamicManager, SleeptimeManager, etc.) is deprecated in the v1.0 SDK and absent from `@letta-ai/letta-client`. Multi-agent coordination uses built-in messaging tools (`send_message_to_agent_and_wait_for_reply`, `send_message_to_agents_matching_tags`) configured via `tools` in config.yaml, plus client-side orchestration in `src/shell/group-provider.ts`.
 
 ## Technical Decisions & Constraints
 
@@ -255,7 +253,7 @@ Before building the framework, validate the critical unknowns with a standalone 
 - Future: tree-sitter AST chunking for better retrieval (Phase 3)
 
 **Cross-agent communication**
-- Primary: `send_message_to_agents_matching_all_tags` (tag-based discovery, no IDs needed)
+- Primary: `send_message_to_agents_matching_tags` (tag-based discovery, no IDs needed)
 - Fallback: `send_message_to_agent_and_wait_for_reply` (when targeting a specific known agent)
 - Only attach ONE of sync/async tools per agent
 - Application-level timeouts on all cross-agent calls
@@ -290,7 +288,7 @@ const agent = await client.agents.create({
     { label: "architecture", value: "Not yet analyzed.", limit: 5000 },
     { label: "conventions", value: "Not yet analyzed.", limit: 5000 },
   ],
-  tools: ["send_message_to_agents_matching_all_tags"],
+  tools: ["send_message_to_agents_matching_tags"],
 });
 
 // Load files into archival memory (passages)

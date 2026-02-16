@@ -22,10 +22,10 @@ describe("buildPersona", () => {
 
   it("includes cross-repo instruction when cross-agent tools are configured", () => {
     const persona = buildPersona("my-app", "A mobile app", undefined, [
-      "send_message_to_agents_matching_all_tags",
+      "send_message_to_agents_matching_tags",
     ]);
     expect(persona).toContain("query other repo-expert agents");
-    expect(persona).toContain("send_message_to_agents_matching_all_tags");
+    expect(persona).toContain("send_message_to_agents_matching_tags");
   });
 
   it("omits cross-repo instruction when no cross-agent tools configured", () => {

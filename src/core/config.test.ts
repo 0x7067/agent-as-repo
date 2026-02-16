@@ -99,12 +99,12 @@ describe("parseConfig", () => {
       repos: {
         "my-app": {
           ...validRaw.repos["my-app"],
-          tools: ["send_message_to_agents_matching_all_tags"],
+          tools: ["send_message_to_agents_matching_tags"],
         },
       },
     };
     const config = parseConfig(raw);
-    expect(config.repos["my-app"].tools).toEqual(["send_message_to_agents_matching_all_tags"]);
+    expect(config.repos["my-app"].tools).toEqual(["send_message_to_agents_matching_tags"]);
   });
 
   it("leaves tools undefined when omitted", () => {
@@ -134,16 +134,16 @@ describe("parseConfig", () => {
   it("applies defaults.tools to repos without per-repo tools", () => {
     const raw = {
       ...validRaw,
-      defaults: { tools: ["send_message_to_agents_matching_all_tags"] },
+      defaults: { tools: ["send_message_to_agents_matching_tags"] },
     };
     const config = parseConfig(raw);
-    expect(config.repos["my-app"].tools).toEqual(["send_message_to_agents_matching_all_tags"]);
+    expect(config.repos["my-app"].tools).toEqual(["send_message_to_agents_matching_tags"]);
   });
 
   it("per-repo tools override defaults.tools", () => {
     const raw = {
       ...validRaw,
-      defaults: { tools: ["send_message_to_agents_matching_all_tags"] },
+      defaults: { tools: ["send_message_to_agents_matching_tags"] },
       repos: {
         "my-app": {
           ...validRaw.repos["my-app"],

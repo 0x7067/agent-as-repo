@@ -52,8 +52,9 @@ However, 3,000 characters per block is **very tight** for meaningful codebase su
 **Finding:** All three claimed mechanisms are confirmed as real built-in Letta tools:
 
 - `send_message_to_agent_and_wait_for_reply(message, other_agent_id)` — synchronous, blocking
-- `send_message_to_agent_async(message, other_agent_id)` — fire-and-forget with reply receipt
-- `send_message_to_agents_matching_all_tags(message, tags[])` — tag-based broadcast
+- `send_message_to_agents_matching_tags(message, tags[])` — tag-based broadcast
+
+> **Note:** `send_message_to_agent_async` does NOT exist in Letta Cloud (verified via spike).
 
 Additionally, Letta now has a **Groups API** with four orchestration patterns (Supervisor-Worker, Dynamic Orchestrator, Sleeptime, Round-Robin) that is more powerful than the spec acknowledges. The tag-based broadcast tool means agents can discover peers by tags **without needing stored agent IDs**.
 
@@ -61,7 +62,7 @@ Critical caveats: (a) Letta docs recommend attaching only ONE of sync/async tool
 
 **Verdict: CONFIRMED**
 
-**Recommendation:** Use `send_message_to_agents_matching_all_tags` as the primary cross-agent mechanism (eliminates the need to store peer agent IDs in memory blocks). For Phase 4's "smart routing," use the Groups API's `DynamicManager` pattern instead of building a custom orchestrator. Add application-level timeouts around the REST API calls to handle stuck agents.
+**Recommendation:** Use `send_message_to_agents_matching_tags` as the primary cross-agent mechanism (eliminates the need to store peer agent IDs in memory blocks). For Phase 4's "smart routing," use the Groups API's `DynamicManager` pattern instead of building a custom orchestrator. Add application-level timeouts around the REST API calls to handle stuck agents.
 
 ---
 
@@ -107,7 +108,7 @@ The unique value proposition of this project is: **persistent, self-updating mem
 | 2 | **Archival memory retrieval quality** — Dumping raw source files into vector search may produce poor retrieval results (irrelevant matches, missed relevant files) due to naive chunking | High | High | Adopt Aider's repo-map technique: use tree-sitter to extract symbol definitions and call relationships, embed those summaries instead of (or alongside) raw files. This dramatically improves retrieval relevance. |
 | 3 | **Ingestion speed at scale** — Loading a large repo (5K+ files) takes 10-30 minutes via sequential API calls, making setup and full re-sync painfully slow | Medium | High | Batch insertions with concurrency (test how many parallel `passages.create` calls Letta tolerates). Consider loading only files matching a relevance heuristic (recently changed, imported frequently) rather than all files. |
 | 4 | **Letta Cloud cost/availability** — No published pricing means costs could be unsustainable at scale, and the service could have downtime or rate limiting that blocks usage | Medium | High | Design the framework to be Letta-agnostic at the interface level — use an adapter pattern so the agent backend could be swapped for a local RAG approach if Letta Cloud becomes untenable. |
-| 5 | **Cross-agent latency compounding** — A query that triggers cross-repo communication could take 30+ seconds (each hop = LLM inference time), making the CLI feel unresponsive | Medium | Medium | Default to querying a single agent. Only invoke cross-agent communication when the user explicitly asks (e.g., `--all` flag). Use `send_message_to_agent_async` + polling instead of synchronous blocking where possible. |
+| 5 | **Cross-agent latency compounding** — A query that triggers cross-repo communication could take 30+ seconds (each hop = LLM inference time), making the CLI feel unresponsive | Medium | Medium | Default to querying a single agent. Only invoke cross-agent communication when the user explicitly asks (e.g., `--all` flag). Use client-side `broadcastAsk` with per-agent timeouts instead of synchronous blocking where possible. |
 
 ---
 
@@ -122,7 +123,7 @@ The project is **feasible but needs corrections before coding begins**. The core
 
 **What should change before writing code:**
 - Fix all SDK references to match actual `LettaClient` API (camelCase, `passages` not `archival_memory`, `token` not `apiKey`)
-- Replace the "store peer agent IDs in memory blocks" design with tag-based discovery (`send_message_to_agents_matching_all_tags`)
+- Replace the "store peer agent IDs in memory blocks" design with tag-based discovery (`send_message_to_agents_matching_tags`)
 - Use the Groups API for orchestration patterns instead of building custom routing
 - Add a passage-to-file-path mapping in the state file for incremental sync
 - Reduce core memory blocks from 5 to 3-4 with higher character limits

@@ -6,9 +6,8 @@
  *
  *   1. **Built-in messaging tools** (already supported via `tools` config):
  *      - `send_message_to_agent_and_wait_for_reply` — synchronous cross-agent query
- *      - `send_message_to_agent_async` — fire-and-forget messaging
- *      - `send_message_to_agents_matching_all_tags` — broadcast to tagged agents
- *      Attach ONE of sync/async per agent (not both). Tag-based discovery is preferred.
+ *      - `send_message_to_agents_matching_tags` — broadcast to tagged agents
+ *      Tag-based discovery is preferred.
  *
  *   2. **Client-side orchestration** — application code manages turn-taking,
  *      routing, and aggregation using the existing `AgentProvider.sendMessage`.
