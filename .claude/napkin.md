@@ -11,6 +11,7 @@
 | 2026-02-16 | audit | `mcp-server.ts` ran `main()` at import time, breaking test imports | Guard entry points: `if (process.argv[1] === fileURLToPath(import.meta.url))` |
 | 2026-02-17 | self | Started repository exploration before reading `.claude/napkin.md` | Read napkin first at session start, then begin codebase/tool work |
 | 2026-02-17 | self | CLI integration tests tried to execute `src/cli.ts` relative to temp CWD, causing module-not-found failures | Use an absolute entry path when spawning CLI processes from temp directories |
+| 2026-02-17 | self | `rg` pattern beginning with `--` was parsed as command flags and broke a verification grep | Use `rg -n -- \"pattern\" file` when the search pattern may begin with hyphens |
 
 ## User Preferences
 - Use `/platform-cli` skill for CLI design

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { loadState, saveState } from "./state-store.js";
 import { createEmptyState, addAgentToState } from "../core/state.js";
 import * as fs from "fs/promises";
@@ -47,19 +47,16 @@ describe("state store", () => {
     });
   });
 
-  it("returns empty state for corrupted JSON", async () => {
+  it("throws actionable error for corrupted JSON", async () => {
     await withTempDir(async (dir) => {
       const filePath = path.join(dir, "state.json");
       await fs.writeFile(filePath, "not valid json {{{{", "utf-8");
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const state = await loadState(filePath);
-      expect(state.agents).toEqual({});
-      expect(warnSpy).toHaveBeenCalledOnce();
-      warnSpy.mockRestore();
+      await expect(loadState(filePath)).rejects.toThrow("Invalid state file");
+      await expect(loadState(filePath)).rejects.toThrow(filePath);
     });
   });
 
-  it("returns empty state for invalid schema", async () => {
+  it("throws actionable error for invalid schema", async () => {
     await withTempDir(async (dir) => {
       const filePath = path.join(dir, "state.json");
       await fs.writeFile(
@@ -67,11 +64,8 @@ describe("state store", () => {
         JSON.stringify({ agents: { repo: { agentId: 123 } } }),
         "utf-8",
       );
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const state = await loadState(filePath);
-      expect(state.agents).toEqual({});
-      expect(warnSpy).toHaveBeenCalledOnce();
-      warnSpy.mockRestore();
+      await expect(loadState(filePath)).rejects.toThrow("Invalid state file");
+      await expect(loadState(filePath)).rejects.toThrow("remove or fix it");
     });
   });
 
@@ -93,6 +87,26 @@ describe("state store", () => {
       expect(loaded.agents["my-app"].lastBootstrap).toBeNull();
       expect(loaded.agents["my-app"].lastSyncCommit).toBeNull();
       expect(loaded.agents["my-app"].lastSyncAt).toBeNull();
+    });
+  });
+
+  it("saves state atomically without temp-file residue", async () => {
+    await withTempDir(async (dir) => {
+      const filePath = path.join(dir, "state.json");
+      let state = createEmptyState();
+      state = addAgentToState(state, "my-app", "agent-123", "2026-01-01T00:00:00.000Z");
+
+      await saveState(filePath, state);
+      const content = await fs.readFile(filePath, "utf-8");
+      expect(JSON.parse(content)).toMatchObject({
+        agents: {
+          "my-app": { agentId: "agent-123" },
+        },
+      });
+
+      const files = await fs.readdir(dir);
+      const tempFiles = files.filter((name) => name.startsWith(".state.json.tmp."));
+      expect(tempFiles).toEqual([]);
     });
   });
 });

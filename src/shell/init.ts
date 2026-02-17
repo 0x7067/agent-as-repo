@@ -98,12 +98,26 @@ export async function runInit(rl: readline.Interface): Promise<InitResult> {
     throw err;
   }
 
+  try {
+    await fs.access(path.join(resolvedPath, ".git"));
+  } catch {
+    console.error(`Not a git repository: ${resolvedPath}`);
+    process.exitCode = 1;
+    throw new Error("Not a git repository");
+  }
+
   // 3. Scan and detect
   console.log("\nScanning files...");
   const files = await scanFilePaths(resolvedPath);
   const extensions = detectExtensions(files);
   const ignoreDirs = suggestIgnoreDirs(files);
   const repoName = detectRepoName(resolvedPath);
+
+  if (extensions.length === 0) {
+    console.error("No code files detected for indexing (no supported extensions found).");
+    process.exitCode = 1;
+    throw new Error("No code files detected");
+  }
 
   console.log(`  Found ${files.length} files`);
   console.log(`  Detected extensions: ${extensions.join(", ") || "(none)"}`);

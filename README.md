@@ -16,6 +16,9 @@ Unlike IDE tools that forget between sessions, these agents accumulate knowledge
 pnpm install
 pnpm repo-expert init    # guided setup: API key + repo config
 pnpm repo-expert setup   # create agents
+pnpm repo-expert doctor  # verify API/config/state/git health
+pnpm repo-expert onboard my-app
+pnpm repo-expert ask my-app "How does authentication work?"
 ```
 
 ## Manual Setup

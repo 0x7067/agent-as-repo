@@ -138,4 +138,17 @@ describe("cli contract", () => {
     expect(result.stderr).not.toContain("SyntaxError:");
     expect(result.stderr).not.toContain("at Command.");
   });
+
+  it("shows actionable error when state file is malformed", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-state-malformed-");
+    await fs.writeFile(path.join(cwd, ".repo-expert-state.json"), "{ invalid json", "utf-8");
+
+    const result = runCli(["list"], cwd);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Invalid state file");
+    expect(result.stderr).toContain(".repo-expert-state.json");
+    expect(result.stderr).toContain("remove or fix it");
+    expect(result.stderr).not.toContain("Unexpected error");
+  });
 });

@@ -12,7 +12,7 @@ import { runAllChecks } from "./shell/doctor.js";
 import { formatDoctorReport } from "./core/doctor.js";
 import { ConfigError, formatConfigError } from "./core/config.js";
 import { collectFiles } from "./shell/file-collector.js";
-import { loadState, saveState } from "./shell/state-store.js";
+import { StateFileError, loadState, saveState } from "./shell/state-store.js";
 import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
 import { bootstrapAgent } from "./shell/bootstrap.js";
 import { LettaProvider } from "./shell/letta-provider.js";
@@ -28,6 +28,7 @@ import { watchRepos } from "./shell/watch.js";
 import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
 import { generateMcpEntry, checkMcpEntry } from "./core/mcp-config.js";
+import { buildPostSetupNextSteps, getSetupMode } from "./core/setup.js";
 import type { AgentState, AppState, Config } from "./core/types.js";
 
 interface SetupOpts {
@@ -245,45 +246,68 @@ program
         return;
       }
 
-      if (state.agents[repoName]) {
-        console.log(`Agent for "${repoName}" already exists (${state.agents[repoName].agentId}), skipping`);
+      const existingAgent = state.agents[repoName];
+      const mode = getSetupMode(existingAgent, repoConfig.bootstrapOnCreate);
+
+      if (mode === "skip") {
+        console.log(`Agent for "${repoName}" already exists (${existingAgent!.agentId}), skipping`);
         continue;
       }
 
       console.log(`Setting up "${repoName}"...`);
 
-      const agentState = await createRepoAgent(provider, repoName, repoConfig, config.letta);
-      console.log(`  Agent created: ${agentState.agentId}`);
-      state = addAgentToState(state, repoName, agentState.agentId, new Date().toISOString());
+      let agentId: string;
+      if (mode === "create") {
+        const agentState = await createRepoAgent(provider, repoName, repoConfig, config.letta);
+        agentId = agentState.agentId;
+        console.log(`  Agent created: ${agentId}`);
+        state = addAgentToState(state, repoName, agentId, new Date().toISOString());
+        await saveState(STATE_FILE, state);
+      } else {
+        agentId = existingAgent!.agentId;
+        if (mode === "resume_bootstrap") {
+          console.log(`  Resuming bootstrap for existing agent (${agentId})...`);
+        } else {
+          console.log(`  Resuming indexing for existing agent (${agentId})...`);
+        }
+      }
 
-      console.log(`  Collecting files from ${repoConfig.path}...`);
-      const files = await collectFiles(repoConfig);
-      console.log(`  Found ${files.length} files`);
+      if (mode === "create" || mode === "resume_full") {
+        console.log(`  Collecting files from ${repoConfig.path}...`);
+        const files = await collectFiles(repoConfig);
+        console.log(`  Found ${files.length} files`);
 
-      const chunks = files.flatMap((f) => rawTextStrategy(f));
-      console.log(`  Loading ${chunks.length} passages...`);
-      const passageMap = await loadPassages(provider, agentState.agentId, chunks, 20, printProgress);
-      if (chunks.length > 0) process.stdout.write("\n");
-      state = updatePassageMap(state, repoName, passageMap);
+        const chunks = files.flatMap((f) => rawTextStrategy(f));
+        console.log(`  Loading ${chunks.length} passages...`);
+        const passageMap = await loadPassages(provider, agentId, chunks, 20, printProgress);
+        if (chunks.length > 0) process.stdout.write("\n");
+        state = updatePassageMap(state, repoName, passageMap);
+        await saveState(STATE_FILE, state);
+      }
 
       // Store HEAD commit so incremental sync works immediately
       const headCommit = gitHeadCommit(repoConfig.path);
       if (headCommit) {
         state = updateAgentField(state, repoName, { lastSyncCommit: headCommit });
+        await saveState(STATE_FILE, state);
       }
 
-      if (repoConfig.bootstrapOnCreate) {
+      if (repoConfig.bootstrapOnCreate && (mode === "create" || mode === "resume_full" || mode === "resume_bootstrap")) {
         console.log(`  Bootstrapping...`);
-        await bootstrapAgent(provider, agentState.agentId);
+        await bootstrapAgent(provider, agentId);
         state = updateAgentField(state, repoName, { lastBootstrap: new Date().toISOString() });
+        await saveState(STATE_FILE, state);
         console.log(`  Bootstrap complete`);
       }
 
-      await saveState(STATE_FILE, state);
       console.log(`  Done: "${repoName}"`);
     }
 
     console.log("Setup complete.");
+    const exampleRepoName = repoNames[0] ?? "my-repo";
+    for (const line of buildPostSetupNextSteps(exampleRepoName)) {
+      console.log(line);
+    }
   });
 
 program
@@ -910,9 +934,9 @@ async function main(argv = process.argv): Promise<void> {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
-    if (err instanceof CliUserError) {
+    if (err instanceof CliUserError || err instanceof StateFileError) {
       console.error(err.message);
-      process.exitCode = err.exitCode;
+      process.exitCode = err instanceof CliUserError ? err.exitCode : 1;
       return;
     }
     const message = err instanceof Error ? err.message : String(err);
