@@ -21,6 +21,8 @@ import { onboardAgent } from "./shell/onboard.js";
 import { broadcastAsk } from "./shell/group-provider.js";
 import { watchRepos } from "./shell/watch.js";
 import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
+import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
+import { generateMcpEntry, checkMcpEntry } from "./core/mcp-config.js";
 import type { AgentState, AppState, Config } from "./core/types.js";
 
 interface SetupOpts {
@@ -52,6 +54,11 @@ interface DestroyOpts {
 
 interface WatchOpts {
   repo?: string;
+  interval: string;
+  config: string;
+}
+
+interface InstallDaemonOpts {
   interval: string;
   config: string;
 }
@@ -559,6 +566,176 @@ program
     });
 
     console.log("Watch stopped.");
+  });
+
+program
+  .command("install-daemon")
+  .description("Install launchd daemon for auto-sync on macOS")
+  .option("--interval <seconds>", "Poll interval in seconds", "30")
+  .option("--config <path>", "Config file path", "config.yaml")
+  .action(async (opts: InstallDaemonOpts) => {
+    if (process.platform !== "darwin") {
+      console.error("install-daemon is only supported on macOS (launchd).");
+      process.exitCode = 1;
+      return;
+    }
+
+    const fs = await import("fs/promises");
+    const os = await import("os");
+    const home = os.default.homedir();
+
+    // Resolve pnpm: prefer mise shims (stable across node versions), fallback to which
+    const shimPath = path.join(home, ".local/share/mise/shims/pnpm");
+    let pnpmPath: string;
+    try {
+      await fs.access(shimPath);
+      pnpmPath = shimPath;
+    } catch {
+      try {
+        pnpmPath = execFileSync("which", ["pnpm"], { encoding: "utf-8" }).trim();
+      } catch {
+        console.error("Cannot find pnpm. Install it and try again.");
+        process.exitCode = 1;
+        return;
+      }
+    }
+
+    const plistPath = path.join(home, "Library/LaunchAgents", `${PLIST_LABEL}.plist`);
+    const logPath = path.join(home, "Library/Logs/repo-expert-watch.log");
+
+    const plist = generatePlist({
+      workingDirectory: process.cwd(),
+      pnpmPath,
+      intervalSeconds: parseIntOrDefault(opts.interval, 30),
+      configPath: opts.config,
+      logPath,
+    });
+
+    // Unload existing daemon if present
+    try {
+      execFileSync("launchctl", ["unload", plistPath], { stdio: "pipe" });
+    } catch {
+      // Not loaded — fine
+    }
+
+    await fs.mkdir(path.dirname(plistPath), { recursive: true });
+    await fs.writeFile(plistPath, plist, "utf-8");
+    console.log(`Plist written: ${plistPath}`);
+
+    execFileSync("launchctl", ["load", plistPath]);
+    console.log("Daemon loaded. Watch is running.");
+    console.log(`  Logs: ${logPath}`);
+    console.log(`  Stop: repo-expert uninstall-daemon`);
+  });
+
+program
+  .command("uninstall-daemon")
+  .description("Uninstall the launchd watch daemon")
+  .action(async () => {
+    if (process.platform !== "darwin") {
+      console.error("uninstall-daemon is only supported on macOS (launchd).");
+      process.exitCode = 1;
+      return;
+    }
+
+    const os = await import("os");
+    const fs = await import("fs/promises");
+    const home = os.default.homedir();
+    const plistPath = path.join(home, "Library/LaunchAgents", `${PLIST_LABEL}.plist`);
+
+    try {
+      execFileSync("launchctl", ["unload", plistPath], { stdio: "pipe" });
+      console.log("Daemon unloaded.");
+    } catch {
+      console.log("Daemon was not loaded.");
+    }
+
+    try {
+      await fs.unlink(plistPath);
+      console.log(`Removed ${plistPath}`);
+    } catch {
+      console.log("Plist file was already removed.");
+    }
+  });
+
+interface McpInstallOpts {
+  global?: boolean;
+  baseUrl: string;
+}
+
+program
+  .command("mcp-install")
+  .description("Add Letta MCP server entry to Claude Code config")
+  .option("--global", "Write to global ~/.claude.json (default)", true)
+  .option("--base-url <url>", "Letta base URL", "https://api.letta.com")
+  .action(async (opts: McpInstallOpts) => {
+    requireApiKey();
+
+    const fs = await import("fs/promises");
+    const os = await import("os");
+    const home = os.default.homedir();
+    const mcpServerPath = path.resolve("src/mcp-server.ts");
+    const configFile = path.join(home, ".claude.json");
+
+    let config: Record<string, unknown> = {};
+    try {
+      const raw = await fs.readFile(configFile, "utf-8");
+      config = JSON.parse(raw) as Record<string, unknown>;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+
+    const mcpServers = (config.mcpServers ?? {}) as Record<string, unknown>;
+    if (mcpServers.letta) {
+      console.log("Existing 'letta' entry found — overwriting.");
+    }
+
+    const entry = generateMcpEntry(mcpServerPath, process.env.LETTA_API_KEY!, opts.baseUrl);
+    mcpServers.letta = entry;
+    config.mcpServers = mcpServers;
+
+    await fs.writeFile(configFile, JSON.stringify(config, null, 2) + "\n", "utf-8");
+    console.log(`MCP entry written to ${configFile}`);
+    console.log("Restart Claude Code to pick up the change.");
+  });
+
+program
+  .command("mcp-check")
+  .description("Validate existing MCP server entry in Claude Code config")
+  .action(async () => {
+    const fs = await import("fs/promises");
+    const os = await import("os");
+    const home = os.default.homedir();
+    const mcpServerPath = path.resolve("src/mcp-server.ts");
+    const configFile = path.join(home, ".claude.json");
+
+    let config: Record<string, unknown> = {};
+    try {
+      const raw = await fs.readFile(configFile, "utf-8");
+      config = JSON.parse(raw) as Record<string, unknown>;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        console.error(`Config file not found: ${configFile}`);
+        process.exitCode = 1;
+        return;
+      }
+      throw err;
+    }
+
+    const mcpServers = (config.mcpServers ?? {}) as Record<string, unknown>;
+    const entry = mcpServers.letta as Parameters<typeof checkMcpEntry>[0];
+    const result = checkMcpEntry(entry, mcpServerPath);
+
+    if (result.ok) {
+      console.log("MCP config looks good.");
+    } else {
+      console.error("Issues found:");
+      for (const issue of result.issues) {
+        console.error(`  - ${issue}`);
+      }
+      console.error('\nRun "repo-expert mcp-install" to fix.');
+      process.exitCode = 1;
+    }
   });
 
 program.parse();
