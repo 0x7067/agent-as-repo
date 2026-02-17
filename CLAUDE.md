@@ -36,6 +36,10 @@ Global `~/.claude/CLAUDE.md` applies (think before coding, simplicity, surgical 
 - Never override Letta system prompt — use `persona` block for agent instructions
 - State persistence: `.repo-expert-state.json` (gitignored)
 - API key: `LETTA_API_KEY` in `.env`
+- Shell commands: always `execFileSync` with arg arrays, never `execSync` with template literals
+- Any code path producing a file list must filter through `shouldIncludeFile` (extensions, ignoreDirs)
+- Guard entry-point `main()` calls: `if (process.argv[1] === fileURLToPath(import.meta.url))`
+- `Promise.race` with `setTimeout`: always store timer ID and `clearTimeout` in `finally`
 
 ## Key Files
 
