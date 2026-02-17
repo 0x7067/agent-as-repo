@@ -1,5 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
+import { randomUUID } from "crypto";
 import { z } from "zod/v4";
 import { STATE_SCHEMA_VERSION, createEmptyState } from "../core/state.js";
 import type { AppState } from "../core/types.js";
@@ -61,6 +62,35 @@ async function backupInvalidState(filePath: string): Promise<string | null> {
   }
 }
 
+function isTransientRenameError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  if (!("code" in err)) return false;
+  const code = String(err.code);
+  return code === "EBUSY" || code === "EPERM" || code === "EACCES";
+}
+
+type RenameFn = (fromPath: string, toPath: string) => Promise<void>;
+let renameFn: RenameFn = (fromPath, toPath) => fs.rename(fromPath, toPath);
+
+export function setRenameFnForTests(next: RenameFn | null): void {
+  renameFn = next ?? ((fromPath, toPath) => fs.rename(fromPath, toPath));
+}
+
+async function renameWithRetry(tempPath: string, filePath: string, retries = 3): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      await renameFn(tempPath, filePath);
+      return;
+    } catch (err) {
+      lastError = err;
+      if (!isTransientRenameError(err) || attempt === retries) break;
+      await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
 export async function loadState(filePath: string): Promise<AppState> {
   try {
     const content = await fs.readFile(filePath, "utf-8");
@@ -96,12 +126,12 @@ export async function loadState(filePath: string): Promise<AppState> {
 export async function saveState(filePath: string, state: AppState): Promise<void> {
   const dir = path.dirname(filePath);
   const base = path.basename(filePath);
-  const tempPath = path.join(dir, `.${base}.tmp.${process.pid}.${Date.now()}`);
+  const tempPath = path.join(dir, `.${base}.tmp.${process.pid}.${Date.now()}.${randomUUID()}`);
   const toPersist: AppState = {
     ...state,
     stateVersion: STATE_SCHEMA_VERSION,
   };
 
   await fs.writeFile(tempPath, JSON.stringify(toPersist, null, 2), "utf-8");
-  await fs.rename(tempPath, filePath);
+  await renameWithRetry(tempPath, filePath);
 }

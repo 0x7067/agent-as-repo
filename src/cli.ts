@@ -9,6 +9,8 @@ import { execFileSync } from "child_process";
 import { loadConfig } from "./shell/config-loader.js";
 import { runInit } from "./shell/init.js";
 import { runAllChecks, runDoctorFixes } from "./shell/doctor.js";
+import { formatSelfChecks, runSelfChecks } from "./shell/self-check.js";
+import { completionFileName, generateCompletionScript, type CompletionShell } from "./core/completion.js";
 import { formatDoctorReport } from "./core/doctor.js";
 import { ConfigError, formatConfigError } from "./core/config.js";
 import { collectFiles } from "./shell/file-collector.js";
@@ -26,6 +28,7 @@ import { exportAgent } from "./shell/export.js";
 import { onboardAgent } from "./shell/onboard.js";
 import { broadcastAsk } from "./shell/group-provider.js";
 import { watchRepos } from "./shell/watch.js";
+import { beginCommandTelemetry, endCommandTelemetry, recordCommandRetry } from "./shell/telemetry.js";
 import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
 import { generateMcpEntry, checkMcpEntry } from "./core/mcp-config.js";
@@ -59,6 +62,10 @@ interface DoctorOpts {
   config: string;
   json?: boolean;
   fix?: boolean;
+}
+
+interface SelfCheckOpts {
+  json?: boolean;
 }
 
 interface AskOpts {
@@ -96,6 +103,11 @@ interface WatchOpts {
 interface InstallDaemonOpts {
   interval: string;
   config: string;
+}
+
+interface ConfigLintOpts {
+  config: string;
+  json?: boolean;
 }
 
 const STATE_FILE = ".repo-expert-state.json";
@@ -146,6 +158,10 @@ class FakeProvider implements AgentProvider {
   }
 
   async storePassage(agentId: string, text: string): Promise<string> {
+    const delayMs = parseInt(process.env.REPO_EXPERT_TEST_DELAY_STORE_MS ?? "0", 10);
+    if (!Number.isNaN(delayMs) && delayMs > 0) {
+      await delay(delayMs);
+    }
     if (process.env.REPO_EXPERT_TEST_FAIL_LOAD_ONCE === "1") {
       process.env.REPO_EXPERT_TEST_FAIL_LOAD_ONCE = "0";
       throw new Error("simulated load failure");
@@ -170,6 +186,10 @@ class FakeProvider implements AgentProvider {
   }
 
   async sendMessage(_agentId: string, _content: string): Promise<string> {
+    const delayMs = parseInt(process.env.REPO_EXPERT_TEST_DELAY_BOOTSTRAP_MS ?? "0", 10);
+    if (!Number.isNaN(delayMs) && delayMs > 0) {
+      await delay(delayMs);
+    }
     if (process.env.REPO_EXPERT_TEST_FAIL_BOOTSTRAP_ONCE === "1") {
       process.env.REPO_EXPERT_TEST_FAIL_BOOTSTRAP_ONCE = "0";
       throw new Error("simulated bootstrap failure");
@@ -268,6 +288,7 @@ async function withRetry<T>(
       lastErr = err;
       if (attempt === retries) break;
       const waitMs = 500 * Math.pow(2, attempt);
+      recordCommandRetry();
       onRetry(`  ${label} failed (attempt ${attempt + 1}/${retries + 1}): ${(err as Error).message}. Retrying in ${waitMs}ms...`);
       await delay(waitMs);
     }
@@ -296,6 +317,12 @@ function readDebugEnabled(argv: string[]): boolean {
 const program = new Command();
 program.name("repo-expert").description("Persistent AI agents for git repositories").version("0.1.0");
 program.option("--no-input", "Disable interactive prompts").option("--debug", "Show stack traces for unexpected errors");
+program.hook("preAction", (_thisCommand, actionCommand) => {
+  beginCommandTelemetry(actionCommand.name());
+});
+program.hook("postAction", () => {
+  endCommandTelemetry(process.exitCode && process.exitCode !== 0 ? "error" : "ok");
+});
 program.addHelpText(
   "after",
   [
@@ -359,6 +386,20 @@ program
     }
     const hasFailures = results.some((r) => r.status === "fail");
     if (hasFailures) process.exitCode = 1;
+  });
+
+program
+  .command("self-check")
+  .description("Check local runtime/toolchain health (Node, pnpm, dependencies)")
+  .option("--json", "Output checks as JSON")
+  .action(async (opts: SelfCheckOpts) => {
+    const results = await runSelfChecks(process.cwd());
+    if (opts.json) {
+      console.log(JSON.stringify(results, null, 2));
+    } else {
+      console.log(formatSelfChecks(results));
+    }
+    if (results.some((r) => r.status === "fail")) process.exitCode = 1;
   });
 
 program
@@ -535,6 +576,39 @@ program
       for (const line of buildPostSetupNextSteps(exampleRepoName)) {
         console.log(line);
       }
+    }
+  });
+
+const configCommand = program.command("config").description("Configuration helpers");
+
+configCommand
+  .command("lint")
+  .description("Validate config.yaml structure and semantics")
+  .option("--config <path>", "Config file path", "config.yaml")
+  .option("--json", "Output lint report as JSON")
+  .action(async (opts: ConfigLintOpts) => {
+    const configPath = path.resolve(opts.config);
+    try {
+      const config = await loadConfigSafe(configPath);
+      const summary = {
+        ok: true,
+        configPath,
+        repoCount: Object.keys(config.repos).length,
+        repos: Object.keys(config.repos),
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(summary, null, 2));
+      } else {
+        console.log(`Config OK: ${summary.repoCount} repo(s) in ${configPath}`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (opts.json) {
+        console.log(JSON.stringify({ ok: false, configPath, issues: [message] }, null, 2));
+      } else {
+        console.error(message);
+      }
+      process.exitCode = 1;
     }
   });
 
@@ -1112,6 +1186,10 @@ interface McpCheckOpts {
   json?: boolean;
 }
 
+interface CompletionOpts {
+  installDir?: string;
+}
+
 program
   .command("mcp-install")
   .description("Add Letta MCP server entry to Claude Code config")
@@ -1211,12 +1289,43 @@ program
     }
   });
 
+program
+  .command("completion <shell>")
+  .description("Print shell completion script (bash, zsh, fish)")
+  .option("--install-dir <path>", "Write script to directory instead of stdout")
+  .action(async (shell: string, opts: CompletionOpts) => {
+    if (shell !== "bash" && shell !== "zsh" && shell !== "fish") {
+      console.error(`Unsupported shell "${shell}". Use one of: bash, zsh, fish.`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const selectedShell = shell as CompletionShell;
+    const script = generateCompletionScript(selectedShell, "repo-expert");
+
+    if (!opts.installDir) {
+      process.stdout.write(script);
+      return;
+    }
+
+    const fs = await import("fs/promises");
+    const installDir = path.resolve(opts.installDir);
+    const fileName = completionFileName(selectedShell, "repo-expert");
+    const targetPath = path.join(installDir, fileName);
+
+    await fs.mkdir(installDir, { recursive: true });
+    await fs.writeFile(targetPath, script, "utf-8");
+    console.log(`Completion script written to ${targetPath}`);
+  });
+
 async function main(argv = process.argv): Promise<void> {
   await program.parseAsync(argv);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
+    const errorClass = err instanceof Error ? err.name : "UnknownError";
+    endCommandTelemetry("error", errorClass);
     if (err instanceof CliUserError || err instanceof StateFileError) {
       console.error(err.message);
       process.exitCode = err instanceof CliUserError ? err.exitCode : 1;

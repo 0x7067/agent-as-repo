@@ -8,6 +8,10 @@
     "letta-tools": "./src/mcp-server.ts"
   },
   "scripts": {
+    "build": "tsx scripts/build.ts",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "changeset publish",
     "test": "vitest run",
     "repo-expert": "tsx src/cli.ts",
     "mcp-server": "tsx src/mcp-server.ts"
@@ -27,8 +31,10 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.29.6",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.2.3",
+    "esbuild": "^0.27.3",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"

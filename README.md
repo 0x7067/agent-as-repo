@@ -17,6 +17,7 @@ pnpm install
 pnpm repo-expert init    # guided setup: API key + repo config
 pnpm repo-expert setup   # create agents
 pnpm repo-expert doctor  # verify API/config/state/git health
+pnpm repo-expert self-check
 pnpm repo-expert onboard my-app
 pnpm repo-expert ask my-app "How does authentication work?"
 ```
@@ -25,6 +26,7 @@ Non-interactive bootstrap:
 
 ```bash
 pnpm repo-expert --no-input init --api-key "$LETTA_API_KEY" --repo-path ~/repos/my-app --yes
+pnpm repo-expert config lint --json
 pnpm repo-expert setup --reindex --json
 pnpm repo-expert sync --dry-run --json
 ```
@@ -50,6 +52,8 @@ cp config.example.yaml config.yaml
 # Create agents from config
 pnpm repo-expert setup
 pnpm repo-expert setup --repo my-app    # single repo
+pnpm repo-expert setup --resume         # resume partial setup
+pnpm repo-expert setup --reindex        # force full re-index
 
 # Ask questions
 pnpm repo-expert ask my-app "How does authentication work?"
@@ -65,6 +69,8 @@ pnpm repo-expert sync --repo my-app
 # Inspect
 pnpm repo-expert list                   # list agents
 pnpm repo-expert status                 # memory stats and health
+pnpm repo-expert self-check             # node/pnpm/dependency health
+pnpm repo-expert config lint            # validate config.yaml
 pnpm repo-expert export --repo my-app   # dump memory to markdown
 
 # Onboarding
@@ -73,6 +79,10 @@ pnpm repo-expert onboard my-app         # guided codebase walkthrough
 # Cleanup
 pnpm repo-expert destroy                # delete all agents (with confirmation)
 pnpm repo-expert destroy --repo my-app
+
+# Shell completions
+pnpm repo-expert completion zsh > ~/.zsh/completions/_repo-expert
+pnpm repo-expert completion fish --install-dir ~/.config/fish/completions
 ```
 
 ## Configuration
@@ -107,6 +117,16 @@ On `setup`, the agent loads all matching files, then bootstraps by analyzing the
 ## Development
 
 ```bash
+pnpm build             # build dist artifacts
+pnpm changeset         # add release note entry
+pnpm version-packages  # apply version bumps/changelogs
+pnpm release           # publish with changesets
 pnpm test              # run tests
 pnpm tsx src/cli.ts    # run CLI directly
+```
+
+Optional command telemetry (JSONL):
+
+```bash
+REPO_EXPERT_TELEMETRY_PATH=.repo-expert-telemetry.jsonl pnpm repo-expert setup --json
 ```

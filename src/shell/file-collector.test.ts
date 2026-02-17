@@ -105,4 +105,20 @@ describe("collectFiles", () => {
       },
     );
   });
+
+  it("meets collection performance budget on medium fixture repo", async () => {
+    const fixtureFiles: Record<string, string> = {};
+    for (let i = 0; i < 300; i++) {
+      fixtureFiles[`src/module-${i}.ts`] = `export const value${i} = ${i};\n`;
+    }
+
+    await withTempRepo(fixtureFiles, async (repoPath) => {
+      const startedAt = Date.now();
+      const files = await collectFiles(makeConfig(repoPath));
+      const durationMs = Date.now() - startedAt;
+
+      expect(files.length).toBe(300);
+      expect(durationMs).toBeLessThan(5000);
+    });
+  });
 });

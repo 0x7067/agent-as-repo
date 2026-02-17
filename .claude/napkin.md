@@ -14,6 +14,9 @@
 | 2026-02-17 | self | `rg` pattern beginning with `--` was parsed as command flags and broke a verification grep | Use `rg -n -- \"pattern\" file` when the search pattern may begin with hyphens |
 | 2026-02-17 | self | Assumed init always writes `.env`; tests failed when `LETTA_API_KEY` was inherited from parent env | In integration tests, control env explicitly (`LETTA_API_KEY=\"\"`) when asserting `.env` creation |
 | 2026-02-17 | self | `sync --dry-run --full` still required git HEAD, causing unnecessary failures on non-git fixtures | For dry-run planning paths, relax git HEAD requirements when no write/network actions depend on it |
+| 2026-02-17 | self | Used `Date.now()`-only temp names for atomic state writes; concurrent saves collided and caused `ENOENT` on rename | Include a uniqueness suffix (e.g., `randomUUID()`) in temp file paths used for atomic writes |
+| 2026-02-17 | self | Tried `vi.spyOn` on ESM namespace export (`fs.promises.rename`) and hit non-configurable export errors | Add explicit test injection hooks for filesystem edges instead of spying on ESM namespace exports |
+| 2026-02-17 | self | Wrote build script with top-level `await`; `tsx` executed it as CJS and failed at runtime | Wrap build scripts in `main()` and call it explicitly for CJS/ESM compatibility |
 
 ## User Preferences
 - Use `/platform-cli` skill for CLI design

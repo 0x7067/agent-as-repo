@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.20.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare CI config fixture
+        run: |
+          cat > config.ci.yaml <<'EOF'
+          letta:
+            model: openai/gpt-4.1
+            embedding: openai/text-embedding-3-small
+          repos:
+            ci-repo:
+              path: .
+              description: "CI validation fixture"
+              extensions: [.ts, .js, .json, .md]
+              ignore_dirs: [node_modules, .git, dist]
+              bootstrap_on_create: false
+          EOF
+
+      - name: Run doctor gate with safe fixes
+        env:
+          LETTA_API_KEY: ci-placeholder-key
+        run: pnpm repo-expert doctor --fix --json --config config.ci.yaml
+
+      - name: Run tests
+        run: pnpm test

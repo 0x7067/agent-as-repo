@@ -1,0 +1,51 @@
+name: Release Artifacts
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  artifacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.20.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build artifacts
+        run: pnpm build
+
+      - name: Create provenance attestations
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/cli.mjs
+            dist/mcp-server.mjs
+
+      - name: Publish GitHub release with artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/cli.mjs
+            dist/mcp-server.mjs

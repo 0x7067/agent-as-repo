@@ -1,9 +1,14 @@
-import { describe, it, expect } from "vitest";
-import { loadState, saveState } from "./state-store.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { loadState, saveState, setRenameFnForTests } from "./state-store.js";
 import { STATE_SCHEMA_VERSION, addAgentToState, createEmptyState } from "../core/state.js";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  setRenameFnForTests(null);
+});
 
 async function withTempDir(fn: (dir: string) => Promise<void>) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "state-test-"));
@@ -161,6 +166,42 @@ describe("state store", () => {
       const files = await fs.readdir(dir);
       const backups = files.filter((name) => name.startsWith("state.json.bak."));
       expect(backups.length).toBe(1);
+    });
+  });
+
+  it("retries rename when state save hits transient lock contention", async () => {
+    await withTempDir(async (dir) => {
+      const filePath = path.join(dir, "state.json");
+      const state = addAgentToState(createEmptyState(), "my-app", "agent-1", "2026-01-01T00:00:00.000Z");
+      const busyErr = Object.assign(new Error("busy"), { code: "EBUSY" });
+      let calls = 0;
+      setRenameFnForTests(async (fromPath, toPath) => {
+        calls++;
+        if (calls === 1) throw busyErr;
+        await fs.rename(fromPath, toPath);
+      });
+
+      await saveState(filePath, state);
+      const loaded = await loadState(filePath);
+      expect(loaded.agents["my-app"].agentId).toBe("agent-1");
+      expect(calls).toBe(2);
+    });
+  });
+
+  it("keeps state JSON valid under concurrent saves", async () => {
+    await withTempDir(async (dir) => {
+      const filePath = path.join(dir, "state.json");
+      const saves = Array.from({ length: 20 }).map((_, i) => {
+        const repoName = `repo-${i}`;
+        const state = addAgentToState(createEmptyState(), repoName, `agent-${i}`, "2026-01-01T00:00:00.000Z");
+        return saveState(filePath, state);
+      });
+
+      await Promise.all(saves);
+      const raw = await fs.readFile(filePath, "utf-8");
+      expect(() => JSON.parse(raw)).not.toThrow();
+      const loaded = await loadState(filePath);
+      expect(Object.keys(loaded.agents).length).toBe(1);
     });
   });
 });
