@@ -36,6 +36,9 @@
 - `Promise.race` with bare `setTimeout` — leaks timers; always track and clear
 
 ## Domain Notes
+- Letta Folders API: `embedding_chunk_size` blocked on cloud API (400 error) — can't tune chunk size
+- Letta Folders API pagination: `folders.files.list()` uses `.items` (ArrayPage), `agents.files.list()` uses `.files` (NextFilesPage) — NOT `.data`
+- Letta Folders API: files namespaced under folder name (`my-folder/src/file.ts`), not bare paths
 - Letta SDK `passages.create` returns `Array<Passage>` (not single object) — both `letta-provider.ts` and `mcp-server.ts` are correct
 - `Config.defaults.tools` was declared but never populated — removed from type since per-repo tools with fallback to `userDefaults.tools` covers all cases
 - `watch.ts` poll loop: abort handler is the sole resolve path; interval callback just clears itself
