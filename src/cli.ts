@@ -4,6 +4,7 @@ import { Command } from "commander";
 import { Letta } from "@letta-ai/letta-client";
 import * as path from "path";
 import * as readline from "readline/promises";
+import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
 import { loadConfig } from "./shell/config-loader.js";
 import { runInit } from "./shell/init.js";
@@ -34,6 +35,16 @@ interface SetupOpts {
   config: string;
 }
 
+interface ProgramOpts {
+  noInput?: boolean;
+  debug?: boolean;
+}
+
+interface DoctorOpts {
+  config: string;
+  json?: boolean;
+}
+
 interface AskOpts {
   all?: boolean;
   interactive?: boolean;
@@ -49,6 +60,7 @@ interface SyncOpts {
 
 interface RepoOpts {
   repo?: string;
+  json?: boolean;
 }
 
 interface DestroyOpts {
@@ -71,11 +83,19 @@ const STATE_FILE = ".repo-expert-state.json";
 
 // --- Helpers ---
 
+class CliUserError extends Error {
+  readonly exitCode: number;
+
+  constructor(message: string, exitCode = 1) {
+    super(message);
+    this.name = "CliUserError";
+    this.exitCode = exitCode;
+  }
+}
+
 function requireApiKey(): void {
   if (!process.env.LETTA_API_KEY) {
-    console.error("Missing LETTA_API_KEY.");
-    console.error('Run "repo-expert init" to configure, or add it to .env manually.');
-    process.exit(1);
+    throw new CliUserError('Missing LETTA_API_KEY.\nRun "repo-expert init" to configure, or add it to .env manually.');
   }
 }
 
@@ -89,13 +109,10 @@ async function loadConfigSafe(configPath: string): Promise<Config> {
     return await loadConfig(configPath);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      console.error(`Config file not found: ${configPath}`);
-      console.error('Run "repo-expert init" or copy config.example.yaml to config.yaml.');
-      process.exit(1);
+      throw new CliUserError(`Config file not found: ${configPath}\nRun "repo-expert init" or copy config.example.yaml to config.yaml.`);
     }
     if (err instanceof ConfigError) {
-      console.error(formatConfigError(err));
-      process.exit(1);
+      throw new CliUserError(formatConfigError(err));
     }
     throw err;
   }
@@ -132,15 +149,50 @@ function printProgress(loaded: number, total: number): void {
   process.stdout.write(`\r  Loading passages: ${loaded}/${total}`);
 }
 
+function noInputEnabled(): boolean {
+  return process.argv.includes("--no-input") || Boolean(program.opts<ProgramOpts>().noInput);
+}
+
+function interactiveInputAvailable(): boolean {
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+}
+
+function readDebugEnabled(argv: string[]): boolean {
+  return argv.includes("--debug");
+}
+
 // --- Program ---
 
 const program = new Command();
 program.name("repo-expert").description("Persistent AI agents for git repositories").version("0.1.0");
+program.option("--no-input", "Disable interactive prompts").option("--debug", "Show stack traces for unexpected errors");
+program.addHelpText(
+  "after",
+  [
+    "",
+    "Examples:",
+    "  repo-expert init",
+    "  repo-expert setup",
+    '  repo-expert ask my-app "Where is auth?"',
+    "  repo-expert list --json",
+  ].join("\n"),
+);
 
 program
   .command("init")
   .description("Interactive setup: configure API key, scan a repo, generate config.yaml")
   .action(async () => {
+    if (noInputEnabled()) {
+      console.error("init requires interactive input. Re-run without --no-input.");
+      process.exitCode = 1;
+      return;
+    }
+    if (!interactiveInputAvailable()) {
+      console.error("init requires an interactive terminal (TTY).");
+      process.exitCode = 1;
+      return;
+    }
+
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     try {
       await runInit(rl);
@@ -155,14 +207,19 @@ program
   .command("doctor")
   .description("Check setup: API key, config, repo paths, git, state consistency")
   .option("--config <path>", "Config file path", "config.yaml")
-  .action(async (opts: { config: string }) => {
+  .option("--json", "Output checks as JSON")
+  .action(async (opts: DoctorOpts) => {
     const configPath = path.resolve(opts.config);
     let provider: LettaProvider | null = null;
     if (process.env.LETTA_API_KEY) {
       provider = new LettaProvider(new Letta({ timeout: 10_000 }));
     }
     const results = await runAllChecks(provider, configPath);
-    console.log(formatDoctorReport(results));
+    if (opts.json) {
+      console.log(JSON.stringify(results, null, 2));
+    } else {
+      console.log(formatDoctorReport(results));
+    }
     const hasFailures = results.some((r) => r.status === "fail");
     if (hasFailures) process.exitCode = 1;
   });
@@ -237,6 +294,17 @@ program
   .option("--timeout <ms>", "Per-agent timeout for --all (ms)", "30000")
   .action(async (repo: string | undefined, question: string | undefined, opts: AskOpts) => {
     if (opts.interactive) {
+      if (noInputEnabled()) {
+        console.error("Interactive mode is disabled by --no-input.");
+        process.exitCode = 1;
+        return;
+      }
+      if (!interactiveInputAvailable()) {
+        console.error("Interactive mode requires an interactive terminal (TTY).");
+        process.exitCode = 1;
+        return;
+      }
+
       const state = await loadState(STATE_FILE);
       const repoNames = Object.keys(state.agents);
       if (repoNames.length === 0) {
@@ -451,20 +519,36 @@ program
 program
   .command("list")
   .description("List all agents")
-  .action(async () => {
+  .option("--json", "Output agent list as JSON")
+  .action(async (opts: RepoOpts) => {
     const state = await loadState(STATE_FILE);
     const entries = Object.entries(state.agents);
 
     if (entries.length === 0) {
-      console.log('No agents found. Run "repo-expert setup" to create them.');
+      if (opts.json) {
+        console.log("[]");
+      } else {
+        console.log('No agents found. Run "repo-expert setup" to create them.');
+      }
       return;
     }
 
-    for (const [name, agent] of entries) {
-      const files = Object.keys(agent.passages).length;
-      const passages = Object.values(agent.passages).flat().length;
-      const bootstrap = agent.lastBootstrap ? "yes" : "no";
-      console.log(`  ${name}: agent=${agent.agentId} files=${files} passages=${passages} bootstrapped=${bootstrap}`);
+    const rows = entries.map(([repoName, agent]) => ({
+      repoName,
+      agentId: agent.agentId,
+      files: Object.keys(agent.passages).length,
+      passages: Object.values(agent.passages).flat().length,
+      bootstrapped: Boolean(agent.lastBootstrap),
+    }));
+
+    if (opts.json) {
+      console.log(JSON.stringify(rows, null, 2));
+      return;
+    }
+
+    for (const row of rows) {
+      const bootstrap = row.bootstrapped ? "yes" : "no";
+      console.log(`  ${row.repoName}: agent=${row.agentId} files=${row.files} passages=${row.passages} bootstrapped=${bootstrap}`);
     }
   });
 
@@ -533,6 +617,16 @@ program
     }
 
     if (!opts.force) {
+      if (noInputEnabled()) {
+        console.error("destroy requires confirmation. Use --force with --no-input for non-interactive runs.");
+        process.exitCode = 1;
+        return;
+      }
+      if (!interactiveInputAvailable()) {
+        console.error("destroy requires an interactive terminal for confirmation. Use --force in non-interactive environments.");
+        process.exitCode = 1;
+        return;
+      }
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
       const answer = await rl.question(`Delete ${existing.length} agent(s) (${existing.join(", ")})? [y/N] `);
       rl.close();
@@ -703,28 +797,44 @@ program
 
 interface McpInstallOpts {
   global?: boolean;
+  local?: boolean;
   baseUrl: string;
+}
+
+interface McpCheckOpts {
+  json?: boolean;
 }
 
 program
   .command("mcp-install")
   .description("Add Letta MCP server entry to Claude Code config")
-  .option("--global", "Write to global ~/.claude.json (default)", true)
+  .option("--global", "Write to global ~/.claude.json (default)")
+  .option("--local", "Write to local ./.claude.json")
   .option("--base-url <url>", "Letta base URL", "https://api.letta.com")
   .action(async (opts: McpInstallOpts) => {
     requireApiKey();
+    if (opts.global && opts.local) {
+      console.error("Choose either --global or --local, not both.");
+      process.exitCode = 1;
+      return;
+    }
 
     const fs = await import("fs/promises");
     const os = await import("os");
     const home = os.default.homedir();
     const mcpServerPath = path.resolve("src/mcp-server.ts");
-    const configFile = path.join(home, ".claude.json");
+    const configFile = opts.local ? path.resolve(".claude.json") : path.join(home, ".claude.json");
 
     let config: Record<string, unknown> = {};
     try {
       const raw = await fs.readFile(configFile, "utf-8");
-      config = JSON.parse(raw) as Record<string, unknown>;
+      try {
+        config = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        throw new CliUserError(`Failed to parse ${configFile}: invalid JSON.`);
+      }
     } catch (err) {
+      if (err instanceof CliUserError) throw err;
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     }
 
@@ -745,7 +855,8 @@ program
 program
   .command("mcp-check")
   .description("Validate existing MCP server entry in Claude Code config")
-  .action(async () => {
+  .option("--json", "Output check result as JSON")
+  .action(async (opts: McpCheckOpts) => {
     const fs = await import("fs/promises");
     const os = await import("os");
     const home = os.default.homedir();
@@ -755,7 +866,13 @@ program
     let config: Record<string, unknown> = {};
     try {
       const raw = await fs.readFile(configFile, "utf-8");
-      config = JSON.parse(raw) as Record<string, unknown>;
+      try {
+        config = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        console.error(`Failed to parse ${configFile}: invalid JSON.`);
+        process.exitCode = 1;
+        return;
+      }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
         console.error(`Config file not found: ${configFile}`);
@@ -769,6 +886,12 @@ program
     const entry = mcpServers.letta as Parameters<typeof checkMcpEntry>[0];
     const result = checkMcpEntry(entry, mcpServerPath);
 
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+      if (!result.ok) process.exitCode = 1;
+      return;
+    }
+
     if (result.ok) {
       console.log("MCP config looks good.");
     } else {
@@ -781,4 +904,23 @@ program
     }
   });
 
-program.parse();
+async function main(argv = process.argv): Promise<void> {
+  await program.parseAsync(argv);
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    if (err instanceof CliUserError) {
+      console.error(err.message);
+      process.exitCode = err.exitCode;
+      return;
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Unexpected error: ${message}`);
+    console.error("Run with --debug for stack trace.");
+    if (readDebugEnabled(process.argv) && err instanceof Error && err.stack) {
+      console.error(err.stack);
+    }
+    process.exitCode = 1;
+  });
+}
