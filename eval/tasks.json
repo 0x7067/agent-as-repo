@@ -1,0 +1,444 @@
+{
+  "tasks": [
+    {
+      "id": "quickstart-first-run",
+      "input": "I just cloned the repo. What exact commands should I run to get from zero to asking my first question?",
+      "checks": {
+        "correct": {
+          "must_include": ["pnpm install", "repo-expert init", "repo-expert setup", "repo-expert ask"],
+          "must_not_include": ["npm install"]
+        },
+        "grounded": {
+          "must_include": ["repo-expert"],
+          "must_not_include": ["I can't access your repo"]
+        },
+        "useful": {
+          "must_include": ["1.", "2.", "3."],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["pnpm"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "init-non-interactive",
+      "input": "Give me the non-interactive init command for CI or scripts.",
+      "checks": {
+        "correct": {
+          "must_include": ["--no-input", "init", "--api-key", "--repo-path", "--yes"],
+          "must_not_include": []
+        },
+        "grounded": {
+          "must_include": ["LETTA_API_KEY"],
+          "must_not_include": ["open browser"]
+        },
+        "useful": {
+          "must_include": ["pnpm repo-expert"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["--repo-path"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "setup-resume-vs-reindex",
+      "input": "When should I use setup --resume versus setup --reindex?",
+      "checks": {
+        "correct": {
+          "must_include": ["--resume", "--reindex", "partial", "full"],
+          "must_not_include": ["use both together"]
+        },
+        "grounded": {
+          "must_include": ["setup"],
+          "must_not_include": ["database migration"]
+        },
+        "useful": {
+          "must_include": ["1.", "2."],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["--resume"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "doctor-safe-fix",
+      "input": "How do I safely check and auto-fix setup issues?",
+      "checks": {
+        "correct": {
+          "must_include": ["doctor --fix --json"],
+          "must_not_include": ["delete your config"]
+        },
+        "grounded": {
+          "must_include": ["repo-expert doctor"],
+          "must_not_include": ["manual SQL"]
+        },
+        "useful": {
+          "must_include": ["config.yaml", ".env", ".repo-expert-state.json"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["--fix"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "self-check-health",
+      "input": "What command verifies local Node, pnpm, and dependency health?",
+      "checks": {
+        "correct": {
+          "must_include": ["self-check", "--json"],
+          "must_not_include": ["yarn"]
+        },
+        "grounded": {
+          "must_include": ["Node", "pnpm"],
+          "must_not_include": ["docker compose"]
+        },
+        "useful": {
+          "must_include": ["repo-expert self-check"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["self-check"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "config-lint-json",
+      "input": "How do I validate config semantics and get machine-readable output?",
+      "checks": {
+        "correct": {
+          "must_include": ["config lint", "--json"],
+          "must_not_include": ["manual parsing only"]
+        },
+        "grounded": {
+          "must_include": ["config.yaml"],
+          "must_not_include": ["terraform"]
+        },
+        "useful": {
+          "must_include": ["--config"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["repo-expert config lint"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "sync-safe-preview",
+      "input": "I changed code and want to sync safely first. What should I run?",
+      "checks": {
+        "correct": {
+          "must_include": ["sync --dry-run --json"],
+          "must_not_include": ["always sync --full without checking"]
+        },
+        "grounded": {
+          "must_include": ["sync"],
+          "must_not_include": ["kubectl"]
+        },
+        "useful": {
+          "must_include": ["changedFiles"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["--dry-run"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "destroy-non-interactive",
+      "input": "What is the safe non-interactive way to destroy an agent?",
+      "checks": {
+        "correct": {
+          "must_include": ["destroy", "--repo", "--force"],
+          "must_not_include": ["git reset --hard"]
+        },
+        "grounded": {
+          "must_include": ["--no-input"],
+          "must_not_include": ["interactive prompt required"]
+        },
+        "useful": {
+          "must_include": ["--dry-run"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["destroy --dry-run"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "status-and-list",
+      "input": "How do I quickly inspect current agents and memory status?",
+      "checks": {
+        "correct": {
+          "must_include": ["list --json", "status --json"],
+          "must_not_include": []
+        },
+        "grounded": {
+          "must_include": ["agentId", "passage"],
+          "must_not_include": ["database schema migration"]
+        },
+        "useful": {
+          "must_include": ["repo"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["repo-expert list"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "completion-install",
+      "input": "How can I install shell completion for zsh and fish?",
+      "checks": {
+        "correct": {
+          "must_include": ["completion zsh", "completion fish", "--install-dir"],
+          "must_not_include": []
+        },
+        "grounded": {
+          "must_include": ["repo-expert completion"],
+          "must_not_include": ["oh-my-zsh plugin required"]
+        },
+        "useful": {
+          "must_include": ["~/.zsh", "~/.config/fish/completions"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["zsh", "fish"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "eval-run-basics",
+      "input": "How do I run my personal benchmark with this tool?",
+      "checks": {
+        "correct": {
+          "must_include": ["eval run", "--repo", "--file"],
+          "must_not_include": []
+        },
+        "grounded": {
+          "must_include": ["eval/tasks.json"],
+          "must_not_include": ["separate service required"]
+        },
+        "useful": {
+          "must_include": ["--json", "--save"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["repo-expert eval run"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "eval-threshold-gate",
+      "input": "How do I fail CI if benchmark quality drops below target?",
+      "checks": {
+        "correct": {
+          "must_include": ["--min-pass-rate", "eval run"],
+          "must_not_include": ["ignore failures"]
+        },
+        "grounded": {
+          "must_include": ["pass rate"],
+          "must_not_include": ["manual subjective only"]
+        },
+        "useful": {
+          "must_include": ["85"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["--min-pass-rate 85"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "telemetry-enable",
+      "input": "How do I capture command telemetry for retries and durations?",
+      "checks": {
+        "correct": {
+          "must_include": ["REPO_EXPERT_TELEMETRY_PATH", "setup --json"],
+          "must_not_include": []
+        },
+        "grounded": {
+          "must_include": ["jsonl"],
+          "must_not_include": ["remote telemetry service"]
+        },
+        "useful": {
+          "must_include": ["retryCount", "durationMs"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["REPO_EXPERT_TELEMETRY_PATH="],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "state-file-recovery",
+      "input": "If state file gets corrupted, what should I expect and do?",
+      "checks": {
+        "correct": {
+          "must_include": ["Invalid state file", ".bak.", "remove or fix"],
+          "must_not_include": ["silently ignored"]
+        },
+        "grounded": {
+          "must_include": [".repo-expert-state.json"],
+          "must_not_include": ["drop your database"]
+        },
+        "useful": {
+          "must_include": ["backup"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["state"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "partial-failure-recovery",
+      "input": "What happens if setup fails halfway through loading passages?",
+      "checks": {
+        "correct": {
+          "must_include": ["resume", "state", "setup --resume"],
+          "must_not_include": ["start over manually every time"]
+        },
+        "grounded": {
+          "must_include": ["partial", "agent"],
+          "must_not_include": ["undefined behavior"]
+        },
+        "useful": {
+          "must_include": ["--load-retries"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["setup --resume"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "non-interactive-contract",
+      "input": "What are the key rules for non-interactive usage across commands?",
+      "checks": {
+        "correct": {
+          "must_include": ["--no-input", "--force"],
+          "must_not_include": ["prompt anyway"]
+        },
+        "grounded": {
+          "must_include": ["interactive", "TTY"],
+          "must_not_include": ["GUI required"]
+        },
+        "useful": {
+          "must_include": ["destroy", "ask -i"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["--no-input"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "ask-all-usage",
+      "input": "How do I broadcast one question to all repo agents with timeout?",
+      "checks": {
+        "correct": {
+          "must_include": ["ask --all", "--timeout"],
+          "must_not_include": []
+        },
+        "grounded": {
+          "must_include": ["Broadcasting"],
+          "must_not_include": ["single agent only"]
+        },
+        "useful": {
+          "must_include": ["repo-expert ask --all"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["--timeout"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "watch-daemon-ops",
+      "input": "What are the commands to run background syncing on macOS and remove it later?",
+      "checks": {
+        "correct": {
+          "must_include": ["install-daemon", "uninstall-daemon"],
+          "must_not_include": ["systemctl"]
+        },
+        "grounded": {
+          "must_include": ["macOS", "launchd"],
+          "must_not_include": ["windows service"]
+        },
+        "useful": {
+          "must_include": ["--interval", "--config"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["repo-expert install-daemon"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "release-flow",
+      "input": "What is the release flow now that changesets are configured?",
+      "checks": {
+        "correct": {
+          "must_include": ["pnpm changeset", "pnpm version-packages", "pnpm release"],
+          "must_not_include": ["manual tag only"]
+        },
+        "grounded": {
+          "must_include": ["changesets"],
+          "must_not_include": ["semantic-release"]
+        },
+        "useful": {
+          "must_include": ["build", "test"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["pnpm"],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "weekly-quality-loop",
+      "input": "Give me a weekly loop to keep agent quality improving as a solo user.",
+      "checks": {
+        "correct": {
+          "must_include": ["benchmark", "re-run", "compare"],
+          "must_not_include": ["change everything at once"]
+        },
+        "grounded": {
+          "must_include": ["20", "tasks"],
+          "must_not_include": ["need many users"]
+        },
+        "useful": {
+          "must_include": ["1.", "2.", "3.", "4."],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["weekly"],
+          "must_not_include": []
+        }
+      }
+    }
+  ]
+}

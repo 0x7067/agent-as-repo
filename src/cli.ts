@@ -9,6 +9,8 @@ import { execFileSync } from "child_process";
 import { loadConfig } from "./shell/config-loader.js";
 import { runInit } from "./shell/init.js";
 import { runAllChecks, runDoctorFixes } from "./shell/doctor.js";
+import { formatEvalReport } from "./core/eval.js";
+import { runEvalFromFile } from "./shell/eval-runner.js";
 import { formatSelfChecks, runSelfChecks } from "./shell/self-check.js";
 import { completionFileName, generateCompletionScript, type CompletionShell } from "./core/completion.js";
 import { formatDoctorReport } from "./core/doctor.js";
@@ -108,6 +110,15 @@ interface InstallDaemonOpts {
 interface ConfigLintOpts {
   config: string;
   json?: boolean;
+}
+
+interface EvalRunOpts {
+  repo: string;
+  file: string;
+  json?: boolean;
+  maxTasks: string;
+  minPassRate: string;
+  save?: string;
 }
 
 const STATE_FILE = ".repo-expert-state.json";
@@ -608,6 +619,51 @@ configCommand
       } else {
         console.error(message);
       }
+      process.exitCode = 1;
+    }
+  });
+
+const evalCommand = program.command("eval").description("Personal benchmark evaluation helpers");
+
+evalCommand
+  .command("run")
+  .description("Run benchmark tasks against one configured agent")
+  .requiredOption("--repo <name>", "Repo name to evaluate")
+  .option("--file <path>", "Task file path", "eval/tasks.json")
+  .option("--json", "Output evaluation report as JSON")
+  .option("--max-tasks <n>", "Limit how many tasks to run", "-1")
+  .option("--min-pass-rate <n>", "Set failing threshold for overall pass rate (0-100)", "0")
+  .option("--save <path>", "Write full JSON result to a file")
+  .action(async (opts: EvalRunOpts) => {
+    const state = await loadState(STATE_FILE);
+    const agent = requireAgent(state, opts.repo);
+    if (!agent) return;
+
+    const provider = createProviderForCommands();
+    const filePath = path.resolve(opts.file);
+    const maxTasks = parseIntOrDefault(opts.maxTasks, -1);
+    const minPassRate = parseNonNegativeInt(opts.minPassRate, 0);
+    const run = await runEvalFromFile({
+      provider,
+      agentId: agent.agentId,
+      filePath,
+      maxTasks: maxTasks < 0 ? undefined : maxTasks,
+    });
+
+    if (opts.save) {
+      const fs = await import("fs/promises");
+      const savePath = path.resolve(opts.save);
+      await fs.mkdir(path.dirname(savePath), { recursive: true });
+      await fs.writeFile(savePath, JSON.stringify(run, null, 2), "utf-8");
+    }
+
+    if (opts.json) {
+      console.log(JSON.stringify(run, null, 2));
+    } else {
+      console.log(formatEvalReport(run));
+    }
+
+    if (run.summary.overallPassRate < minPassRate) {
       process.exitCode = 1;
     }
   });

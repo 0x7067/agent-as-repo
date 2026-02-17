@@ -1,0 +1,48 @@
+{
+  "tasks": [
+    {
+      "id": "auth-flow",
+      "input": "How does authentication work in this repo?",
+      "checks": {
+        "correct": {
+          "must_include": ["token"],
+          "must_not_include": ["oauth2"]
+        },
+        "grounded": {
+          "must_include": ["src/"],
+          "must_not_include": ["I guess"]
+        },
+        "useful": {
+          "must_include": ["next step"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["1."],
+          "must_not_include": []
+        }
+      }
+    },
+    {
+      "id": "sync-command",
+      "input": "How should I run sync safely before deployment?",
+      "checks": {
+        "correct": {
+          "must_include": ["sync --dry-run"],
+          "must_not_include": []
+        },
+        "grounded": {
+          "must_include": ["repo-expert"],
+          "must_not_include": ["random"]
+        },
+        "useful": {
+          "must_include": ["checklist"],
+          "must_not_include": []
+        },
+        "format_followed": {
+          "must_include": ["1."],
+          "must_not_include": []
+        }
+      }
+    }
+  ]
+}

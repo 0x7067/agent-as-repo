@@ -76,6 +76,12 @@ pnpm repo-expert export --repo my-app   # dump memory to markdown
 # Onboarding
 pnpm repo-expert onboard my-app         # guided codebase walkthrough
 
+# Personal quality benchmark
+cp eval/tasks.example.json eval/tasks.json
+pnpm repo-expert eval run --repo my-app --file eval/tasks.json
+pnpm repo-expert eval run --repo my-app --file eval/tasks.json --json --save eval/results.json
+pnpm repo-expert eval run --repo my-app --file eval/tasks.json --min-pass-rate 85
+
 # Cleanup
 pnpm repo-expert destroy                # delete all agents (with confirmation)
 pnpm repo-expert destroy --repo my-app
