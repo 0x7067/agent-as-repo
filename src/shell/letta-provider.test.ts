@@ -259,6 +259,22 @@ describe("LettaProvider", () => {
 
       expect(reply).toBe("");
     });
+
+    it("passes override_model and max_steps when provided", async () => {
+      const client = makeMockClient();
+      const provider = new LettaProvider(mockClientAs(client));
+
+      await provider.sendMessage("agent-abc", "quick summary", {
+        overrideModel: "openai/gpt-4.1-mini",
+        maxSteps: 3,
+      });
+
+      expect(client.agents.messages.create).toHaveBeenCalledWith("agent-abc", {
+        messages: [{ role: "user", content: "quick summary" }],
+        override_model: "openai/gpt-4.1-mini",
+        max_steps: 3,
+      });
+    });
   });
 
   describe("retry on rate limit", () => {

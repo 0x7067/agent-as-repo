@@ -17,6 +17,10 @@
 | 2026-02-17 | self | Used `Date.now()`-only temp names for atomic state writes; concurrent saves collided and caused `ENOENT` on rename | Include a uniqueness suffix (e.g., `randomUUID()`) in temp file paths used for atomic writes |
 | 2026-02-17 | self | Tried `vi.spyOn` on ESM namespace export (`fs.promises.rename`) and hit non-configurable export errors | Add explicit test injection hooks for filesystem edges instead of spying on ESM namespace exports |
 | 2026-02-17 | self | Wrote build script with top-level `await`; `tsx` executed it as CJS and failed at runtime | Wrap build scripts in `main()` and call it explicitly for CJS/ESM compatibility |
+| 2026-02-17 | self | Ran full `pnpm test` in sandbox and got noisy `tsx` IPC `EPERM` failures from CLI integration tests | Run targeted vitest suites for changed units in sandbox; treat CLI spawn tests as environment-limited unless unsandboxed |
+| 2026-02-17 | self | Used a hoisted `vi.mock()` factory that referenced a top-level variable (`mockWatch`) before initialization | In Vitest, keep `vi.mock()` factories self-contained; do not capture top-level variables from test scope |
+| 2026-02-17 | self | Daemon kept logging `401 Unauthorized` while manual CLI checks passed | Compare shell `LETTA_API_KEY` with `.env` key; launchd may use a different environment than your shell and can run with stale credentials |
+| 2026-02-17 | self | After fixing daemon credentials, watch kept retrying the same repo until one successful sync advanced `lastSyncCommit` | For persistent sync failures, run a one-off `repo-expert sync --repo <name>` to unblock watch loop and clear repeated errors |
 
 ## User Preferences
 - Use `/platform-cli` skill for CLI design

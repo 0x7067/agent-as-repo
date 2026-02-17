@@ -19,7 +19,7 @@ import { collectFiles } from "./shell/file-collector.js";
 import { StateFileError, loadState, saveState } from "./shell/state-store.js";
 import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
 import { bootstrapAgent } from "./shell/bootstrap.js";
-import type { AgentProvider, CreateAgentParams } from "./shell/provider.js";
+import type { AgentProvider, CreateAgentParams, SendMessageOptions } from "./shell/provider.js";
 import { LettaProvider } from "./shell/letta-provider.js";
 import { rawTextStrategy } from "./core/chunker.js";
 import { shouldIncludeFile } from "./core/filter.js";
@@ -36,6 +36,15 @@ import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
 import { generateMcpEntry, checkMcpEntry } from "./core/mcp-config.js";
 import { buildPostSetupNextSteps, getSetupMode } from "./core/setup.js";
 import type { AgentState, AppState, Config } from "./core/types.js";
+import {
+  ASK_DEFAULT_CACHE_TTL_MS,
+  ASK_DEFAULT_FAST_TIMEOUT_MS,
+  ASK_DEFAULT_TIMEOUT_MS,
+  buildAskRoutePlan,
+  parseAskRoutingMode,
+  type AskRoutingMode,
+} from "./core/ask-routing.js";
+import { InMemoryAnswerCache, toModelCacheKey } from "./shell/answer-cache.js";
 
 interface SetupOpts {
   repo?: string;
@@ -74,6 +83,12 @@ interface AskOpts {
   all?: boolean;
   interactive?: boolean;
   timeout: string;
+  routing?: string;
+  fastModel?: string;
+  askTimeoutMs?: string;
+  maxSteps?: string;
+  cache?: boolean;
+  config?: string;
 }
 
 interface SyncOpts {
@@ -99,11 +114,13 @@ interface DestroyOpts {
 interface WatchOpts {
   repo?: string;
   interval: string;
+  debounce: string;
   config: string;
 }
 
 interface InstallDaemonOpts {
   interval: string;
+  debounce: string;
   config: string;
 }
 
@@ -122,6 +139,17 @@ interface EvalRunOpts {
 }
 
 const STATE_FILE = ".repo-expert-state.json";
+const askAnswerCache = new InMemoryAnswerCache(ASK_DEFAULT_CACHE_TTL_MS);
+
+interface AskRuntimeSettings {
+  routing: AskRoutingMode;
+  fastModel?: string;
+  askTimeoutMs: number;
+  fastAskTimeoutMs: number;
+  cacheTtlMs: number;
+  maxSteps?: number;
+  cacheEnabled: boolean;
+}
 
 // --- Helpers ---
 
@@ -196,7 +224,7 @@ class FakeProvider implements AgentProvider {
     return this.blocksByAgent[agentId]?.[label] ?? { value: "", limit: 5000 };
   }
 
-  async sendMessage(_agentId: string, _content: string): Promise<string> {
+  async sendMessage(_agentId: string, _content: string, _options?: SendMessageOptions): Promise<string> {
     const delayMs = parseInt(process.env.REPO_EXPERT_TEST_DELAY_BOOTSTRAP_MS ?? "0", 10);
     if (!Number.isNaN(delayMs) && delayMs > 0) {
       await delay(delayMs);
@@ -262,6 +290,20 @@ function parseNonNegativeInt(value: string, fallback: number): number {
   return parsed < 0 ? fallback : parsed;
 }
 
+function parseOptionalPositiveInt(value: string | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  const parsed = parseInt(value, 10);
+  if (Number.isNaN(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function parseOptionalMaxSteps(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = parseInt(value, 10);
+  if (Number.isNaN(parsed) || parsed <= 0) return undefined;
+  return parsed;
+}
+
 function formatDurationMs(durationMs: number): string {
   if (durationMs < 1000) return `${durationMs}ms`;
   return `${(durationMs / 1000).toFixed(2)}s`;
@@ -321,6 +363,121 @@ function interactiveInputAvailable(): boolean {
 
 function readDebugEnabled(argv: string[]): boolean {
   return argv.includes("--debug");
+}
+
+async function loadAskConfigDefaults(configPath: string | undefined): Promise<{
+  fastModel?: string;
+  askTimeoutMs: number;
+  fastAskTimeoutMs: number;
+  cacheTtlMs: number;
+}> {
+  const defaults = {
+    askTimeoutMs: ASK_DEFAULT_TIMEOUT_MS,
+    fastAskTimeoutMs: ASK_DEFAULT_FAST_TIMEOUT_MS,
+    cacheTtlMs: ASK_DEFAULT_CACHE_TTL_MS,
+  };
+
+  const resolvedPath = configPath ? path.resolve(configPath) : path.resolve("config.yaml");
+  if (!configPath) {
+    try {
+      const fs = await import("fs/promises");
+      await fs.access(resolvedPath);
+    } catch {
+      return defaults;
+    }
+  }
+
+  const config = await loadConfigSafe(resolvedPath);
+  return {
+    fastModel: config.letta.fastModel,
+    askTimeoutMs: config.defaults.askTimeoutMs ?? defaults.askTimeoutMs,
+    fastAskTimeoutMs: config.defaults.fastAskTimeoutMs ?? defaults.fastAskTimeoutMs,
+    cacheTtlMs: config.defaults.cacheTtlMs ?? defaults.cacheTtlMs,
+  };
+}
+
+async function askAgent(
+  provider: AgentProvider,
+  agent: AgentState,
+  question: string,
+  settings: AskRuntimeSettings,
+): Promise<string> {
+  const plan = buildAskRoutePlan({
+    routing: settings.routing,
+    question,
+    fastModel: settings.fastModel,
+    askTimeoutMs: settings.askTimeoutMs,
+    fastAskTimeoutMs: settings.fastAskTimeoutMs,
+  });
+
+  const attempts: Array<{ overrideModel?: string; timeoutMs: number }> = [
+    { overrideModel: plan.primaryOverrideModel, timeoutMs: plan.primaryTimeoutMs },
+  ];
+  if (plan.enableFallback) {
+    attempts.push({
+      overrideModel: plan.fallbackOverrideModel,
+      timeoutMs: plan.fallbackTimeoutMs,
+    });
+  }
+
+  if (settings.cacheEnabled) {
+    for (const attempt of attempts) {
+      const cached = askAnswerCache.get({
+        agentId: agent.agentId,
+        question,
+        modelKey: toModelCacheKey(attempt.overrideModel),
+        lastSyncCommit: agent.lastSyncCommit,
+      });
+      if (cached !== null) {
+        return cached;
+      }
+    }
+  }
+
+  const runAttempt = async (attempt: { overrideModel?: string; timeoutMs: number }): Promise<string> => {
+    const modelLabel = attempt.overrideModel ?? "agent-default";
+    return withTimeout(
+      `Ask "${agent.repoName}" (${modelLabel})`,
+      attempt.timeoutMs,
+      () => provider.sendMessage(agent.agentId, question, { overrideModel: attempt.overrideModel, maxSteps: settings.maxSteps }),
+    );
+  };
+
+  let answer: string | null = null;
+  let usedModel = attempts[0].overrideModel;
+  let primaryError: unknown = null;
+
+  try {
+    answer = await runAttempt(attempts[0]);
+  } catch (err) {
+    primaryError = err;
+  }
+
+  const hasFallback = attempts.length > 1;
+  const shouldFallback = hasFallback && (primaryError !== null || (answer ?? "").trim().length === 0);
+
+  if (shouldFallback) {
+    answer = await runAttempt(attempts[1]);
+    usedModel = attempts[1].overrideModel;
+  } else if (primaryError !== null) {
+    throw primaryError;
+  }
+
+  const finalAnswer = answer ?? "";
+  if (settings.cacheEnabled && finalAnswer.trim().length > 0) {
+    askAnswerCache.set(
+      {
+        agentId: agent.agentId,
+        question,
+        modelKey: toModelCacheKey(usedModel),
+        lastSyncCommit: agent.lastSyncCommit,
+      },
+      finalAnswer,
+      settings.cacheTtlMs,
+    );
+  }
+
+  return finalAnswer;
 }
 
 // --- Program ---
@@ -674,7 +831,33 @@ program
   .option("--all", "Ask all agents and collect responses")
   .option("-i, --interactive", "Interactive REPL mode")
   .option("--timeout <ms>", "Per-agent timeout for --all (ms)", "30000")
+  .option("--routing <mode>", "Routing mode for single-agent asks: auto|quality|speed", "auto")
+  .option("--fast-model <model>", "Fast model handle used by routing=auto|speed")
+  .option("--ask-timeout-ms <ms>", "Timeout for single-agent asks and interactive mode")
+  .option("--max-steps <n>", "Maximum agent reasoning/tool steps per ask")
+  .option("--no-cache", "Disable in-memory answer cache for single-agent asks")
+  .option("--config <path>", "Optional config file path used for ask defaults")
   .action(async (repo: string | undefined, question: string | undefined, opts: AskOpts) => {
+    const buildAskSettings = async (): Promise<AskRuntimeSettings> => {
+      const configDefaults = await loadAskConfigDefaults(opts.config);
+      let routing: AskRoutingMode;
+      try {
+        routing = parseAskRoutingMode(opts.routing);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new CliUserError(message);
+      }
+      return {
+        routing,
+        fastModel: opts.fastModel ?? configDefaults.fastModel,
+        askTimeoutMs: parseOptionalPositiveInt(opts.askTimeoutMs, configDefaults.askTimeoutMs),
+        fastAskTimeoutMs: configDefaults.fastAskTimeoutMs,
+        cacheTtlMs: configDefaults.cacheTtlMs,
+        maxSteps: parseOptionalMaxSteps(opts.maxSteps),
+        cacheEnabled: opts.cache !== false,
+      };
+    };
+
     if (opts.interactive) {
       if (noInputEnabled()) {
         console.error("Interactive mode is disabled by --no-input.");
@@ -697,6 +880,7 @@ program
 
       const provider = createProvider();
       const defaultRepo = repo && state.agents[repo] ? repo : undefined;
+      const askSettings = await buildAskSettings();
 
       console.log("Interactive mode. Use @repo to target a specific agent.");
       console.log(`Available agents: ${repoNames.join(", ")}`);
@@ -737,7 +921,7 @@ program
             continue;
           }
 
-          const answer = await provider.sendMessage(agentInfo.agentId, q);
+          const answer = await askAgent(provider, agentInfo, q, askSettings);
           console.log(`\n${answer}\n`);
         }
       } finally {
@@ -796,7 +980,8 @@ program
     if (!agentInfo) return;
 
     const provider = createProvider();
-    const answer = await provider.sendMessage(agentInfo.agentId, question);
+    const askSettings = await buildAskSettings();
+    const answer = await askAgent(provider, agentInfo, question, askSettings);
     console.log(answer);
   });
 
@@ -894,6 +1079,14 @@ program
         continue;
       }
 
+      if (!headCommit) {
+        const message = `"${repoName}": missing git HEAD commit`;
+        console.error(message);
+        syncResults.push({ repoName, status: "error", error: message });
+        process.exitCode = 1;
+        continue;
+      }
+
       const result = await syncRepo({
         provider: provider!,
         agent: agentInfo,
@@ -910,6 +1103,7 @@ program
           }
         },
         headCommit,
+        maxFileSizeKb: repoConfig.maxFileSizeKb,
       });
 
       if (result.isFullReIndex) {
@@ -982,7 +1176,7 @@ program
     const state = await loadState(STATE_FILE);
     const provider = createProviderForCommands();
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
-    const rows: Record<string, unknown>[] = [];
+    const rows: unknown[] = [];
 
     for (const repoName of repoNames) {
       const agentInfo = requireAgent(state, repoName);
@@ -1095,9 +1289,10 @@ program
 
 program
   .command("watch")
-  .description("Watch repos and auto-sync on new commits")
+  .description("Watch repos and auto-sync on repo changes")
   .option("--repo <name>", "Watch a single repo")
   .option("--interval <seconds>", "Poll interval in seconds", String(DEFAULT_WATCH_CONFIG.intervalMs / 1000))
+  .option("--debounce <ms>", "Debounce window for file-change batching", String(DEFAULT_WATCH_CONFIG.debounceMs))
   .option("--config <path>", "Config file path", "config.yaml")
   .action(async (opts: WatchOpts) => {
     const configPath = path.resolve(opts.config);
@@ -1121,6 +1316,7 @@ program
     }
 
     const intervalMs = Math.max(1, parseIntOrDefault(opts.interval, DEFAULT_WATCH_CONFIG.intervalMs / 1000)) * 1000;
+    const debounceMs = Math.max(50, parseIntOrDefault(opts.debounce, DEFAULT_WATCH_CONFIG.debounceMs));
     const provider = createProvider();
     const ac = new AbortController();
 
@@ -1128,7 +1324,9 @@ program
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
 
-    console.log(`Watching ${repoNames.length} repo(s) (every ${intervalMs / 1000}s). Press Ctrl+C to stop.`);
+    console.log(
+      `Watching ${repoNames.length} repo(s) (poll every ${intervalMs / 1000}s, debounce ${debounceMs}ms). Press Ctrl+C to stop.`,
+    );
 
     await watchRepos({
       provider,
@@ -1136,6 +1334,7 @@ program
       repoNames,
       statePath: STATE_FILE,
       intervalMs,
+      debounceMs,
       signal: ac.signal,
     });
 
@@ -1145,7 +1344,8 @@ program
 program
   .command("install-daemon")
   .description("Install launchd daemon for auto-sync on macOS")
-  .option("--interval <seconds>", "Poll interval in seconds", "30")
+  .option("--interval <seconds>", "Poll interval in seconds", String(DEFAULT_WATCH_CONFIG.intervalMs / 1000))
+  .option("--debounce <ms>", "Debounce window for file-change batching", String(DEFAULT_WATCH_CONFIG.debounceMs))
   .option("--config <path>", "Config file path", "config.yaml")
   .action(async (opts: InstallDaemonOpts) => {
     if (process.platform !== "darwin") {
@@ -1180,7 +1380,8 @@ program
     const plist = generatePlist({
       workingDirectory: process.cwd(),
       pnpmPath,
-      intervalSeconds: parseIntOrDefault(opts.interval, 30),
+      intervalSeconds: parseIntOrDefault(opts.interval, DEFAULT_WATCH_CONFIG.intervalMs / 1000),
+      debounceMs: Math.max(50, parseIntOrDefault(opts.debounce, DEFAULT_WATCH_CONFIG.debounceMs)),
       configPath: opts.config,
       logPath,
     });

@@ -24,6 +24,11 @@ export interface MemoryBlock {
   limit: number;
 }
 
+export interface SendMessageOptions {
+  overrideModel?: string;
+  maxSteps?: number;
+}
+
 export interface AgentProvider {
   createAgent(params: CreateAgentParams): Promise<CreateAgentResult>;
   deleteAgent(agentId: string): Promise<void>;
@@ -31,5 +36,5 @@ export interface AgentProvider {
   deletePassage(agentId: string, passageId: string): Promise<void>;
   listPassages(agentId: string): Promise<Passage[]>;
   getBlock(agentId: string, label: string): Promise<MemoryBlock>;
-  sendMessage(agentId: string, content: string): Promise<string>;
+  sendMessage(agentId: string, content: string, options?: SendMessageOptions): Promise<string>;
 }

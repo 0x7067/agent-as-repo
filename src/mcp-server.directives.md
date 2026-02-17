@@ -4,7 +4,7 @@
 
 - `letta_list_agents` — no params. Returns `[{id, name, description, model}]`.
 - `letta_get_agent(agent_id)` — full agent details including tools, blocks, model settings.
-- `letta_send_message(agent_id, content)` — send a user message, returns the agent's text reply.
+- `letta_send_message(agent_id, content, override_model?, routing?, timeout_ms?, max_steps?, cache?)` — send a user message, returns the agent's text reply.
 - `letta_get_core_memory(agent_id)` — returns `[{label, value, limit}]` for all memory blocks.
 - `letta_search_archival(agent_id, query, top_k?)` — semantic search over archival passages.
 - `letta_insert_passage(agent_id, text)` — insert a passage into archival memory.

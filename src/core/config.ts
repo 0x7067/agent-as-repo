@@ -6,6 +6,9 @@ const BUILT_IN_DEFAULTS = {
   memoryBlockLimit: 5000,
   bootstrapOnCreate: true,
   chunking: "raw" as const,
+  askTimeoutMs: 20_000,
+  fastAskTimeoutMs: 8_000,
+  cacheTtlMs: 180_000,
 };
 
 const defaultsSchema = z.object({
@@ -13,6 +16,9 @@ const defaultsSchema = z.object({
   memory_block_limit: z.number().optional(),
   bootstrap_on_create: z.boolean().optional(),
   chunking: z.enum(["raw", "tree-sitter"]).optional(),
+  ask_timeout_ms: z.number().optional(),
+  fast_ask_timeout_ms: z.number().optional(),
+  cache_ttl_ms: z.number().optional(),
   tools: z.array(z.string()).optional(),
 });
 
@@ -34,6 +40,7 @@ const rawConfigSchema = z.object({
   letta: z.object({
     model: z.string(),
     embedding: z.string(),
+    fast_model: z.string().optional(),
   }),
   defaults: defaultsSchema.optional(),
   repos: z.record(z.string(), repoRawSchema),
@@ -103,6 +110,9 @@ export function parseConfig(raw: unknown): Config {
     memoryBlockLimit: userDefaults.memory_block_limit ?? BUILT_IN_DEFAULTS.memoryBlockLimit,
     bootstrapOnCreate: userDefaults.bootstrap_on_create ?? BUILT_IN_DEFAULTS.bootstrapOnCreate,
     chunking: userDefaults.chunking ?? BUILT_IN_DEFAULTS.chunking,
+    askTimeoutMs: userDefaults.ask_timeout_ms ?? BUILT_IN_DEFAULTS.askTimeoutMs,
+    fastAskTimeoutMs: userDefaults.fast_ask_timeout_ms ?? BUILT_IN_DEFAULTS.fastAskTimeoutMs,
+    cacheTtlMs: userDefaults.cache_ttl_ms ?? BUILT_IN_DEFAULTS.cacheTtlMs,
   };
 
   const repos: Record<string, RepoConfig> = {};
@@ -123,7 +133,11 @@ export function parseConfig(raw: unknown): Config {
   }
 
   return {
-    letta: parsed.letta,
+    letta: {
+      model: parsed.letta.model,
+      embedding: parsed.letta.embedding,
+      fastModel: parsed.letta.fast_model,
+    },
     defaults,
     repos,
   };

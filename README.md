@@ -60,11 +60,13 @@ pnpm repo-expert ask my-app "How does authentication work?"
 pnpm repo-expert ask --all "What's the API contract for user creation?"
 pnpm repo-expert ask -i                 # interactive REPL
 pnpm repo-expert ask -i my-app          # REPL with default agent
+pnpm repo-expert ask my-app "where is auth?" --routing auto --fast-model openai/gpt-4.1-mini
 
 # Sync after code changes
 pnpm repo-expert sync                   # incremental (git diff)
 pnpm repo-expert sync --full            # full re-index
 pnpm repo-expert sync --repo my-app
+pnpm repo-expert watch                  # near real-time file watch + poll fallback
 
 # Inspect
 pnpm repo-expert list                   # list agents
@@ -118,7 +120,7 @@ Each repo gets a Letta agent with three-tier memory:
 - **Archival memory** (vector store): source files as searchable passages
 - **Recall memory** (conversation history): institutional memory of past interactions
 
-On `setup`, the agent loads all matching files, then bootstraps by analyzing the codebase and populating its core memory blocks. On `sync`, only changed files (via `git diff`) are re-indexed.
+On `setup`, the agent loads all matching files, then bootstraps by analyzing the codebase and populating its core memory blocks. On `sync`, only changed files (via `git diff`) are re-indexed. On `watch`, file-system changes are batched with a short debounce and synced immediately, with periodic polling as a fallback.
 
 ## Development
 

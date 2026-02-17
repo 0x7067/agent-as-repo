@@ -24,6 +24,9 @@ describe("parseConfig", () => {
     expect(config.repos["my-app"].maxFileSizeKb).toBe(50);
     expect(config.repos["my-app"].memoryBlockLimit).toBe(5000);
     expect(config.repos["my-app"].bootstrapOnCreate).toBe(true);
+    expect(config.defaults.askTimeoutMs).toBe(20_000);
+    expect(config.defaults.fastAskTimeoutMs).toBe(8_000);
+    expect(config.defaults.cacheTtlMs).toBe(180_000);
   });
 
   it("defaults chunking to 'raw' when omitted", () => {
@@ -40,12 +43,34 @@ describe("parseConfig", () => {
   it("applies explicit defaults over built-in defaults", () => {
     const raw = {
       ...validRaw,
-      defaults: { max_file_size_kb: 100, memory_block_limit: 3000, bootstrap_on_create: false },
+      defaults: {
+        max_file_size_kb: 100,
+        memory_block_limit: 3000,
+        bootstrap_on_create: false,
+        ask_timeout_ms: 12345,
+        fast_ask_timeout_ms: 3456,
+        cache_ttl_ms: 7777,
+      },
     };
     const config = parseConfig(raw);
     expect(config.repos["my-app"].maxFileSizeKb).toBe(100);
     expect(config.repos["my-app"].memoryBlockLimit).toBe(3000);
     expect(config.repos["my-app"].bootstrapOnCreate).toBe(false);
+    expect(config.defaults.askTimeoutMs).toBe(12345);
+    expect(config.defaults.fastAskTimeoutMs).toBe(3456);
+    expect(config.defaults.cacheTtlMs).toBe(7777);
+  });
+
+  it("accepts optional letta.fast_model", () => {
+    const raw = {
+      ...validRaw,
+      letta: {
+        ...validRaw.letta,
+        fast_model: "openai/gpt-4.1-mini",
+      },
+    };
+    const config = parseConfig(raw);
+    expect(config.letta.fastModel).toBe("openai/gpt-4.1-mini");
   });
 
   it("allows per-repo overrides of defaults", () => {

@@ -3,7 +3,14 @@ import type { Passage as LettaPassage } from "@letta-ai/letta-client/resources/p
 import type { BlockResponse } from "@letta-ai/letta-client/resources/blocks/blocks.js";
 import type { AssistantMessage, LettaResponse } from "@letta-ai/letta-client/resources/agents/messages.js";
 import { buildPersona } from "../core/prompts.js";
-import type { AgentProvider, CreateAgentParams, CreateAgentResult, Passage, MemoryBlock } from "./provider.js";
+import type {
+  AgentProvider,
+  CreateAgentParams,
+  CreateAgentResult,
+  Passage,
+  MemoryBlock,
+  SendMessageOptions,
+} from "./provider.js";
 
 function isHttpStatus(err: unknown, code: number): boolean {
   if (typeof err !== "object" || err === null) return false;
@@ -82,11 +89,23 @@ export class LettaProvider implements AgentProvider {
     return result[0].id ?? "";
   }
 
-  async sendMessage(agentId: string, content: string): Promise<string> {
+  async sendMessage(agentId: string, content: string, options?: SendMessageOptions): Promise<string> {
+    const payload: {
+      messages: Array<{ role: "user"; content: string }>;
+      override_model?: string;
+      max_steps?: number;
+    } = {
+      messages: [{ role: "user", content }],
+    };
+    if (options?.overrideModel) {
+      payload.override_model = options.overrideModel;
+    }
+    if (options?.maxSteps !== undefined) {
+      payload.max_steps = options.maxSteps;
+    }
+
     const resp: LettaResponse = await this.withRetry(() =>
-      this.client.agents.messages.create(agentId, {
-        messages: [{ role: "user", content }],
-      }),
+      this.client.agents.messages.create(agentId, payload),
     );
 
     for (const msg of resp.messages) {

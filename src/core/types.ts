@@ -18,12 +18,16 @@ export interface Config {
   letta: {
     model: string;
     embedding: string;
+    fastModel?: string;
   };
   defaults: {
     maxFileSizeKb: number;
     memoryBlockLimit: number;
     bootstrapOnCreate: boolean;
     chunking: "raw" | "tree-sitter";
+    askTimeoutMs?: number;
+    fastAskTimeoutMs?: number;
+    cacheTtlMs?: number;
   };
   repos: Record<string, RepoConfig>;
 }
