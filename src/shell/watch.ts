@@ -86,7 +86,10 @@ export async function watchRepos(params: WatchParams): Promise<void> {
       const currentHead = gitHeadCommit(repoConfig.path);
       if (!currentHead) continue;
 
-      if (!shouldSync(agentInfo.lastSyncCommit, currentHead)) continue;
+      if (!shouldSync(agentInfo.lastSyncCommit, currentHead)) {
+        log(`[${repoName}] no changes (HEAD=${currentHead.slice(0, 7)})`);
+        continue;
+      }
 
       syncing.add(repoName);
       try {

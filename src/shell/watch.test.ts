@@ -147,7 +147,7 @@ describe("watchRepos", () => {
     await watchPromise;
 
     expect(mockedSyncRepo).not.toHaveBeenCalled();
-    expect(log).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith("[my-app] no changes (HEAD=abc123)");
   });
 
   it("logs error without crashing on sync failure", async () => {
