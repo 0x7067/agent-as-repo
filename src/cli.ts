@@ -6,6 +6,7 @@ import * as path from "path";
 import * as readline from "readline/promises";
 import { execFileSync } from "child_process";
 import { loadConfig } from "./shell/config-loader.js";
+import { runInit } from "./shell/init.js";
 import { collectFiles } from "./shell/file-collector.js";
 import { loadState, saveState } from "./shell/state-store.js";
 import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
@@ -123,6 +124,20 @@ function printProgress(loaded: number, total: number): void {
 
 const program = new Command();
 program.name("repo-expert").description("Persistent AI agents for git repositories").version("0.1.0");
+
+program
+  .command("init")
+  .description("Interactive setup: configure API key, scan a repo, generate config.yaml")
+  .action(async () => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      await runInit(rl);
+    } catch {
+      // runInit sets process.exitCode and logs errors
+    } finally {
+      rl.close();
+    }
+  });
 
 program
   .command("setup")

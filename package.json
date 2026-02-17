@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "bin": {
+    "repo-expert": "./src/cli.ts",
     "letta-tools": "./src/mcp-server.ts"
   },
   "scripts": {
@@ -19,6 +20,7 @@
     "@letta-ai/letta-client": "^1.7.8",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "commander": "^14.0.3",
+    "dotenv": "^17.3.1",
     "fast-glob": "^3.3.3",
     "js-yaml": "^4.1.1",
     "p-limit": "^7.3.0",
@@ -27,7 +29,6 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.2.3",
-    "dotenv": "^17.3.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"

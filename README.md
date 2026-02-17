@@ -10,7 +10,17 @@ Unlike IDE tools that forget between sessions, these agents accumulate knowledge
 - [pnpm](https://pnpm.io/)
 - A [Letta Cloud](https://app.letta.com/) account and API key
 
-## Setup
+## Quick Start
+
+```bash
+pnpm install
+pnpm repo-expert init    # guided setup: API key + repo config
+pnpm repo-expert setup   # create agents
+```
+
+## Manual Setup
+
+If you prefer manual configuration over `init`:
 
 ```bash
 pnpm install
