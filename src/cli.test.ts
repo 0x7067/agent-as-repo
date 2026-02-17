@@ -55,10 +55,6 @@ async function makeTempDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 const tempDirs: string[] = [];
 
 async function makeWorkspace(prefix: string): Promise<string> {
@@ -708,7 +704,11 @@ describe("cli contract", () => {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    await sleep(200);
+    await new Promise<void>((resolve) => {
+      child.stdout!.on("data", (chunk: Buffer) => {
+        if (chunk.toString().includes("Loading")) resolve();
+      });
+    });
     child.kill("SIGINT");
     const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
       child.on("exit", (code, signal) => resolve({ code, signal }));
