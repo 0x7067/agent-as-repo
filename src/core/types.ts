@@ -66,5 +66,6 @@ export interface AgentState {
 
 /** Top-level persisted state. */
 export interface AppState {
+  stateVersion: number;
   agents: Record<string, AgentState>;
 }

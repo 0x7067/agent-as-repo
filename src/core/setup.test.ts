@@ -20,6 +20,10 @@ describe("getSetupMode", () => {
     expect(getSetupMode(undefined, false)).toBe("create");
   });
 
+  it("returns create for --reindex when no agent exists", () => {
+    expect(getSetupMode(undefined, false, { forceReindex: true })).toBe("create");
+  });
+
   it("returns resume_full when agent exists but has no passages", () => {
     const agent = makeAgent();
     expect(getSetupMode(agent, false)).toBe("resume_full");
@@ -57,6 +61,14 @@ describe("getSetupMode", () => {
       lastBootstrap: "2026-01-01T00:10:00.000Z",
     });
     expect(getSetupMode(agent, true)).toBe("skip");
+  });
+
+  it("returns reindex_full when --reindex is requested on existing agent", () => {
+    const agent = makeAgent({
+      passages: { "src/a.ts": ["p-1"] },
+      lastSyncCommit: "abc123",
+    });
+    expect(getSetupMode(agent, false, { forceReindex: true })).toBe("reindex_full");
   });
 });
 

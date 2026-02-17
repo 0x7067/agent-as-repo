@@ -16,6 +16,13 @@ interface InitResult {
   repoName: string;
 }
 
+export interface RunInitOptions {
+  apiKey?: string;
+  repoPath?: string;
+  assumeYes?: boolean;
+  allowPrompts?: boolean;
+}
+
 /**
  * Scan a directory for file paths (no content). Used for extension/ignore detection.
  */
@@ -41,7 +48,13 @@ function tildeify(absPath: string): string {
 /**
  * Interactive init flow. Prompts for API key, repo path, confirms settings, writes files.
  */
-export async function runInit(rl: readline.Interface): Promise<InitResult> {
+export async function runInit(rl: readline.Interface, options: RunInitOptions = {}): Promise<InitResult> {
+  const {
+    apiKey: apiKeyFromFlag,
+    repoPath: repoPathFromFlag,
+    assumeYes = false,
+    allowPrompts = true,
+  } = options;
   console.log("repo-expert init — set up your first agent\n");
 
   // 1. API key
@@ -63,7 +76,16 @@ export async function runInit(rl: readline.Interface): Promise<InitResult> {
 
     if (hasEnvFile) {
       console.log("API key: found in .env");
+    } else if (apiKeyFromFlag && apiKeyFromFlag.trim()) {
+      await fs.writeFile(envPath, `LETTA_API_KEY=${apiKeyFromFlag.trim()}\n`, "utf-8");
+      envWritten = envPath;
+      console.log(`API key: wrote ${envPath} from --api-key`);
     } else {
+      if (!allowPrompts) {
+        console.error("API key is required in non-interactive mode. Pass --api-key or set LETTA_API_KEY.");
+        process.exitCode = 1;
+        throw new Error("Missing API key");
+      }
       const apiKey = await rl.question("Letta API key (from https://app.letta.com/): ");
       if (!apiKey.trim()) {
         console.error("API key is required. Get one at https://app.letta.com/");
@@ -77,7 +99,12 @@ export async function runInit(rl: readline.Interface): Promise<InitResult> {
   }
 
   // 2. Repo path
-  const rawPath = await rl.question("\nPath to your git repo: ");
+  const rawPath = repoPathFromFlag ?? (allowPrompts ? await rl.question("\nPath to your git repo: ") : "");
+  if (!rawPath.trim()) {
+    console.error("Repository path is required. Pass --repo-path in non-interactive mode.");
+    process.exitCode = 1;
+    throw new Error("Missing repo path");
+  }
   const resolvedPath = rawPath.trim().startsWith("~/")
     ? path.resolve(os.homedir(), rawPath.trim().slice(2))
     : path.resolve(rawPath.trim());
@@ -138,7 +165,7 @@ export async function runInit(rl: readline.Interface): Promise<InitResult> {
   const descPrompt = defaultDescription
     ? `Description [${defaultDescription}]: `
     : "Description (e.g. \"React Native mobile app\"): ";
-  const descInput = await rl.question(`\n${descPrompt}`);
+  const descInput = assumeYes ? "" : (allowPrompts ? await rl.question(`\n${descPrompt}`) : "");
   const description = descInput.trim() || defaultDescription || `${repoName} repository`;
 
   // 5. Confirm
@@ -149,7 +176,7 @@ export async function runInit(rl: readline.Interface): Promise<InitResult> {
   console.log(`  Extensions: ${extensions.join(", ")}`);
   console.log(`  Ignore dirs: ${ignoreDirs.join(", ")}`);
 
-  const confirm = await rl.question("\nWrite config.yaml? [Y/n] ");
+  const confirm = assumeYes ? "y" : (allowPrompts ? await rl.question("\nWrite config.yaml? [Y/n] ") : "y");
   if (confirm.trim().toLowerCase() === "n") {
     console.log("Aborted.");
     process.exitCode = 1;

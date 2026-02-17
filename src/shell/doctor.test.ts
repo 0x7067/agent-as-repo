@@ -2,10 +2,11 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it } from "vitest";
-import { checkApiKey, checkConfigFile, runAllChecks } from "./doctor.js";
+import { checkApiKey, checkConfigFile, runAllChecks, runDoctorFixes } from "./doctor.js";
 
 const tempDirs: string[] = [];
 const originalApiKey = process.env.LETTA_API_KEY;
+const originalCwd = process.cwd();
 
 async function makeTempDir(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -14,6 +15,7 @@ async function makeTempDir(prefix: string): Promise<string> {
 }
 
 afterEach(async () => {
+  process.chdir(originalCwd);
   process.env.LETTA_API_KEY = originalApiKey;
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
@@ -64,5 +66,22 @@ describe("doctor shell checks", () => {
     expect(names).toContain("Config file");
     expect(names).toContain("Git");
     expect(names).toContain('Repo "my-app"');
+  });
+
+  it("runDoctorFixes creates missing config, env, and state", async () => {
+    const tempDir = await makeTempDir("doctor-fix-");
+    process.chdir(tempDir);
+    const configPath = path.join(tempDir, "config.yaml");
+    await fs.writeFile(path.join(tempDir, "config.example.yaml"), "repos: {}\nletta:\n  model: x\n  embedding: y\n", "utf-8");
+
+    const result = await runDoctorFixes(configPath);
+
+    expect(result.applied.some((line) => line.includes(".env"))).toBe(true);
+    expect(result.applied.some((line) => line.includes("config.example.yaml"))).toBe(true);
+    expect(result.applied.some((line) => line.includes(".repo-expert-state.json"))).toBe(true);
+
+    await expect(fs.access(path.join(tempDir, ".env"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(tempDir, "config.yaml"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(tempDir, ".repo-expert-state.json"))).resolves.toBeUndefined();
   });
 });

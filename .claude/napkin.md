@@ -12,6 +12,8 @@
 | 2026-02-17 | self | Started repository exploration before reading `.claude/napkin.md` | Read napkin first at session start, then begin codebase/tool work |
 | 2026-02-17 | self | CLI integration tests tried to execute `src/cli.ts` relative to temp CWD, causing module-not-found failures | Use an absolute entry path when spawning CLI processes from temp directories |
 | 2026-02-17 | self | `rg` pattern beginning with `--` was parsed as command flags and broke a verification grep | Use `rg -n -- \"pattern\" file` when the search pattern may begin with hyphens |
+| 2026-02-17 | self | Assumed init always writes `.env`; tests failed when `LETTA_API_KEY` was inherited from parent env | In integration tests, control env explicitly (`LETTA_API_KEY=\"\"`) when asserting `.env` creation |
+| 2026-02-17 | self | `sync --dry-run --full` still required git HEAD, causing unnecessary failures on non-git fixtures | For dry-run planning paths, relax git HEAD requirements when no write/network actions depend on it |
 
 ## User Preferences
 - Use `/platform-cli` skill for CLI design

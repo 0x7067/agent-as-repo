@@ -51,6 +51,7 @@ const testConfig: Config = {
 
 function makeState(lastSyncCommit: string | null = "abc123"): AppState {
   return {
+    stateVersion: 2,
     agents: {
       "my-app": {
         agentId: "agent-abc",

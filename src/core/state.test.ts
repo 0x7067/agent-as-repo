@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  STATE_SCHEMA_VERSION,
   createEmptyState,
   addAgentToState,
   updatePassageMap,
@@ -10,6 +11,7 @@ import {
 describe("state operations", () => {
   it("creates an empty state", () => {
     const state = createEmptyState();
+    expect(state.stateVersion).toBe(STATE_SCHEMA_VERSION);
     expect(state.agents).toEqual({});
   });
 

@@ -76,4 +76,26 @@ describe.sequential("runInit", () => {
     expect(config).toContain("repo:");
     expect(config).toContain(".ts");
   });
+
+  it("supports non-interactive options without prompts", async () => {
+    const workspace = await makeTempDir("init-workspace-");
+    const repoDir = path.join(workspace, "repo");
+    await fs.mkdir(path.join(repoDir, ".git"), { recursive: true });
+    await fs.writeFile(path.join(repoDir, "index.ts"), "export const ready = true;\n", "utf-8");
+
+    process.chdir(workspace);
+    delete process.env.LETTA_API_KEY;
+    const rl = makeRl([]) as unknown as readline.Interface;
+
+    const result = await runInit(rl, {
+      apiKey: "abc123",
+      repoPath: repoDir,
+      assumeYes: true,
+      allowPrompts: false,
+    });
+
+    expect(result.repoName).toBe("repo");
+    await expect(fs.access(path.join(workspace, ".env"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(workspace, "config.yaml"))).resolves.toBeUndefined();
+  });
 });

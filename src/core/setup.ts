@@ -1,9 +1,28 @@
 import type { AgentState } from "./types.js";
 
-export type SetupMode = "create" | "resume_full" | "resume_bootstrap" | "skip";
+export type SetupMode = "create" | "resume_full" | "resume_bootstrap" | "reindex_full" | "skip";
 
-export function getSetupMode(agent: AgentState | undefined, bootstrapOnCreate: boolean): SetupMode {
+export interface SetupModeOptions {
+  forceResume?: boolean;
+  forceReindex?: boolean;
+}
+
+export function getSetupMode(
+  agent: AgentState | undefined,
+  bootstrapOnCreate: boolean,
+  options: SetupModeOptions = {},
+): SetupMode {
+  if (options.forceReindex) {
+    return agent ? "reindex_full" : "create";
+  }
   if (!agent) return "create";
+
+  if (options.forceResume) {
+    const hasPassages = Object.keys(agent.passages).length > 0;
+    if (!hasPassages || !agent.lastSyncCommit) return "resume_full";
+    if (bootstrapOnCreate && !agent.lastBootstrap) return "resume_bootstrap";
+    return "skip";
+  }
 
   const hasPassages = Object.keys(agent.passages).length > 0;
   if (!hasPassages) return "resume_full";

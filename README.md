@@ -21,6 +21,14 @@ pnpm repo-expert onboard my-app
 pnpm repo-expert ask my-app "How does authentication work?"
 ```
 
+Non-interactive bootstrap:
+
+```bash
+pnpm repo-expert --no-input init --api-key "$LETTA_API_KEY" --repo-path ~/repos/my-app --yes
+pnpm repo-expert setup --reindex --json
+pnpm repo-expert sync --dry-run --json
+```
+
 ## Manual Setup
 
 If you prefer manual configuration over `init`:

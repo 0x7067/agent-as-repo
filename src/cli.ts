@@ -8,19 +8,20 @@ import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
 import { loadConfig } from "./shell/config-loader.js";
 import { runInit } from "./shell/init.js";
-import { runAllChecks } from "./shell/doctor.js";
+import { runAllChecks, runDoctorFixes } from "./shell/doctor.js";
 import { formatDoctorReport } from "./core/doctor.js";
 import { ConfigError, formatConfigError } from "./core/config.js";
 import { collectFiles } from "./shell/file-collector.js";
 import { StateFileError, loadState, saveState } from "./shell/state-store.js";
 import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
 import { bootstrapAgent } from "./shell/bootstrap.js";
+import type { AgentProvider, CreateAgentParams } from "./shell/provider.js";
 import { LettaProvider } from "./shell/letta-provider.js";
 import { rawTextStrategy } from "./core/chunker.js";
 import { shouldIncludeFile } from "./core/filter.js";
 import { addAgentToState, removeAgentFromState, updateAgentField, updatePassageMap } from "./core/state.js";
 import { syncRepo } from "./shell/sync.js";
-import { getAgentStatus } from "./shell/status.js";
+import { getAgentStatus, getAgentStatusData } from "./shell/status.js";
 import { exportAgent } from "./shell/export.js";
 import { onboardAgent } from "./shell/onboard.js";
 import { broadcastAsk } from "./shell/group-provider.js";
@@ -34,6 +35,13 @@ import type { AgentState, AppState, Config } from "./core/types.js";
 interface SetupOpts {
   repo?: string;
   config: string;
+  resume?: boolean;
+  reindex?: boolean;
+  json?: boolean;
+  loadRetries: string;
+  bootstrapRetries: string;
+  loadTimeoutMs: string;
+  bootstrapTimeoutMs: string;
 }
 
 interface ProgramOpts {
@@ -41,9 +49,16 @@ interface ProgramOpts {
   debug?: boolean;
 }
 
+interface InitOpts {
+  apiKey?: string;
+  repoPath?: string;
+  yes?: boolean;
+}
+
 interface DoctorOpts {
   config: string;
   json?: boolean;
+  fix?: boolean;
 }
 
 interface AskOpts {
@@ -57,6 +72,8 @@ interface SyncOpts {
   full?: boolean;
   since?: string;
   config: string;
+  json?: boolean;
+  dryRun?: boolean;
 }
 
 interface RepoOpts {
@@ -67,6 +84,7 @@ interface RepoOpts {
 interface DestroyOpts {
   repo?: string;
   force?: boolean;
+  dryRun?: boolean;
 }
 
 interface WatchOpts {
@@ -103,6 +121,68 @@ function requireApiKey(): void {
 function createProvider(): LettaProvider {
   requireApiKey();
   return new LettaProvider(new Letta({ timeout: 5 * 60 * 1000 }));
+}
+
+class FakeProvider implements AgentProvider {
+  private nextAgentId = 1;
+  private nextPassageId = 1;
+  private passagesByAgent: Record<string, { id: string; text: string }[]> = {};
+  private blocksByAgent: Record<string, Record<string, { value: string; limit: number }>> = {};
+
+  async createAgent(_params: CreateAgentParams): Promise<{ agentId: string }> {
+    const agentId = `fake-agent-${this.nextAgentId++}`;
+    this.passagesByAgent[agentId] = [];
+    this.blocksByAgent[agentId] = {
+      persona: { value: "fake", limit: 5000 },
+      architecture: { value: "fake", limit: 5000 },
+      conventions: { value: "fake", limit: 5000 },
+    };
+    return { agentId };
+  }
+
+  async deleteAgent(agentId: string): Promise<void> {
+    delete this.passagesByAgent[agentId];
+    delete this.blocksByAgent[agentId];
+  }
+
+  async storePassage(agentId: string, text: string): Promise<string> {
+    if (process.env.REPO_EXPERT_TEST_FAIL_LOAD_ONCE === "1") {
+      process.env.REPO_EXPERT_TEST_FAIL_LOAD_ONCE = "0";
+      throw new Error("simulated load failure");
+    }
+    if (!this.passagesByAgent[agentId]) this.passagesByAgent[agentId] = [];
+    const id = `fake-passage-${this.nextPassageId++}`;
+    this.passagesByAgent[agentId].push({ id, text });
+    return id;
+  }
+
+  async deletePassage(agentId: string, passageId: string): Promise<void> {
+    const list = this.passagesByAgent[agentId] ?? [];
+    this.passagesByAgent[agentId] = list.filter((p) => p.id !== passageId);
+  }
+
+  async listPassages(agentId: string): Promise<Array<{ id: string; text: string }>> {
+    return this.passagesByAgent[agentId] ?? [];
+  }
+
+  async getBlock(agentId: string, label: string): Promise<{ value: string; limit: number }> {
+    return this.blocksByAgent[agentId]?.[label] ?? { value: "", limit: 5000 };
+  }
+
+  async sendMessage(_agentId: string, _content: string): Promise<string> {
+    if (process.env.REPO_EXPERT_TEST_FAIL_BOOTSTRAP_ONCE === "1") {
+      process.env.REPO_EXPERT_TEST_FAIL_BOOTSTRAP_ONCE = "0";
+      throw new Error("simulated bootstrap failure");
+    }
+    return "ok";
+  }
+}
+
+function createProviderForCommands(): AgentProvider {
+  if (process.env.REPO_EXPERT_TEST_FAKE_PROVIDER === "1") {
+    return new FakeProvider();
+  }
+  return createProvider();
 }
 
 async function loadConfigSafe(configPath: string): Promise<Config> {
@@ -146,6 +226,55 @@ function parseIntOrDefault(value: string, fallback: number): number {
   return Number.isNaN(n) ? fallback : n;
 }
 
+function parseNonNegativeInt(value: string, fallback: number): number {
+  const parsed = parseIntOrDefault(value, fallback);
+  return parsed < 0 ? fallback : parsed;
+}
+
+function formatDurationMs(durationMs: number): string {
+  if (durationMs < 1000) return `${durationMs}ms`;
+  return `${(durationMs / 1000).toFixed(2)}s`;
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withTimeout<T>(label: string, timeoutMs: number, fn: () => Promise<T>): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      fn(),
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
+async function withRetry<T>(
+  label: string,
+  retries: number,
+  fn: (attempt: number) => Promise<T>,
+  onRetry: (message: string) => void = (message) => console.warn(message),
+): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn(attempt);
+    } catch (err) {
+      lastErr = err;
+      if (attempt === retries) break;
+      const waitMs = 500 * Math.pow(2, attempt);
+      onRetry(`  ${label} failed (attempt ${attempt + 1}/${retries + 1}): ${(err as Error).message}. Retrying in ${waitMs}ms...`);
+      await delay(waitMs);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
 function printProgress(loaded: number, total: number): void {
   process.stdout.write(`\r  Loading passages: ${loaded}/${total}`);
 }
@@ -182,21 +311,18 @@ program.addHelpText(
 program
   .command("init")
   .description("Interactive setup: configure API key, scan a repo, generate config.yaml")
-  .action(async () => {
-    if (noInputEnabled()) {
-      console.error("init requires interactive input. Re-run without --no-input.");
-      process.exitCode = 1;
-      return;
-    }
-    if (!interactiveInputAvailable()) {
-      console.error("init requires an interactive terminal (TTY).");
-      process.exitCode = 1;
-      return;
-    }
-
+  .option("--api-key <key>", "API key to write to .env (non-interactive)")
+  .option("--repo-path <path>", "Repository path to configure")
+  .option("-y, --yes", "Accept defaults and skip confirmation prompts")
+  .action(async (opts: InitOpts) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     try {
-      await runInit(rl);
+      await runInit(rl, {
+        apiKey: opts.apiKey,
+        repoPath: opts.repoPath,
+        assumeYes: Boolean(opts.yes),
+        allowPrompts: !noInputEnabled() && interactiveInputAvailable(),
+      });
     } catch {
       // runInit sets process.exitCode and logs errors
     } finally {
@@ -209,15 +335,25 @@ program
   .description("Check setup: API key, config, repo paths, git, state consistency")
   .option("--config <path>", "Config file path", "config.yaml")
   .option("--json", "Output checks as JSON")
+  .option("--fix", "Apply safe automatic remediations before checks")
   .action(async (opts: DoctorOpts) => {
     const configPath = path.resolve(opts.config);
-    let provider: LettaProvider | null = null;
+    let fixed: Awaited<ReturnType<typeof runDoctorFixes>> | null = null;
+    if (opts.fix) {
+      fixed = await runDoctorFixes(configPath);
+      if (!opts.json) {
+        for (const line of fixed.applied) console.log(`FIXED: ${line}`);
+        for (const line of fixed.suggestions) console.log(`NOTE: ${line}`);
+      }
+    }
+
+    let provider: AgentProvider | null = null;
     if (process.env.LETTA_API_KEY) {
-      provider = new LettaProvider(new Letta({ timeout: 10_000 }));
+      provider = createProviderForCommands();
     }
     const results = await runAllChecks(provider, configPath);
     if (opts.json) {
-      console.log(JSON.stringify(results, null, 2));
+      console.log(JSON.stringify({ fixes: fixed, checks: results }, null, 2));
     } else {
       console.log(formatDoctorReport(results));
     }
@@ -230,83 +366,175 @@ program
   .description("Create agents from config.yaml")
   .option("--repo <name>", "Set up a single repo")
   .option("--config <path>", "Config file path", "config.yaml")
+  .option("--resume", "Resume incomplete setup work (default behavior)")
+  .option("--reindex", "Force full re-index for existing agents")
+  .option("--json", "Output setup results as JSON")
+  .option("--load-retries <n>", "Retries for passage loading", "2")
+  .option("--bootstrap-retries <n>", "Retries for bootstrap stage", "2")
+  .option("--load-timeout-ms <ms>", "Timeout for passage loading stage", "300000")
+  .option("--bootstrap-timeout-ms <ms>", "Timeout for bootstrap stage", "120000")
   .action(async (opts: SetupOpts) => {
+    if (opts.resume && opts.reindex) {
+      console.error("Choose either --resume or --reindex, not both.");
+      process.exitCode = 1;
+      return;
+    }
+
+    const log = opts.json ? (_: string) => {} : (line: string) => console.log(line);
+    const warn = opts.json ? (_: string) => {} : (line: string) => console.warn(line);
+    const loadRetries = parseNonNegativeInt(opts.loadRetries, 2);
+    const bootstrapRetries = parseNonNegativeInt(opts.bootstrapRetries, 2);
+    const loadTimeoutMs = parseNonNegativeInt(opts.loadTimeoutMs, 300_000);
+    const bootstrapTimeoutMs = parseNonNegativeInt(opts.bootstrapTimeoutMs, 120_000);
+
     const configPath = path.resolve(opts.config);
     const config = await loadConfigSafe(configPath);
-    const provider = createProvider();
+    const provider = createProviderForCommands();
     let state = await loadState(STATE_FILE);
 
     const repoNames = opts.repo ? [opts.repo] : Object.keys(config.repos);
+    const setupResults: Array<Record<string, unknown>> = [];
 
     for (const repoName of repoNames) {
+      const repoStart = Date.now();
       const repoConfig = config.repos[repoName];
       if (!repoConfig) {
-        console.error(`Repo "${repoName}" not found in config`);
+        const message = `Repo "${repoName}" not found in config`;
+        console.error(message);
+        setupResults.push({ repoName, status: "error", error: message, totalMs: Date.now() - repoStart });
         process.exitCode = 1;
-        return;
-      }
-
-      const existingAgent = state.agents[repoName];
-      const mode = getSetupMode(existingAgent, repoConfig.bootstrapOnCreate);
-
-      if (mode === "skip") {
-        console.log(`Agent for "${repoName}" already exists (${existingAgent!.agentId}), skipping`);
         continue;
       }
 
-      console.log(`Setting up "${repoName}"...`);
+      const existingAgent = state.agents[repoName];
+      const mode = getSetupMode(existingAgent, repoConfig.bootstrapOnCreate, {
+        forceResume: Boolean(opts.resume),
+        forceReindex: Boolean(opts.reindex),
+      });
+
+      if (mode === "skip") {
+        log(`Agent for "${repoName}" already exists (${existingAgent!.agentId}), skipping`);
+        setupResults.push({
+          repoName,
+          status: "skipped",
+          mode,
+          agentId: existingAgent!.agentId,
+          totalMs: Date.now() - repoStart,
+        });
+        continue;
+      }
+
+      log(`Setting up "${repoName}"...`);
+      let createMs = 0;
+      let indexMs = 0;
+      let bootstrapMs = 0;
+      let filesFound = 0;
+      let chunksLoaded = 0;
 
       let agentId: string;
-      if (mode === "create") {
-        const agentState = await createRepoAgent(provider, repoName, repoConfig, config.letta);
-        agentId = agentState.agentId;
-        console.log(`  Agent created: ${agentId}`);
-        state = addAgentToState(state, repoName, agentId, new Date().toISOString());
-        await saveState(STATE_FILE, state);
-      } else {
-        agentId = existingAgent!.agentId;
-        if (mode === "resume_bootstrap") {
-          console.log(`  Resuming bootstrap for existing agent (${agentId})...`);
+      try {
+        if (mode === "create") {
+          const createStart = Date.now();
+          const agentState = await createRepoAgent(provider, repoName, repoConfig, config.letta);
+          agentId = agentState.agentId;
+          createMs = Date.now() - createStart;
+          log(`  Agent created: ${agentId} (${formatDurationMs(createMs)})`);
+          state = addAgentToState(state, repoName, agentId, new Date().toISOString());
+          await saveState(STATE_FILE, state);
         } else {
-          console.log(`  Resuming indexing for existing agent (${agentId})...`);
+          agentId = existingAgent!.agentId;
+          if (mode === "resume_bootstrap") {
+            log(`  Resuming bootstrap for existing agent (${agentId})...`);
+          } else {
+            log(`  Resuming indexing for existing agent (${agentId})...`);
+          }
         }
+
+        if (mode === "create" || mode === "resume_full" || mode === "reindex_full") {
+          const indexStart = Date.now();
+          log(`  Collecting files from ${repoConfig.path}...`);
+          const files = await collectFiles(repoConfig);
+          filesFound = files.length;
+          log(`  Found ${files.length} files`);
+
+          const chunks = files.flatMap((f) => rawTextStrategy(f));
+          chunksLoaded = chunks.length;
+          log(`  Loading ${chunks.length} passages...`);
+          const passageMap = await withRetry(
+            `loading passages for "${repoName}"`,
+            loadRetries,
+            () => withTimeout(
+              `Loading passages for "${repoName}"`,
+              loadTimeoutMs,
+              () => loadPassages(provider, agentId, chunks, 20, opts.json ? undefined : printProgress),
+            ),
+            warn,
+          );
+          if (chunks.length > 0 && !opts.json) process.stdout.write("\n");
+          state = updatePassageMap(state, repoName, passageMap);
+          await saveState(STATE_FILE, state);
+          indexMs = Date.now() - indexStart;
+          log(`  Index phase completed in ${formatDurationMs(indexMs)}.`);
+        }
+
+        // Store HEAD commit so incremental sync works immediately
+        const headCommit = gitHeadCommit(repoConfig.path);
+        if (headCommit) {
+          state = updateAgentField(state, repoName, { lastSyncCommit: headCommit });
+          await saveState(STATE_FILE, state);
+        }
+
+        if (repoConfig.bootstrapOnCreate && (mode === "create" || mode === "resume_full" || mode === "resume_bootstrap" || mode === "reindex_full")) {
+          const bootstrapStart = Date.now();
+          log(`  Bootstrapping...`);
+          await withRetry(
+            `bootstrap for "${repoName}"`,
+            bootstrapRetries,
+            () => withTimeout(`Bootstrap for "${repoName}"`, bootstrapTimeoutMs, () => bootstrapAgent(provider, agentId)),
+            warn,
+          );
+          state = updateAgentField(state, repoName, { lastBootstrap: new Date().toISOString() });
+          await saveState(STATE_FILE, state);
+          bootstrapMs = Date.now() - bootstrapStart;
+          log(`  Bootstrap complete (${formatDurationMs(bootstrapMs)}).`);
+        }
+
+        const totalMs = Date.now() - repoStart;
+        log(`  Done: "${repoName}" (${formatDurationMs(totalMs)}).`);
+        setupResults.push({
+          repoName,
+          status: "ok",
+          mode,
+          agentId,
+          filesFound,
+          chunksLoaded,
+          createMs,
+          indexMs,
+          bootstrapMs,
+          totalMs,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`Setup failed for "${repoName}": ${message}`);
+        setupResults.push({
+          repoName,
+          status: "error",
+          mode,
+          error: message,
+          totalMs: Date.now() - repoStart,
+        });
+        process.exitCode = 1;
       }
-
-      if (mode === "create" || mode === "resume_full") {
-        console.log(`  Collecting files from ${repoConfig.path}...`);
-        const files = await collectFiles(repoConfig);
-        console.log(`  Found ${files.length} files`);
-
-        const chunks = files.flatMap((f) => rawTextStrategy(f));
-        console.log(`  Loading ${chunks.length} passages...`);
-        const passageMap = await loadPassages(provider, agentId, chunks, 20, printProgress);
-        if (chunks.length > 0) process.stdout.write("\n");
-        state = updatePassageMap(state, repoName, passageMap);
-        await saveState(STATE_FILE, state);
-      }
-
-      // Store HEAD commit so incremental sync works immediately
-      const headCommit = gitHeadCommit(repoConfig.path);
-      if (headCommit) {
-        state = updateAgentField(state, repoName, { lastSyncCommit: headCommit });
-        await saveState(STATE_FILE, state);
-      }
-
-      if (repoConfig.bootstrapOnCreate && (mode === "create" || mode === "resume_full" || mode === "resume_bootstrap")) {
-        console.log(`  Bootstrapping...`);
-        await bootstrapAgent(provider, agentId);
-        state = updateAgentField(state, repoName, { lastBootstrap: new Date().toISOString() });
-        await saveState(STATE_FILE, state);
-        console.log(`  Bootstrap complete`);
-      }
-
-      console.log(`  Done: "${repoName}"`);
     }
 
-    console.log("Setup complete.");
-    const exampleRepoName = repoNames[0] ?? "my-repo";
-    for (const line of buildPostSetupNextSteps(exampleRepoName)) {
-      console.log(line);
+    if (opts.json) {
+      console.log(JSON.stringify({ results: setupResults }, null, 2));
+    } else {
+      console.log("Setup complete.");
+      const exampleRepoName = repoNames[0] ?? "my-repo";
+      for (const line of buildPostSetupNextSteps(exampleRepoName)) {
+        console.log(line);
+      }
     }
   });
 
@@ -449,11 +677,15 @@ program
   .option("--full", "Full re-index instead of incremental")
   .option("--since <ref>", "Git ref to diff from (overrides stored commit)")
   .option("--config <path>", "Config file path", "config.yaml")
+  .option("--json", "Output sync results as JSON")
+  .option("--dry-run", "Preview sync plan without writing state or calling Letta")
   .action(async (opts: SyncOpts) => {
+    const log = opts.json ? (_: string) => {} : (line: string) => console.log(line);
     const configPath = path.resolve(opts.config);
     const config = await loadConfigSafe(configPath);
-    const provider = createProvider();
+    const provider = opts.dryRun ? null : createProviderForCommands();
     let state = await loadState(STATE_FILE);
+    const syncResults: Array<Record<string, unknown>> = [];
 
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
 
@@ -463,27 +695,32 @@ program
 
       const repoConfig = config.repos[repoName];
       if (!repoConfig) {
-        console.error(`Repo "${repoName}" not found in config`);
+        const message = `Repo "${repoName}" not found in config`;
+        console.error(message);
+        syncResults.push({ repoName, status: "error", error: message });
         process.exitCode = 1;
-        return;
+        continue;
       }
 
       const headCommit = gitHeadCommit(repoConfig.path);
-      if (!headCommit) {
-        console.error(`"${repoName}": not a git repository or git is not available (${repoConfig.path})`);
+      if (!headCommit && !(opts.dryRun && opts.full)) {
+        const message = `"${repoName}": not a git repository or git is not available (${repoConfig.path})`;
+        console.error(message);
+        syncResults.push({ repoName, status: "error", error: message });
         process.exitCode = 1;
-        return;
+        continue;
       }
 
       let changedFiles: string[];
       if (opts.full) {
         const files = await collectFiles(repoConfig);
         changedFiles = files.map((f) => f.path);
-        console.log(`Syncing "${repoName}" (full re-index, ${changedFiles.length} files)...`);
+        log(`Syncing "${repoName}" (full re-index, ${changedFiles.length} files)...`);
       } else {
         const sinceRef = opts.since ?? agentInfo.lastSyncCommit;
         if (!sinceRef) {
-          console.log(`No previous sync for "${repoName}". Run "repo-expert sync --full" or re-run "repo-expert setup".`);
+          log(`No previous sync for "${repoName}". Run "repo-expert sync --full" or re-run "repo-expert setup".`);
+          syncResults.push({ repoName, status: "skipped", reason: "no_previous_sync" });
           continue;
         }
 
@@ -495,23 +732,40 @@ program
             stdio: ["pipe", "pipe", "pipe"],
           }).trim();
         } catch {
-          console.error(`"${repoName}": git diff failed. Is "${sinceRef}" a valid ref?`);
+          const message = `"${repoName}": git diff failed. Is "${sinceRef}" a valid ref?`;
+          console.error(message);
+          syncResults.push({ repoName, status: "error", error: message });
           process.exitCode = 1;
-          return;
+          continue;
         }
         changedFiles = (diff ? diff.split("\n") : []).filter((f) => shouldIncludeFile(f, 0, repoConfig));
-        console.log(`Syncing "${repoName}" (${changedFiles.length} changed files since ${sinceRef.slice(0, 7)})...`);
+        log(`Syncing "${repoName}" (${changedFiles.length} changed files since ${sinceRef.slice(0, 7)})...`);
       }
 
       if (changedFiles.length === 0) {
-        console.log(`  No changes to sync.`);
-        state = updateAgentField(state, repoName, { lastSyncCommit: headCommit });
-        await saveState(STATE_FILE, state);
+        log(`  No changes to sync.`);
+        if (!opts.dryRun) {
+          state = updateAgentField(state, repoName, { lastSyncCommit: headCommit });
+          await saveState(STATE_FILE, state);
+        }
+        syncResults.push({ repoName, status: "ok", dryRun: Boolean(opts.dryRun), changedFiles: 0 });
+        continue;
+      }
+
+      if (opts.dryRun) {
+        syncResults.push({
+          repoName,
+          status: "ok",
+          dryRun: true,
+          changedFiles: changedFiles.length,
+          headCommit: headCommit ?? "dry-run",
+        });
+        log(`  Dry-run: would sync ${changedFiles.length} files.`);
         continue;
       }
 
       const result = await syncRepo({
-        provider,
+        provider: provider!,
         agent: agentInfo,
         changedFiles,
         collectFile: async (filePath) => {
@@ -529,14 +783,27 @@ program
       });
 
       if (result.isFullReIndex) {
-        console.log(`  Warning: ${changedFiles.length} files changed — consider --full re-index`);
+        log(`  Warning: ${changedFiles.length} files changed — consider --full re-index`);
       }
 
-      console.log(`  Deleted: ${result.filesDeleted} files, Re-indexed: ${result.filesReIndexed} files`);
+      log(`  Deleted: ${result.filesDeleted} files, Re-indexed: ${result.filesReIndexed} files`);
 
       state = updateAgentField(state, repoName, { passages: result.passages, lastSyncCommit: result.lastSyncCommit });
       await saveState(STATE_FILE, state);
-      console.log(`  Done.`);
+      log(`  Done.`);
+      syncResults.push({
+        repoName,
+        status: "ok",
+        dryRun: false,
+        changedFiles: changedFiles.length,
+        filesDeleted: result.filesDeleted,
+        filesReIndexed: result.filesReIndexed,
+        isFullReIndex: result.isFullReIndex,
+      });
+    }
+
+    if (opts.json) {
+      console.log(JSON.stringify({ results: syncResults }, null, 2));
     }
   });
 
@@ -580,17 +847,27 @@ program
   .command("status")
   .description("Show agent memory stats and health")
   .option("--repo <name>", "Show status for a single repo")
+  .option("--json", "Output status as JSON")
   .action(async (opts: RepoOpts) => {
     const state = await loadState(STATE_FILE);
-    const provider = createProvider();
+    const provider = createProviderForCommands();
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
+    const rows: Record<string, unknown>[] = [];
 
     for (const repoName of repoNames) {
       const agentInfo = requireAgent(state, repoName);
       if (!agentInfo) return;
 
-      const output = await getAgentStatus(provider, repoName, agentInfo);
-      console.log(output);
+      if (opts.json) {
+        rows.push(await getAgentStatusData(provider, repoName, agentInfo));
+      } else {
+        const output = await getAgentStatus(provider, repoName, agentInfo);
+        console.log(output);
+      }
+    }
+
+    if (opts.json) {
+      console.log(JSON.stringify(rows, null, 2));
     }
   });
 
@@ -630,6 +907,7 @@ program
   .description("Delete agents")
   .option("--repo <name>", "Destroy a single repo agent")
   .option("--force", "Skip confirmation prompt")
+  .option("--dry-run", "Preview agents that would be deleted")
   .action(async (opts: DestroyOpts) => {
     const state = await loadState(STATE_FILE);
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
@@ -637,6 +915,11 @@ program
 
     if (existing.length === 0) {
       console.log("No agents to destroy.");
+      return;
+    }
+
+    if (opts.dryRun) {
+      console.log(`Dry-run: would delete ${existing.length} agent(s): ${existing.join(", ")}`);
       return;
     }
 
@@ -660,7 +943,7 @@ program
       }
     }
 
-    const provider = createProvider();
+    const provider = createProviderForCommands();
 
     for (const repoName of existing) {
       const agentInfo = state.agents[repoName];

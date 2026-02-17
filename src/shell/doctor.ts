@@ -1,6 +1,9 @@
 import * as fs from "fs/promises";
+import * as path from "path";
 import { execFileSync } from "child_process";
 import type { CheckResult } from "../core/doctor.js";
+import { createEmptyState } from "../core/state.js";
+import { saveState } from "./state-store.js";
 import type { AgentProvider } from "./provider.js";
 
 export async function checkApiKey(): Promise<CheckResult> {
@@ -146,4 +149,48 @@ export async function runAllChecks(provider: AgentProvider | null, configPath: s
   results.push(checkGit());
 
   return results;
+}
+
+export interface DoctorFixResult {
+  applied: string[];
+  suggestions: string[];
+}
+
+export async function runDoctorFixes(configPath: string): Promise<DoctorFixResult> {
+  const applied: string[] = [];
+  const suggestions: string[] = [];
+
+  const envPath = path.resolve(".env");
+  try {
+    await fs.access(envPath);
+  } catch {
+    await fs.writeFile(envPath, "LETTA_API_KEY=your-key-here\n", "utf-8");
+    applied.push(`Created ${envPath} with LETTA_API_KEY template.`);
+  }
+
+  try {
+    await fs.access(configPath);
+  } catch {
+    const examplePath = path.resolve("config.example.yaml");
+    try {
+      await fs.copyFile(examplePath, configPath);
+      applied.push(`Copied ${examplePath} to ${configPath}.`);
+    } catch {
+      suggestions.push(`Create ${configPath} manually or run "repo-expert init".`);
+    }
+  }
+
+  const statePath = path.resolve(".repo-expert-state.json");
+  try {
+    await fs.access(statePath);
+  } catch {
+    await saveState(statePath, createEmptyState());
+    applied.push(`Created empty state file at ${statePath}.`);
+  }
+
+  if (applied.length === 0) {
+    suggestions.push("No automatic fixes were needed.");
+  }
+
+  return { applied, suggestions };
 }

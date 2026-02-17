@@ -1,7 +1,7 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import { z } from "zod/v4";
-import { createEmptyState } from "../core/state.js";
+import { STATE_SCHEMA_VERSION, createEmptyState } from "../core/state.js";
 import type { AppState } from "../core/types.js";
 
 const passageMapSchema = z.record(z.string(), z.array(z.string()));
@@ -17,16 +17,47 @@ const agentStateSchema = z.object({
 });
 
 const appStateSchema = z.object({
+  stateVersion: z.number().int().default(STATE_SCHEMA_VERSION),
   agents: z.record(z.string(), agentStateSchema).optional().default({}),
 });
 
 export class StateFileError extends Error {
   readonly filePath: string;
+  readonly backupPath: string | null;
 
-  constructor(filePath: string, details: string) {
-    super(`Invalid state file at ${filePath}: ${details}. Please remove or fix it, then re-run your command.`);
+  constructor(filePath: string, details: string, backupPath: string | null) {
+    const backupHint = backupPath ? ` A backup was created at ${backupPath}.` : "";
+    super(`Invalid state file at ${filePath}: ${details}. Please remove or fix it, then re-run your command.${backupHint}`);
     this.name = "StateFileError";
     this.filePath = filePath;
+    this.backupPath = backupPath;
+  }
+}
+
+function migrateLegacyState(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null) return raw;
+  const record = raw as Record<string, unknown>;
+
+  // v1 had no stateVersion field.
+  if (!("stateVersion" in record)) {
+    return { stateVersion: STATE_SCHEMA_VERSION, ...record };
+  }
+
+  const version = record.stateVersion;
+  if (version === 1) {
+    return { ...record, stateVersion: STATE_SCHEMA_VERSION };
+  }
+
+  return raw;
+}
+
+async function backupInvalidState(filePath: string): Promise<string | null> {
+  const backupPath = `${filePath}.bak.${Date.now()}`;
+  try {
+    await fs.copyFile(filePath, backupPath);
+    return backupPath;
+  } catch {
+    return null;
   }
 }
 
@@ -34,18 +65,29 @@ export async function loadState(filePath: string): Promise<AppState> {
   try {
     const content = await fs.readFile(filePath, "utf-8");
     const raw: unknown = JSON.parse(content);
-    return appStateSchema.parse(raw);
+    const migrated = migrateLegacyState(raw);
+    const parsed = appStateSchema.parse(migrated);
+    if (parsed.stateVersion !== STATE_SCHEMA_VERSION) {
+      const backupPath = await backupInvalidState(filePath);
+      throw new StateFileError(filePath, `unsupported state version "${parsed.stateVersion}"`, backupPath);
+    }
+    return parsed;
   } catch (err: unknown) {
     if (typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT") {
       return createEmptyState();
     }
+    if (err instanceof StateFileError) {
+      throw err;
+    }
     if (err instanceof SyntaxError) {
-      throw new StateFileError(filePath, err.message);
+      const backupPath = await backupInvalidState(filePath);
+      throw new StateFileError(filePath, err.message, backupPath);
     }
     if (err instanceof z.ZodError) {
       const issue = err.issues[0];
       const location = issue?.path?.join(".") || "root";
-      throw new StateFileError(filePath, `schema error at "${location}": ${issue?.message ?? "invalid value"}`);
+      const backupPath = await backupInvalidState(filePath);
+      throw new StateFileError(filePath, `schema error at "${location}": ${issue?.message ?? "invalid value"}`, backupPath);
     }
     throw err;
   }
@@ -55,7 +97,11 @@ export async function saveState(filePath: string, state: AppState): Promise<void
   const dir = path.dirname(filePath);
   const base = path.basename(filePath);
   const tempPath = path.join(dir, `.${base}.tmp.${process.pid}.${Date.now()}`);
+  const toPersist: AppState = {
+    ...state,
+    stateVersion: STATE_SCHEMA_VERSION,
+  };
 
-  await fs.writeFile(tempPath, JSON.stringify(state, null, 2), "utf-8");
+  await fs.writeFile(tempPath, JSON.stringify(toPersist, null, 2), "utf-8");
   await fs.rename(tempPath, filePath);
 }

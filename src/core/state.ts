@@ -1,7 +1,9 @@
 import type { AgentState, AppState, PassageMap } from "./types.js";
 
+export const STATE_SCHEMA_VERSION = 2;
+
 export function createEmptyState(): AppState {
-  return { agents: {} };
+  return { stateVersion: STATE_SCHEMA_VERSION, agents: {} };
 }
 
 export function addAgentToState(
