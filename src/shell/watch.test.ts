@@ -181,6 +181,78 @@ describe("watchRepos", () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining("Letta API down"));
   });
 
+  it("skips sync when git diff fails", async () => {
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "def456\n";
+      if (args?.includes("--name-only")) throw new Error("git diff failed");
+      return "";
+    });
+
+    const log = vi.fn();
+    const ac = new AbortController();
+
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      signal: ac.signal,
+      log,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    expect(mockedSyncRepo).not.toHaveBeenCalled();
+    expect(mockedSaveState).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("git diff failed"));
+  });
+
+  it("filters changed files by extension and ignoreDirs", async () => {
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "def456\n";
+      if (args?.includes("--name-only")) return "src/a.ts\nREADME.md\nnode_modules/pkg/index.js\n";
+      return "";
+    });
+    mockedSyncRepo.mockResolvedValue({
+      passages: { "src/a.ts": ["p-2"] },
+      lastSyncCommit: "def456",
+      filesDeleted: 0,
+      filesReIndexed: 1,
+      isFullReIndex: false,
+    });
+
+    const log = vi.fn();
+    const ac = new AbortController();
+
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      signal: ac.signal,
+      log,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    expect(mockedSyncRepo).toHaveBeenCalledTimes(1);
+    const syncCall = mockedSyncRepo.mock.calls[0][0];
+    // Only src/a.ts should pass — README.md wrong extension, node_modules filtered
+    expect(syncCall.changedFiles).toEqual(["src/a.ts"]);
+  });
+
   it("respects AbortSignal for graceful shutdown", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);

@@ -38,6 +38,22 @@ describe("exportAgent", () => {
     expect(provider.getBlock).toHaveBeenCalledTimes(3);
   });
 
+  it("strips (continued) suffix from continuation chunk file names", async () => {
+    const provider = makeMockProvider({
+      listPassages: vi.fn().mockResolvedValue([
+        { id: "p-1", text: "FILE: src/big.ts\nfirst chunk" },
+        { id: "p-2", text: "FILE: src/big.ts (continued)\nsecond chunk" },
+      ]),
+      getBlock: vi.fn().mockResolvedValue({ value: "block", limit: 5000 }),
+    });
+
+    const md = await exportAgent(provider, "my-app", "agent-abc");
+
+    expect(md).toContain("Files (1)");
+    expect(md).toContain("`src/big.ts`");
+    expect(md).not.toContain("(continued)");
+  });
+
   it("deduplicates file paths from multiple passages", async () => {
     const provider = makeExportProvider();
 

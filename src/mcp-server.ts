@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Letta } from "@letta-ai/letta-client";
 import type { AssistantMessage } from "@letta-ai/letta-client/resources/agents/messages.js";
+import { fileURLToPath } from "node:url";
 import { z } from "zod/v4";
 
 // Accept LETTA_PASSWORD as alias for LETTA_API_KEY (Codex compat)
@@ -158,7 +159,9 @@ async function main(): Promise<void> {
   await server.connect(transport);
 }
 
-main().catch((err) => {
-  process.stderr.write(`letta-tools MCP server error: ${errorMessage(err)}\n`);
-  process.exit(1);
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    process.stderr.write(`letta-tools MCP server error: ${errorMessage(err)}\n`);
+    process.exit(1);
+  });
+}

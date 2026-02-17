@@ -16,7 +16,7 @@ export async function exportAgent(
   for (const p of passages) {
     const firstLine = p.text.split("\n")[0];
     if (firstLine.startsWith(FILE_PREFIX)) {
-      files.add(firstLine.slice(FILE_PREFIX.length));
+      files.add(firstLine.slice(FILE_PREFIX.length).replace(/ \(continued\)$/, ""));
     }
   }
 

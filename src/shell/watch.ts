@@ -6,6 +6,7 @@ import { collectFiles } from "./file-collector.js";
 import { syncRepo } from "./sync.js";
 import { shouldSync, formatSyncLog } from "../core/watch.js";
 import { updateAgentField } from "../core/state.js";
+import { shouldIncludeFile } from "../core/filter.js";
 import type { AgentProvider } from "./provider.js";
 import type { Config, FileInfo } from "../core/types.js";
 
@@ -31,7 +32,7 @@ function gitHeadCommit(cwd: string): string | null {
   }
 }
 
-function gitDiffFiles(cwd: string, sinceRef: string): string[] {
+function gitDiffFiles(cwd: string, sinceRef: string): string[] | null {
   try {
     const diff = execFileSync("git", ["diff", "--name-only", `${sinceRef}..HEAD`], {
       cwd,
@@ -40,7 +41,7 @@ function gitDiffFiles(cwd: string, sinceRef: string): string[] {
     }).trim();
     return diff ? diff.split("\n") : [];
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -83,7 +84,12 @@ export async function watchRepos(params: WatchParams): Promise<void> {
 
         let changedFiles: string[];
         if (agentInfo.lastSyncCommit) {
-          changedFiles = gitDiffFiles(repoConfig.path, agentInfo.lastSyncCommit);
+          const diffResult = gitDiffFiles(repoConfig.path, agentInfo.lastSyncCommit);
+          if (diffResult === null) {
+            log(`[${repoName}] git diff failed, skipping`);
+            continue;
+          }
+          changedFiles = diffResult.filter((f) => shouldIncludeFile(f, 0, repoConfig));
         } else {
           const files = await collectFiles(repoConfig);
           changedFiles = files.map((f) => f.path);
@@ -138,11 +144,6 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     const timer = setInterval(async () => {
       if (signal.aborted) {
         clearInterval(timer);
-        // Wait for any in-progress syncs to finish
-        while (syncing.size > 0) {
-          await new Promise((r) => setTimeout(r, 100));
-        }
-        resolve();
         return;
       }
       await tick();

@@ -4,7 +4,7 @@ import { Command } from "commander";
 import { Letta } from "@letta-ai/letta-client";
 import * as path from "path";
 import * as readline from "readline/promises";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { loadConfig } from "./shell/config-loader.js";
 import { collectFiles } from "./shell/file-collector.js";
 import { loadState, saveState } from "./shell/state-store.js";
@@ -12,6 +12,7 @@ import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
 import { bootstrapAgent } from "./shell/bootstrap.js";
 import { LettaProvider } from "./shell/letta-provider.js";
 import { chunkFile } from "./core/chunker.js";
+import { shouldIncludeFile } from "./core/filter.js";
 import { addAgentToState, removeAgentFromState, updateAgentField, updatePassageMap } from "./core/state.js";
 import { syncRepo } from "./shell/sync.js";
 import { getAgentStatus } from "./shell/status.js";
@@ -53,7 +54,7 @@ async function loadConfigSafe(configPath: string): Promise<Config> {
 
 function gitHeadCommit(cwd: string): string | null {
   try {
-    return execSync("git rev-parse HEAD", { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+    return execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
   } catch {
     return null;
   }
@@ -313,7 +314,7 @@ program
 
         let diff: string;
         try {
-          diff = execSync(`git diff --name-only ${sinceRef}..HEAD`, {
+          diff = execFileSync("git", ["diff", "--name-only", `${sinceRef}..HEAD`], {
             cwd: repoConfig.path,
             encoding: "utf-8",
             stdio: ["pipe", "pipe", "pipe"],
@@ -323,7 +324,7 @@ program
           process.exitCode = 1;
           return;
         }
-        changedFiles = diff ? diff.split("\n") : [];
+        changedFiles = (diff ? diff.split("\n") : []).filter((f) => shouldIncludeFile(f, 0, repoConfig));
         console.log(`Syncing "${repoName}" (${changedFiles.length} changed files since ${sinceRef.slice(0, 7)})...`);
       }
 

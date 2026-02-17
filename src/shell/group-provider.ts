@@ -86,17 +86,20 @@ export async function broadcastAsk(
 
   return Promise.all(
     agents.map(async ({ repoName, agentId }): Promise<BroadcastResult> => {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
         const response = await Promise.race([
           provider.sendMessage(agentId, question),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`Agent "${repoName}" timed out after ${timeoutMs}ms`)), timeoutMs),
-          ),
+          new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error(`Agent "${repoName}" timed out after ${timeoutMs}ms`)), timeoutMs);
+          }),
         ]);
         return { repoName, response, error: null };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return { repoName, response: null, error: message };
+      } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
       }
     }),
   );
