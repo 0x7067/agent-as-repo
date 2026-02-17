@@ -73,7 +73,8 @@ const STATE_FILE = ".repo-expert-state.json";
 
 function requireApiKey(): void {
   if (!process.env.LETTA_API_KEY) {
-    console.error("Missing LETTA_API_KEY. Set it in your .env file or as an environment variable.");
+    console.error("Missing LETTA_API_KEY.");
+    console.error('Run "repo-expert init" to configure, or add it to .env manually.');
     process.exit(1);
   }
 }
@@ -111,7 +112,11 @@ function gitHeadCommit(cwd: string): string | null {
 function requireAgent(state: AppState, repoName: string): AgentState | null {
   const agentInfo = state.agents[repoName];
   if (!agentInfo) {
-    console.error(`No agent found for "${repoName}". Run "repo-expert setup" first.`);
+    if (Object.keys(state.agents).length === 0) {
+      console.error(`No agents found. Run "repo-expert setup" to create them.`);
+    } else {
+      console.error(`No agent found for "${repoName}". Available: ${Object.keys(state.agents).join(", ")}`);
+    }
     process.exitCode = 1;
     return null;
   }
@@ -235,7 +240,7 @@ program
       const state = await loadState(STATE_FILE);
       const repoNames = Object.keys(state.agents);
       if (repoNames.length === 0) {
-        console.error('No agents. Run "repo-expert setup" first.');
+        console.error('No agents found. Run "repo-expert setup" to create them.');
         process.exitCode = 1;
         return;
       }
@@ -303,7 +308,7 @@ program
       const state = await loadState(STATE_FILE);
       const entries = Object.entries(state.agents);
       if (entries.length === 0) {
-        console.error('No agents. Run "repo-expert setup" first.');
+        console.error('No agents found. Run "repo-expert setup" to create them.');
         process.exitCode = 1;
         return;
       }
@@ -386,7 +391,7 @@ program
       } else {
         const sinceRef = opts.since ?? agentInfo.lastSyncCommit;
         if (!sinceRef) {
-          console.log(`No previous sync for "${repoName}". Use --full for initial sync, or run setup.`);
+          console.log(`No previous sync for "${repoName}". Run "repo-expert sync --full" or re-run "repo-expert setup".`);
           continue;
         }
 
@@ -451,7 +456,7 @@ program
     const entries = Object.entries(state.agents);
 
     if (entries.length === 0) {
-      console.log('No agents. Run "repo-expert setup" first.');
+      console.log('No agents found. Run "repo-expert setup" to create them.');
       return;
     }
 
@@ -570,7 +575,7 @@ program
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
 
     if (repoNames.length === 0) {
-      console.error('No agents. Run "repo-expert setup" first.');
+      console.error('No agents found. Run "repo-expert setup" to create them.');
       process.exitCode = 1;
       return;
     }
