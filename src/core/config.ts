@@ -39,8 +39,63 @@ const rawConfigSchema = z.object({
   repos: z.record(z.string(), repoRawSchema),
 });
 
+export class ConfigError extends Error {
+  constructor(public readonly issues: string[]) {
+    super(`Config validation failed:\n${issues.map((i) => `  - ${i}`).join("\n")}`);
+    this.name = "ConfigError";
+  }
+}
+
+export function formatConfigError(err: ConfigError): string {
+  return `Config validation failed:\n${err.issues.map((i) => `  - ${i}`).join("\n")}`;
+}
+
+function zodIssuesToStrings(err: z.core.$ZodError): string[] {
+  return err.issues.map((issue) => {
+    const path = issue.path.join(".");
+    return `${path}: ${issue.message}`;
+  });
+}
+
+function validateSemantics(parsed: z.infer<typeof rawConfigSchema>): string[] {
+  const issues: string[] = [];
+
+  if (Object.keys(parsed.repos).length === 0) {
+    issues.push("repos: Must define at least one repo");
+  }
+
+  for (const [name, repo] of Object.entries(parsed.repos)) {
+    for (const ext of repo.extensions) {
+      if (!ext.startsWith(".")) {
+        issues.push(`repos.${name}.extensions: "${ext}" should start with "." (e.g. ".${ext}")`);
+      }
+    }
+
+    for (const dir of repo.ignore_dirs) {
+      if (dir.includes("/") || dir.includes("\\")) {
+        issues.push(`repos.${name}.ignore_dirs: "${dir}" should be a directory name, not a path`);
+      }
+    }
+  }
+
+  return issues;
+}
+
 export function parseConfig(raw: unknown): Config {
-  const parsed = rawConfigSchema.parse(raw);
+  let parsed: z.infer<typeof rawConfigSchema>;
+  try {
+    parsed = rawConfigSchema.parse(raw);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      throw new ConfigError(zodIssuesToStrings(err));
+    }
+    throw err;
+  }
+
+  const semanticIssues = validateSemantics(parsed);
+  if (semanticIssues.length > 0) {
+    throw new ConfigError(semanticIssues);
+  }
 
   const userDefaults = parsed.defaults ?? {};
   const defaults = {

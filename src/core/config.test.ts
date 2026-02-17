@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseConfig } from "./config.js";
+import { parseConfig, ConfigError, formatConfigError } from "./config.js";
 
 const validRaw = {
   letta: {
@@ -166,4 +166,83 @@ describe("parseConfig", () => {
     expect(config.repos["my-app"].tools).toEqual(["send_message_to_agent_and_wait_for_reply"]);
   });
 
+  it("throws ConfigError with formatted messages on schema violations", () => {
+    try {
+      parseConfig({
+        letta: {},
+        repos: { app: { path: 123, extensions: "not-array" } },
+      });
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigError);
+      const configErr = err as ConfigError;
+      expect(configErr.issues.length).toBeGreaterThan(0);
+      // Should have readable path-based messages
+      expect(configErr.issues.some((i) => i.includes("letta.model"))).toBe(true);
+      expect(configErr.issues.some((i) => i.includes("repos.app.path"))).toBe(true);
+    }
+  });
+
+  it("throws ConfigError when extensions don't start with dot", () => {
+    try {
+      parseConfig({
+        ...validRaw,
+        repos: {
+          "my-app": {
+            ...validRaw.repos["my-app"],
+            extensions: [".ts", "js", ".tsx"],
+          },
+        },
+      });
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigError);
+      const configErr = err as ConfigError;
+      expect(configErr.issues.some((i) => i.includes('"js"'))).toBe(true);
+      expect(configErr.issues.some((i) => i.includes("start with"))).toBe(true);
+    }
+  });
+
+  it("throws ConfigError when no repos defined", () => {
+    try {
+      parseConfig({
+        letta: { model: "x", embedding: "y" },
+        repos: {},
+      });
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigError);
+      const configErr = err as ConfigError;
+      expect(configErr.issues.some((i) => i.includes("at least one repo"))).toBe(true);
+    }
+  });
+
+  it("throws ConfigError when ignore_dirs contain path separators", () => {
+    try {
+      parseConfig({
+        ...validRaw,
+        repos: {
+          "my-app": {
+            ...validRaw.repos["my-app"],
+            ignore_dirs: ["node_modules", "src/dist"],
+          },
+        },
+      });
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigError);
+      const configErr = err as ConfigError;
+      expect(configErr.issues.some((i) => i.includes("src/dist"))).toBe(true);
+    }
+  });
+});
+
+describe("formatConfigError", () => {
+  it("formats a ConfigError into readable lines", () => {
+    const err = new ConfigError(["letta.model: Required", "repos.app.path: Expected string"]);
+    const output = formatConfigError(err);
+    expect(output).toContain("Config validation failed");
+    expect(output).toContain("letta.model: Required");
+    expect(output).toContain("repos.app.path: Expected string");
+  });
 });

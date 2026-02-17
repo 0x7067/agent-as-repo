@@ -9,6 +9,7 @@ import { loadConfig } from "./shell/config-loader.js";
 import { runInit } from "./shell/init.js";
 import { runAllChecks } from "./shell/doctor.js";
 import { formatDoctorReport } from "./core/doctor.js";
+import { ConfigError, formatConfigError } from "./core/config.js";
 import { collectFiles } from "./shell/file-collector.js";
 import { loadState, saveState } from "./shell/state-store.js";
 import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
@@ -88,7 +89,11 @@ async function loadConfigSafe(configPath: string): Promise<Config> {
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       console.error(`Config file not found: ${configPath}`);
-      console.error("Copy config.example.yaml to config.yaml and customize it.");
+      console.error('Run "repo-expert init" or copy config.example.yaml to config.yaml.');
+      process.exit(1);
+    }
+    if (err instanceof ConfigError) {
+      console.error(formatConfigError(err));
       process.exit(1);
     }
     throw err;
