@@ -77,6 +77,42 @@ describe("syncRepo", () => {
     expect(result.passages["src/new.ts"]).toBeDefined();
   });
 
+  it("uses custom chunkingStrategy when provided", async () => {
+    const customStrategy = vi.fn().mockReturnValue([
+      { text: "custom chunk", sourcePath: "src/a.ts" },
+    ]);
+    const provider = makeMockProvider();
+    await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: ["src/a.ts"],
+      collectFile: async (path) => ({ path, content: "content", sizeKb: 1 }),
+      headCommit: "def456",
+      chunkingStrategy: customStrategy,
+    });
+
+    expect(customStrategy).toHaveBeenCalledWith({ path: "src/a.ts", content: "content", sizeKb: 1 });
+    expect(provider.storePassage).toHaveBeenCalledWith("agent-abc", "custom chunk");
+  });
+
+  it("defaults to rawTextStrategy when chunkingStrategy is omitted", async () => {
+    const provider = makeMockProvider();
+    const result = await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: ["src/a.ts"],
+      collectFile: async (path) => ({ path, content: "const x = 1;", sizeKb: 0.01 }),
+      headCommit: "def456",
+    });
+
+    // rawTextStrategy produces a chunk with FILE: prefix
+    expect(provider.storePassage).toHaveBeenCalledWith(
+      "agent-abc",
+      expect.stringContaining("FILE: src/a.ts"),
+    );
+    expect(result.passages["src/a.ts"]).toBeDefined();
+  });
+
   it("returns unchanged state for empty changed files", async () => {
     const provider = makeMockProvider();
     const result = await syncRepo({

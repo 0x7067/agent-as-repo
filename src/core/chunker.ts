@@ -1,4 +1,4 @@
-import { FILE_PREFIX, type Chunk } from "./types.js";
+import { FILE_PREFIX, type Chunk, type ChunkingStrategy, type FileInfo } from "./types.js";
 
 export function chunkFile(
   filePath: string,
@@ -29,3 +29,7 @@ export function chunkFile(
 
   return chunks;
 }
+
+/** Default chunking strategy: delegates to chunkFile. */
+export const rawTextStrategy: ChunkingStrategy = (file: FileInfo): Chunk[] =>
+  chunkFile(file.path, file.content);

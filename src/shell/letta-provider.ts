@@ -19,18 +19,16 @@ export class LettaProvider implements AgentProvider {
   constructor(private client: Letta, private retryBaseDelay = 1000) {}
 
   private async withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
-    let lastError: unknown;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         return await fn();
       } catch (err) {
         if (!isRateLimitError(err) || attempt === maxRetries) throw err;
-        lastError = err;
         const delay = this.retryBaseDelay * Math.pow(2, attempt);
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
-    throw lastError;
+    throw new Error("retry loop exhausted without result");
   }
 
   async createAgent(params: CreateAgentParams): Promise<CreateAgentResult> {

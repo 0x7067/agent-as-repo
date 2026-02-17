@@ -5,12 +5,14 @@ const BUILT_IN_DEFAULTS = {
   maxFileSizeKb: 50,
   memoryBlockLimit: 5000,
   bootstrapOnCreate: true,
+  chunking: "raw" as const,
 };
 
 const defaultsSchema = z.object({
   max_file_size_kb: z.number().optional(),
   memory_block_limit: z.number().optional(),
   bootstrap_on_create: z.boolean().optional(),
+  chunking: z.enum(["raw", "tree-sitter"]).optional(),
   tools: z.array(z.string()).optional(),
 });
 
@@ -45,6 +47,7 @@ export function parseConfig(raw: unknown): Config {
     maxFileSizeKb: userDefaults.max_file_size_kb ?? BUILT_IN_DEFAULTS.maxFileSizeKb,
     memoryBlockLimit: userDefaults.memory_block_limit ?? BUILT_IN_DEFAULTS.memoryBlockLimit,
     bootstrapOnCreate: userDefaults.bootstrap_on_create ?? BUILT_IN_DEFAULTS.bootstrapOnCreate,
+    chunking: userDefaults.chunking ?? BUILT_IN_DEFAULTS.chunking,
   };
 
   const repos: Record<string, RepoConfig> = {};

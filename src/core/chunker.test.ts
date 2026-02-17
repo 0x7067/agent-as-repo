@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { chunkFile } from "./chunker.js";
+import { chunkFile, rawTextStrategy } from "./chunker.js";
 
 describe("chunkFile", () => {
   it("returns a single chunk for small content", () => {
@@ -39,5 +39,19 @@ describe("chunkFile", () => {
     expect(allText).toContain(section1);
     expect(allText).toContain(section2);
     expect(allText).toContain(section3);
+  });
+});
+
+describe("rawTextStrategy", () => {
+  it("produces identical output to chunkFile", () => {
+    const file = { path: "src/index.ts", content: "const x = 1;", sizeKb: 0.012 };
+    const fromStrategy = rawTextStrategy(file);
+    const fromChunkFile = chunkFile(file.path, file.content);
+    expect(fromStrategy).toEqual(fromChunkFile);
+  });
+
+  it("returns empty array for empty content", () => {
+    const file = { path: "empty.ts", content: "", sizeKb: 0 };
+    expect(rawTextStrategy(file)).toEqual([]);
   });
 });

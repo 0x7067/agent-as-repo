@@ -8,7 +8,7 @@ import { shouldSync, formatSyncLog } from "../core/watch.js";
 import { updateAgentField } from "../core/state.js";
 import { shouldIncludeFile } from "../core/filter.js";
 import type { AgentProvider } from "./provider.js";
-import type { Config, FileInfo } from "../core/types.js";
+import type { AgentState, Config, FileInfo } from "../core/types.js";
 
 export interface WatchParams {
   provider: AgentProvider;
@@ -45,6 +45,15 @@ function gitDiffFiles(cwd: string, sinceRef: string): string[] | null {
   }
 }
 
+async function updateAndSaveState(
+  statePath: string,
+  repoName: string,
+  updates: Partial<Omit<AgentState, "agentId" | "repoName" | "createdAt">>,
+): Promise<void> {
+  const freshState = await loadState(statePath);
+  await saveState(statePath, updateAgentField(freshState, repoName, { ...updates, lastSyncAt: new Date().toISOString() }));
+}
+
 async function collectFile(repoPath: string, filePath: string): Promise<FileInfo | null> {
   const absPath = path.join(repoPath, filePath);
   try {
@@ -59,6 +68,7 @@ async function collectFile(repoPath: string, filePath: string): Promise<FileInfo
 export async function watchRepos(params: WatchParams): Promise<void> {
   const { provider, config, repoNames, statePath, intervalMs, signal, log = console.log } = params;
   const syncing = new Set<string>();
+  let activeTick: Promise<void> = Promise.resolve();
 
   async function tick(): Promise<void> {
     const state = await loadState(statePath);
@@ -97,9 +107,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
 
         if (changedFiles.length === 0) {
           // HEAD changed but no file diff (e.g., merge commit) — update state
-          const freshState = await loadState(statePath);
-          const now = new Date().toISOString();
-          await saveState(statePath, updateAgentField(freshState, repoName, { lastSyncCommit: currentHead, lastSyncAt: now }));
+          await updateAndSaveState(statePath, repoName, { lastSyncCommit: currentHead });
           log(formatSyncLog(repoName, agentInfo.lastSyncCommit, currentHead, 0, Date.now() - start));
           continue;
         }
@@ -113,13 +121,10 @@ export async function watchRepos(params: WatchParams): Promise<void> {
         });
 
         // Re-read state (may have been updated by another command)
-        const freshState = await loadState(statePath);
-        const now = new Date().toISOString();
-        await saveState(statePath, updateAgentField(freshState, repoName, {
+        await updateAndSaveState(statePath, repoName, {
           passages: result.passages,
           lastSyncCommit: result.lastSyncCommit,
-          lastSyncAt: now,
-        }));
+        });
 
         log(formatSyncLog(repoName, agentInfo.lastSyncCommit, currentHead, changedFiles.length, Date.now() - start));
       } catch (err) {
@@ -141,24 +146,18 @@ export async function watchRepos(params: WatchParams): Promise<void> {
       return;
     }
 
-    const timer = setInterval(async () => {
+    const timer = setInterval(() => {
       if (signal.aborted) {
         clearInterval(timer);
         return;
       }
-      await tick();
+      activeTick = tick();
     }, intervalMs);
 
-    signal.addEventListener("abort", () => {
+    signal.addEventListener("abort", async () => {
       clearInterval(timer);
-      // Wait for in-progress syncs before resolving
-      const waitForSyncs = async () => {
-        while (syncing.size > 0) {
-          await new Promise((r) => setTimeout(r, 100));
-        }
-        resolve();
-      };
-      waitForSyncs();
+      await activeTick;
+      resolve();
     }, { once: true });
   });
 }

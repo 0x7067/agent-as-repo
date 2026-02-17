@@ -23,6 +23,7 @@ export interface Config {
     maxFileSizeKb: number;
     memoryBlockLimit: number;
     bootstrapOnCreate: boolean;
+    chunking: "raw" | "tree-sitter";
   };
   repos: Record<string, RepoConfig>;
 }
@@ -45,6 +46,9 @@ export interface Chunk {
   text: string;
   sourcePath: string;
 }
+
+/** A pluggable file-chunking strategy: takes a file and returns chunks. */
+export type ChunkingStrategy = (file: FileInfo) => Chunk[];
 
 /** Map of file path → passage ID for a single agent. */
 export type PassageMap = Record<string, string[]>;

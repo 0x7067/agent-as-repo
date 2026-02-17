@@ -34,7 +34,7 @@ import { makeMockProvider } from "./__test__/mock-provider.js";
 
 const testConfig: Config = {
   letta: { model: "letta-free", embedding: "letta-free" },
-  defaults: { maxFileSizeKb: 50, memoryBlockLimit: 5000, bootstrapOnCreate: false },
+  defaults: { maxFileSizeKb: 50, memoryBlockLimit: 5000, bootstrapOnCreate: false, chunking: "raw" },
   repos: {
     "my-app": {
       path: "/tmp/my-app",

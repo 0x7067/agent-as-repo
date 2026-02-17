@@ -26,6 +26,17 @@ describe("parseConfig", () => {
     expect(config.repos["my-app"].bootstrapOnCreate).toBe(true);
   });
 
+  it("defaults chunking to 'raw' when omitted", () => {
+    const config = parseConfig(validRaw);
+    expect(config.defaults.chunking).toBe("raw");
+  });
+
+  it("accepts 'tree-sitter' chunking override", () => {
+    const raw = { ...validRaw, defaults: { chunking: "tree-sitter" } };
+    const config = parseConfig(raw);
+    expect(config.defaults.chunking).toBe("tree-sitter");
+  });
+
   it("applies explicit defaults over built-in defaults", () => {
     const raw = {
       ...validRaw,

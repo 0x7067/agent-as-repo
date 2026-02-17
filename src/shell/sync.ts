@@ -1,7 +1,7 @@
 import pLimit from "p-limit";
-import type { AgentState, FileInfo, PassageMap } from "../core/types.js";
+import type { AgentState, ChunkingStrategy, FileInfo, PassageMap } from "../core/types.js";
 import { computeSyncPlan } from "../core/sync.js";
-import { chunkFile } from "../core/chunker.js";
+import { rawTextStrategy } from "../core/chunker.js";
 import type { AgentProvider } from "./provider.js";
 
 export interface SyncRepoParams {
@@ -10,6 +10,7 @@ export interface SyncRepoParams {
   changedFiles: string[];
   collectFile: (filePath: string) => Promise<FileInfo | null>;
   headCommit: string;
+  chunkingStrategy?: ChunkingStrategy;
   concurrency?: number;
   fullReIndexThreshold?: number;
 }
@@ -29,6 +30,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
     changedFiles,
     collectFile,
     headCommit,
+    chunkingStrategy = rawTextStrategy,
     concurrency = 20,
     fullReIndexThreshold = 500,
   } = params;
@@ -55,7 +57,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
     const fileInfo = await collectFile(filePath);
     if (!fileInfo) continue;
 
-    const chunks = chunkFile(fileInfo.path, fileInfo.content);
+    const chunks = chunkingStrategy(fileInfo);
     const passageIds: string[] = new Array(chunks.length);
 
     await Promise.all(

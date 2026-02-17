@@ -11,7 +11,7 @@ import { loadState, saveState } from "./shell/state-store.js";
 import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
 import { bootstrapAgent } from "./shell/bootstrap.js";
 import { LettaProvider } from "./shell/letta-provider.js";
-import { chunkFile } from "./core/chunker.js";
+import { rawTextStrategy } from "./core/chunker.js";
 import { shouldIncludeFile } from "./core/filter.js";
 import { addAgentToState, removeAgentFromState, updateAgentField, updatePassageMap } from "./core/state.js";
 import { syncRepo } from "./shell/sync.js";
@@ -22,6 +22,39 @@ import { broadcastAsk } from "./shell/group-provider.js";
 import { watchRepos } from "./shell/watch.js";
 import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import type { AgentState, AppState, Config } from "./core/types.js";
+
+interface SetupOpts {
+  repo?: string;
+  config: string;
+}
+
+interface AskOpts {
+  all?: boolean;
+  interactive?: boolean;
+  timeout: string;
+}
+
+interface SyncOpts {
+  repo?: string;
+  full?: boolean;
+  since?: string;
+  config: string;
+}
+
+interface RepoOpts {
+  repo?: string;
+}
+
+interface DestroyOpts {
+  repo?: string;
+  force?: boolean;
+}
+
+interface WatchOpts {
+  repo?: string;
+  interval: string;
+  config: string;
+}
 
 const STATE_FILE = ".repo-expert-state.json";
 
@@ -89,7 +122,7 @@ program
   .description("Create agents from config.yaml")
   .option("--repo <name>", "Set up a single repo")
   .option("--config <path>", "Config file path", "config.yaml")
-  .action(async (opts) => {
+  .action(async (opts: SetupOpts) => {
     const configPath = path.resolve(opts.config);
     const config = await loadConfigSafe(configPath);
     const provider = createProvider();
@@ -120,7 +153,7 @@ program
       const files = await collectFiles(repoConfig);
       console.log(`  Found ${files.length} files`);
 
-      const chunks = files.flatMap((f) => chunkFile(f.path, f.content));
+      const chunks = files.flatMap((f) => rawTextStrategy(f));
       console.log(`  Loading ${chunks.length} passages...`);
       const passageMap = await loadPassages(provider, agentState.agentId, chunks, 20, printProgress);
       if (chunks.length > 0) process.stdout.write("\n");
@@ -152,7 +185,7 @@ program
   .option("--all", "Ask all agents and collect responses")
   .option("-i, --interactive", "Interactive REPL mode")
   .option("--timeout <ms>", "Per-agent timeout for --all (ms)", "30000")
-  .action(async (repo: string | undefined, question: string | undefined, opts) => {
+  .action(async (repo: string | undefined, question: string | undefined, opts: AskOpts) => {
     if (opts.interactive) {
       const state = await loadState(STATE_FILE);
       const repoNames = Object.keys(state.agents);
@@ -274,7 +307,7 @@ program
   .option("--full", "Full re-index instead of incremental")
   .option("--since <ref>", "Git ref to diff from (overrides stored commit)")
   .option("--config <path>", "Config file path", "config.yaml")
-  .action(async (opts) => {
+  .action(async (opts: SyncOpts) => {
     const configPath = path.resolve(opts.config);
     const config = await loadConfigSafe(configPath);
     const provider = createProvider();
@@ -389,7 +422,7 @@ program
   .command("status")
   .description("Show agent memory stats and health")
   .option("--repo <name>", "Show status for a single repo")
-  .action(async (opts) => {
+  .action(async (opts: RepoOpts) => {
     const state = await loadState(STATE_FILE);
     const provider = createProvider();
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
@@ -407,7 +440,7 @@ program
   .command("export")
   .description("Export agent memory to markdown")
   .option("--repo <name>", "Export a single repo agent")
-  .action(async (opts) => {
+  .action(async (opts: RepoOpts) => {
     const state = await loadState(STATE_FILE);
     const provider = createProvider();
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
@@ -439,7 +472,7 @@ program
   .description("Delete agents")
   .option("--repo <name>", "Destroy a single repo agent")
   .option("--force", "Skip confirmation prompt")
-  .action(async (opts) => {
+  .action(async (opts: DestroyOpts) => {
     const state = await loadState(STATE_FILE);
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
     const existing = repoNames.filter((n) => state.agents[n]);
@@ -485,7 +518,7 @@ program
   .option("--repo <name>", "Watch a single repo")
   .option("--interval <seconds>", "Poll interval in seconds", String(DEFAULT_WATCH_CONFIG.intervalMs / 1000))
   .option("--config <path>", "Config file path", "config.yaml")
-  .action(async (opts) => {
+  .action(async (opts: WatchOpts) => {
     const configPath = path.resolve(opts.config);
     const config = await loadConfigSafe(configPath);
     const state = await loadState(STATE_FILE);

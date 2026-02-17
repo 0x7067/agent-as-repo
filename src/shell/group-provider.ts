@@ -32,8 +32,6 @@ export interface SupervisorConfig {
   workerAgentIds: string[];
 }
 
-export type OrchestrationConfig = RoundRobinConfig | SupervisorConfig;
-
 /**
  * Client-side round-robin: sends user content to each agent in sequence,
  * collecting all responses.
