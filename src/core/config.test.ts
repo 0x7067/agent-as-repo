@@ -24,7 +24,7 @@ describe("parseConfig", () => {
     expect(config.repos["my-app"].maxFileSizeKb).toBe(50);
     expect(config.repos["my-app"].memoryBlockLimit).toBe(5000);
     expect(config.repos["my-app"].bootstrapOnCreate).toBe(true);
-    expect(config.defaults.askTimeoutMs).toBe(20_000);
+    expect(config.defaults.askTimeoutMs).toBe(60_000);
     expect(config.defaults.fastAskTimeoutMs).toBe(8_000);
     expect(config.defaults.cacheTtlMs).toBe(180_000);
   });

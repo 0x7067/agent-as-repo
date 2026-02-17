@@ -1,14 +1,15 @@
 import { z } from "zod/v4";
 import type { Config, RepoConfig } from "./types.js";
+import { ASK_DEFAULT_CACHE_TTL_MS, ASK_DEFAULT_FAST_TIMEOUT_MS, ASK_DEFAULT_TIMEOUT_MS } from "./ask-routing.js";
 
 const BUILT_IN_DEFAULTS = {
   maxFileSizeKb: 50,
   memoryBlockLimit: 5000,
   bootstrapOnCreate: true,
   chunking: "raw" as const,
-  askTimeoutMs: 20_000,
-  fastAskTimeoutMs: 8_000,
-  cacheTtlMs: 180_000,
+  askTimeoutMs: ASK_DEFAULT_TIMEOUT_MS,
+  fastAskTimeoutMs: ASK_DEFAULT_FAST_TIMEOUT_MS,
+  cacheTtlMs: ASK_DEFAULT_CACHE_TTL_MS,
 };
 
 const defaultsSchema = z.object({

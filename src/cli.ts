@@ -28,7 +28,7 @@ import { syncRepo } from "./shell/sync.js";
 import { getAgentStatus, getAgentStatusData } from "./shell/status.js";
 import { exportAgent } from "./shell/export.js";
 import { onboardAgent } from "./shell/onboard.js";
-import { broadcastAsk } from "./shell/group-provider.js";
+import { BROADCAST_ASK_DEFAULT_TIMEOUT_MS, broadcastAsk } from "./shell/group-provider.js";
 import { watchRepos } from "./shell/watch.js";
 import { beginCommandTelemetry, endCommandTelemetry, recordCommandRetry } from "./shell/telemetry.js";
 import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
@@ -830,7 +830,7 @@ program
   .description("Ask an agent a question")
   .option("--all", "Ask all agents and collect responses")
   .option("-i, --interactive", "Interactive REPL mode")
-  .option("--timeout <ms>", "Per-agent timeout for --all (ms)", "30000")
+  .option("--timeout <ms>", "Per-agent timeout for --all (ms)", `${BROADCAST_ASK_DEFAULT_TIMEOUT_MS}`)
   .option("--routing <mode>", "Routing mode for single-agent asks: auto|quality|speed", "auto")
   .option("--fast-model <model>", "Fast model handle used by routing=auto|speed")
   .option("--ask-timeout-ms <ms>", "Timeout for single-agent asks and interactive mode")
@@ -952,7 +952,7 @@ program
 
       console.log(`Broadcasting to ${agents.length} agents...`);
       const results = await broadcastAsk(provider, agents, actualQuestion, {
-        timeoutMs: parseIntOrDefault(opts.timeout, 30_000),
+        timeoutMs: parseIntOrDefault(opts.timeout, BROADCAST_ASK_DEFAULT_TIMEOUT_MS),
       });
 
       for (const result of results) {

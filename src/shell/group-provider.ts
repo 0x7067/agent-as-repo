@@ -18,6 +18,8 @@
 
 import type { AgentProvider } from "./provider.js";
 
+export const BROADCAST_ASK_DEFAULT_TIMEOUT_MS = 60_000;
+
 /** Round-robin: cycle through agents in order. */
 export interface RoundRobinConfig {
   type: "round_robin";
@@ -80,7 +82,7 @@ export async function broadcastAsk(
   question: string,
   options: BroadcastOptions = {},
 ): Promise<BroadcastResult[]> {
-  const timeoutMs = options.timeoutMs ?? 30_000;
+  const timeoutMs = options.timeoutMs ?? BROADCAST_ASK_DEFAULT_TIMEOUT_MS;
 
   return Promise.all(
     agents.map(async ({ repoName, agentId }): Promise<BroadcastResult> => {

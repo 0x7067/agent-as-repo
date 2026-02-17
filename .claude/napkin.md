@@ -48,3 +48,5 @@
 - `Config.defaults.tools` was declared but never populated — removed from type since per-repo tools with fallback to `userDefaults.tools` covers all cases
 - `watch.ts` poll loop: abort handler is the sole resolve path; interval callback just clears itself
 - `execFileSync` (no shell) vs `execSync` (uses `/bin/sh -c`) — this codebase should always use the former
+- `ask --all` timeout default is shared by CLI and broadcast helper; keep both wired to `BROADCAST_ASK_DEFAULT_TIMEOUT_MS` in `src/shell/group-provider.ts`
+- Single-agent ask default should be sourced from `ASK_DEFAULT_TIMEOUT_MS` in `src/core/ask-routing.ts`; wire config built-ins to the same constants to avoid drift

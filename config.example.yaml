@@ -12,7 +12,7 @@ defaults:
   max_file_size_kb: 50        # Skip files larger than this
   memory_block_limit: 5000    # Max chars per core memory block
   bootstrap_on_create: true   # Auto-analyze codebase on setup
-  # ask_timeout_ms: 20000      # Default timeout for single-agent ask requests
+  # ask_timeout_ms: 60000      # Default timeout for single-agent ask requests
   # fast_ask_timeout_ms: 8000  # Timeout when fast model path is selected
   # cache_ttl_ms: 180000       # In-memory answer cache TTL (ms)
   # chunking: raw             # Chunking strategy: "raw" (default) or "tree-sitter"

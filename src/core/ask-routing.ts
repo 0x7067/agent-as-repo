@@ -1,7 +1,7 @@
 export const ASK_ROUTING_MODES = ["auto", "quality", "speed"] as const;
 export type AskRoutingMode = (typeof ASK_ROUTING_MODES)[number];
 
-export const ASK_DEFAULT_TIMEOUT_MS = 20_000;
+export const ASK_DEFAULT_TIMEOUT_MS = 60_000;
 export const ASK_DEFAULT_FAST_TIMEOUT_MS = 8_000;
 export const ASK_DEFAULT_CACHE_TTL_MS = 180_000;
 
