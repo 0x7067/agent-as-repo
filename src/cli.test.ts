@@ -114,7 +114,7 @@ describe("cli contract", () => {
       export [options] Export agent memory to markdown
       onboard <repo> Guided codebase walkthrough for new developers
       destroy [options] Delete agents
-      watch [options] Watch repos and auto-sync on new commits
+      watch [options] Watch repos and auto-sync on repo changes
       install-daemon [options] Install launchd daemon for auto-sync on macOS
       uninstall-daemon Uninstall the launchd watch daemon
       mcp-install [options] Add Letta MCP server entry to Claude Code config

@@ -4,6 +4,7 @@ export interface DaemonConfig {
   workingDirectory: string;
   pnpmPath: string;
   intervalSeconds: number;
+  debounceMs: number;
   configPath: string;
   logPath: string;
 }
@@ -28,6 +29,8 @@ export function generatePlist(config: DaemonConfig): string {
 \t\t<string>watch</string>
 \t\t<string>--interval</string>
 \t\t<string>${config.intervalSeconds}</string>
+\t\t<string>--debounce</string>
+\t\t<string>${config.debounceMs}</string>
 \t\t<string>--config</string>
 \t\t<string>${config.configPath}</string>
 \t</array>

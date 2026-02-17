@@ -128,4 +128,21 @@ describe("syncRepo", () => {
     expect(result.passages).toEqual(testAgent.passages);
     expect(result.lastSyncCommit).toBe("def456");
   });
+
+  it("skips oversized files when maxFileSizeKb is set", async () => {
+    const provider = makeMockProvider();
+    const result = await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: ["src/a.ts"],
+      collectFile: async (path) => ({ path, content: "x".repeat(200_000), sizeKb: 200 }),
+      headCommit: "def456",
+      maxFileSizeKb: 50,
+    });
+
+    expect(provider.deletePassage).toHaveBeenCalledTimes(2);
+    expect(provider.storePassage).not.toHaveBeenCalled();
+    expect(result.passages["src/a.ts"]).toBeUndefined();
+    expect(result.filesReIndexed).toBe(0);
+  });
 });

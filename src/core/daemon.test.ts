@@ -6,6 +6,7 @@ describe("generatePlist", () => {
     workingDirectory: "/home/user/repos/my-app",
     pnpmPath: "/home/user/.local/share/mise/shims/pnpm",
     intervalSeconds: 30,
+    debounceMs: 250,
     configPath: "config.yaml",
     logPath: "/home/user/Library/Logs/repo-expert-watch.log",
   };
@@ -25,9 +26,10 @@ describe("generatePlist", () => {
     expect(plist).toContain("/home/user/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin");
   });
 
-  it("includes interval and config arguments", () => {
+  it("includes interval, debounce, and config arguments", () => {
     const plist = generatePlist(config);
     expect(plist).toContain("<string>30</string>");
+    expect(plist).toContain("<string>250</string>");
     expect(plist).toContain("<string>config.yaml</string>");
   });
 

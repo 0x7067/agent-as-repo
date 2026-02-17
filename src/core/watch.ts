@@ -1,9 +1,11 @@
 export interface WatchConfig {
   intervalMs: number;
+  debounceMs: number;
 }
 
 export const DEFAULT_WATCH_CONFIG: WatchConfig = {
-  intervalMs: 30_000,
+  intervalMs: 5_000,
+  debounceMs: 250,
 };
 
 export function shouldSync(

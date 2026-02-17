@@ -10,6 +10,7 @@ export interface SyncRepoParams {
   changedFiles: string[];
   collectFile: (filePath: string) => Promise<FileInfo | null>;
   headCommit: string;
+  maxFileSizeKb?: number;
   chunkingStrategy?: ChunkingStrategy;
   concurrency?: number;
   fullReIndexThreshold?: number;
@@ -30,6 +31,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
     changedFiles,
     collectFile,
     headCommit,
+    maxFileSizeKb,
     chunkingStrategy = rawTextStrategy,
     concurrency = 20,
     fullReIndexThreshold = 500,
@@ -56,6 +58,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
   for (const filePath of plan.filesToReIndex) {
     const fileInfo = await collectFile(filePath);
     if (!fileInfo) continue;
+    if (maxFileSizeKb !== undefined && fileInfo.sizeKb > maxFileSizeKb) continue;
 
     const chunks = chunkingStrategy(fileInfo);
     const passageIds: string[] = new Array(chunks.length);
