@@ -7,6 +7,8 @@ import * as readline from "readline/promises";
 import { execFileSync } from "child_process";
 import { loadConfig } from "./shell/config-loader.js";
 import { runInit } from "./shell/init.js";
+import { runAllChecks } from "./shell/doctor.js";
+import { formatDoctorReport } from "./core/doctor.js";
 import { collectFiles } from "./shell/file-collector.js";
 import { loadState, saveState } from "./shell/state-store.js";
 import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
@@ -137,6 +139,22 @@ program
     } finally {
       rl.close();
     }
+  });
+
+program
+  .command("doctor")
+  .description("Check setup: API key, config, repo paths, git, state consistency")
+  .option("--config <path>", "Config file path", "config.yaml")
+  .action(async (opts: { config: string }) => {
+    const configPath = path.resolve(opts.config);
+    let provider: LettaProvider | null = null;
+    if (process.env.LETTA_API_KEY) {
+      provider = new LettaProvider(new Letta({ timeout: 10_000 }));
+    }
+    const results = await runAllChecks(provider, configPath);
+    console.log(formatDoctorReport(results));
+    const hasFailures = results.some((r) => r.status === "fail");
+    if (hasFailures) process.exitCode = 1;
   });
 
 program
