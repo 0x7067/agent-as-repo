@@ -1113,7 +1113,7 @@ program
         log(`  Warning: ${changedFiles.length} files changed — consider --full re-index`);
       }
 
-      log(`  Deleted: ${result.filesDeleted} files, Re-indexed: ${result.filesReIndexed} files`);
+      log(`  Removed: ${result.filesRemoved} files, Re-indexed: ${result.filesReIndexed} files`);
 
       state = updateAgentField(state, repoName, { passages: result.passages, lastSyncCommit: result.lastSyncCommit });
       await saveState(STATE_FILE, state);
@@ -1123,7 +1123,7 @@ program
         status: "ok",
         dryRun: false,
         changedFiles: changedFiles.length,
-        filesDeleted: result.filesDeleted,
+        filesRemoved: result.filesRemoved,
         filesReIndexed: result.filesReIndexed,
         isFullReIndex: result.isFullReIndex,
       });

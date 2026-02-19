@@ -20,7 +20,7 @@ export interface SyncRepoParams {
 export interface SyncResult {
   passages: PassageMap;
   lastSyncCommit: string;
-  filesDeleted: number;
+  filesRemoved: number;
   filesReIndexed: number;
   isFullReIndex: boolean;
   failedFiles: string[];
@@ -46,6 +46,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
   const stalePassageIds: string[] = [];
   const failedFiles: string[] = [];
   let filesReIndexed = 0;
+  let filesRemoved = 0;
 
   // Phase 1: Upload new passages (copy-on-write — old passages stay intact until phase 2)
   for (const filePath of plan.filesToReIndex) {
@@ -56,6 +57,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
         const oldIds = agent.passages[filePath];
         if (oldIds) stalePassageIds.push(...oldIds);
         delete updatedPassages[filePath];
+        filesRemoved++;
         continue;
       }
       if (maxFileSizeKb !== undefined && fileInfo.sizeKb > maxFileSizeKb) {
@@ -63,6 +65,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
         const oldIds = agent.passages[filePath];
         if (oldIds) stalePassageIds.push(...oldIds);
         delete updatedPassages[filePath];
+        filesRemoved++;
         continue;
       }
 
@@ -101,7 +104,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
   return {
     passages: updatedPassages,
     lastSyncCommit: headCommit,
-    filesDeleted: changedFiles.length - filesReIndexed - failedFiles.length,
+    filesRemoved,
     filesReIndexed,
     isFullReIndex: plan.isFullReIndex,
     failedFiles,

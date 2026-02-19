@@ -101,7 +101,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: { "src/a.ts": ["p-2"] },
       lastSyncCommit: "def456",
-      filesDeleted: 0,
+      filesRemoved: 0,
       filesReIndexed: 1,
       isFullReIndex: false,
     });
@@ -174,7 +174,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: { "src/a.ts": ["p-2"] },
       lastSyncCommit: "abc123",
-      filesDeleted: 0,
+      filesRemoved: 0,
       filesReIndexed: 1,
       isFullReIndex: false,
     });
@@ -321,7 +321,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: { "src/a.ts": ["p-2"] },
       lastSyncCommit: "def456",
-      filesDeleted: 0,
+      filesRemoved: 0,
       filesReIndexed: 1,
       isFullReIndex: false,
     });
@@ -395,7 +395,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: { "src/a.ts": ["p-2"] },
       lastSyncCommit: "def456",
-      filesDeleted: 0,
+      filesRemoved: 0,
       filesReIndexed: 1,
       isFullReIndex: false,
     });
