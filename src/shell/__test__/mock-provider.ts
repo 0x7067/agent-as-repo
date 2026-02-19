@@ -5,6 +5,7 @@ export function makeMockProvider(overrides?: Partial<AgentProvider>): AgentProvi
   return {
     createAgent: vi.fn().mockResolvedValue({ agentId: "agent-abc" }),
     deleteAgent: vi.fn().mockResolvedValue(undefined),
+    enableSleeptime: vi.fn().mockResolvedValue(undefined),
     deletePassage: vi.fn().mockResolvedValue(undefined),
     listPassages: vi.fn().mockResolvedValue([]),
     getBlock: vi.fn().mockResolvedValue({ value: "", limit: 5000 }),

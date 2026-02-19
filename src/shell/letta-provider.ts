@@ -68,6 +68,7 @@ export class LettaProvider implements AgentProvider {
       name: params.name,
       model: params.model,
       embedding: params.embedding,
+      enable_sleeptime: true,
       tools: ["archival_memory_search", ...(params.tools ?? [])],
       tags: params.tags,
       memory_blocks: [
@@ -82,6 +83,10 @@ export class LettaProvider implements AgentProvider {
 
   async deleteAgent(agentId: string): Promise<void> {
     await this.client.agents.delete(agentId);
+  }
+
+  async enableSleeptime(agentId: string): Promise<void> {
+    await this.withRetry(() => this.client.agents.update(agentId, { enable_sleeptime: true }));
   }
 
   async deletePassage(agentId: string, passageId: string): Promise<void> {

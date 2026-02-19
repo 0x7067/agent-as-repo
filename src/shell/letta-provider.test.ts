@@ -19,6 +19,7 @@ interface MockMessages {
 interface MockAgents {
   create: Mock;
   delete: Mock;
+  update: Mock;
   passages: MockPassages;
   blocks: MockBlocks;
   messages: MockMessages;
@@ -38,6 +39,7 @@ interface CreateAgentCallArg {
   name: string;
   model: string;
   embedding: string;
+  enable_sleeptime: boolean;
   tools: string[];
   tags: string[];
   memory_blocks: MemoryBlockArg[];
@@ -48,6 +50,7 @@ function makeMockClient(): MockLettaClient {
     agents: {
       create: vi.fn().mockResolvedValue({ id: "agent-abc" }),
       delete: vi.fn().mockResolvedValue(undefined),
+      update: vi.fn().mockResolvedValue({ id: "agent-abc" }),
       passages: {
         create: vi.fn().mockResolvedValue([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]),
         delete: vi.fn().mockResolvedValue(undefined),
@@ -160,6 +163,16 @@ describe("LettaProvider", () => {
       expect(call.embedding).toBe("openai/text-embedding-3-small");
       expect(call.tags).toEqual(["repo-expert", "mobile"]);
     });
+
+    it("enables sleep-time by default", async () => {
+      const client = makeMockClient();
+      const provider = new LettaProvider(mockClientAs(client));
+
+      await provider.createAgent(defaultCreateParams);
+
+      const call: CreateAgentCallArg = client.agents.create.mock.calls[0][0];
+      expect(call.enable_sleeptime).toBe(true);
+    });
   });
 
   describe("deleteAgent", () => {
@@ -170,6 +183,17 @@ describe("LettaProvider", () => {
       await provider.deleteAgent("agent-abc");
 
       expect(client.agents.delete).toHaveBeenCalledWith("agent-abc");
+    });
+  });
+
+  describe("enableSleeptime", () => {
+    it("calls agents.modify with enable_sleeptime: true", async () => {
+      const client = makeMockClient();
+      const provider = new LettaProvider(mockClientAs(client));
+
+      await provider.enableSleeptime("agent-abc");
+
+      expect(client.agents.update).toHaveBeenCalledWith("agent-abc", { enable_sleeptime: true });
     });
   });
 

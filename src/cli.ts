@@ -1291,6 +1291,35 @@ program
   });
 
 program
+  .command("sleeptime")
+  .description("Enable sleep-time memory consolidation on existing agents")
+  .option("--repo <name>", "Enable on a single repo agent (default: all)")
+  .action(async (opts: { repo?: string }) => {
+    const state = await loadState(STATE_FILE);
+    const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
+    const existing = repoNames.filter((n) => state.agents[n]);
+
+    if (existing.length === 0) {
+      console.log("No agents found.");
+      return;
+    }
+
+    const provider = createProviderForCommands();
+    for (const repoName of existing) {
+      const agentInfo = state.agents[repoName];
+      process.stdout.write(`Enabling sleep-time for "${repoName}" (${agentInfo.agentId})... `);
+      try {
+        await provider.enableSleeptime(agentInfo.agentId);
+        console.log("done.");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(`failed: ${msg}`);
+        process.exitCode = 1;
+      }
+    }
+  });
+
+program
   .command("watch")
   .description("Watch repos and auto-sync on repo changes")
   .option("--repo <name>", "Watch a single repo")

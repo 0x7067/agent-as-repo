@@ -32,6 +32,7 @@ export interface SendMessageOptions {
 export interface AgentProvider {
   createAgent(params: CreateAgentParams): Promise<CreateAgentResult>;
   deleteAgent(agentId: string): Promise<void>;
+  enableSleeptime(agentId: string): Promise<void>;
   storePassage(agentId: string, text: string): Promise<string>;
   deletePassage(agentId: string, passageId: string): Promise<void>;
   listPassages(agentId: string): Promise<Passage[]>;

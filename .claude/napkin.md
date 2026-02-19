@@ -22,6 +22,8 @@
 | 2026-02-17 | self | Daemon kept logging `401 Unauthorized` while manual CLI checks passed | Compare shell `LETTA_API_KEY` with `.env` key; launchd may use a different environment than your shell and can run with stale credentials |
 | 2026-02-17 | self | After fixing daemon credentials, watch kept retrying the same repo until one successful sync advanced `lastSyncCommit` | For persistent sync failures, run a one-off `repo-expert sync --repo <name>` to unblock watch loop and clear repeated errors |
 | 2026-02-17 | self | Ignored watch-file filter failed because `fs.watch` can emit absolute paths (not only repo-relative names) | For watcher ignore rules, compare both normalized absolute paths and normalized repo-relative paths |
+| 2026-02-19 | self | Used `client.agents.modify()` — doesn't exist in SDK v1.7.8 | Correct method is `client.agents.update(agentId, body)` (PATCH) |
+| 2026-02-19 | self | `blocks.retrieve(agentId, label)` — wrong arg order | Correct: `blocks.retrieve(label, { agent_id: agentId })` |
 
 ## User Preferences
 - Use `/platform-cli` skill for CLI design
