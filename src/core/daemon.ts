@@ -1,8 +1,11 @@
+import * as path from "path";
+
 export const PLIST_LABEL = "com.denguinho.repo-expert-watch";
 
 export interface DaemonConfig {
   workingDirectory: string;
-  pnpmPath: string;
+  nodePath: string;
+  tsxCliPath: string;
   intervalSeconds: number;
   debounceMs: number;
   configPath: string;
@@ -10,7 +13,7 @@ export interface DaemonConfig {
 }
 
 export function generatePlist(config: DaemonConfig): string {
-  const shimDir = config.pnpmPath.substring(0, config.pnpmPath.lastIndexOf("/"));
+  const nodeBinDir = path.dirname(config.nodePath);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -23,8 +26,8 @@ export function generatePlist(config: DaemonConfig): string {
 
 \t<key>ProgramArguments</key>
 \t<array>
-\t\t<string>${config.pnpmPath}</string>
-\t\t<string>tsx</string>
+\t\t<string>${config.nodePath}</string>
+\t\t<string>${config.tsxCliPath}</string>
 \t\t<string>src/cli.ts</string>
 \t\t<string>watch</string>
 \t\t<string>--interval</string>
@@ -38,7 +41,7 @@ export function generatePlist(config: DaemonConfig): string {
 \t<key>EnvironmentVariables</key>
 \t<dict>
 \t\t<key>PATH</key>
-\t\t<string>${shimDir}:/usr/local/bin:/usr/bin:/bin</string>
+\t\t<string>${nodeBinDir}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
 \t</dict>
 
 \t<key>RunAtLoad</key>

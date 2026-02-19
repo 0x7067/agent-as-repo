@@ -114,6 +114,7 @@ describe("cli contract", () => {
       export [options] Export agent memory to markdown
       onboard <repo> Guided codebase walkthrough for new developers
       destroy [options] Delete agents
+      sleeptime [options] Enable sleep-time memory consolidation on existing agents
       watch [options] Watch repos and auto-sync on repo changes
       install-daemon [options] Install launchd daemon for auto-sync on macOS
       uninstall-daemon Uninstall the launchd watch daemon
@@ -430,7 +431,22 @@ describe("cli contract", () => {
     );
     await fs.mkdir(path.join(cwd, "node_modules", "commander"), { recursive: true });
 
-    const result = runCli(["self-check", "--json"], cwd);
+    const binDir = path.join(cwd, "bin");
+    await fs.mkdir(binDir, { recursive: true });
+    const pnpmStubPath = process.platform === "win32"
+      ? path.join(binDir, "pnpm.cmd")
+      : path.join(binDir, "pnpm");
+    const pnpmStub = process.platform === "win32"
+      ? "@echo off\r\necho 10.20.0\r\n"
+      : "#!/usr/bin/env sh\necho 10.20.0\n";
+    await fs.writeFile(pnpmStubPath, pnpmStub, "utf-8");
+    if (process.platform !== "win32") {
+      await fs.chmod(pnpmStubPath, 0o755);
+    }
+
+    const result = runCli(["self-check", "--json"], cwd, {
+      PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+    });
     expect(result.status).toBe(0);
     const payload = JSON.parse(result.stdout) as Array<{ name: string; status: string }>;
     const names = payload.map((row) => row.name);
@@ -625,11 +641,11 @@ describe("cli contract", () => {
     await writeConfig(cwd, "my-app", repoDir);
 
     const first = runCli(
-      ["setup", "--config", "config.yaml", "--json", "--load-retries", "0"],
+      ["setup", "--config", "config.yaml", "--json", "--load-retries", "0", "--load-timeout-ms", "1"],
       cwd,
       {
         REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
-        REPO_EXPERT_TEST_FAIL_LOAD_ONCE: "1",
+        REPO_EXPERT_TEST_DELAY_STORE_MS: "100",
       },
     );
     expect(first.status).toBe(1);
@@ -657,14 +673,26 @@ describe("cli contract", () => {
     const telemetryPath = path.join(cwd, "telemetry.jsonl");
     await fs.mkdir(repoDir, { recursive: true });
     await fs.writeFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf-8");
-    await writeConfig(cwd, "my-app", repoDir);
+    const config = [
+      "letta:",
+      "  model: openai/gpt-4.1",
+      "  embedding: openai/text-embedding-3-small",
+      "repos:",
+      "  my-app:",
+      `    path: ${repoDir}`,
+      "    description: test repo",
+      "    extensions: [.ts]",
+      "    ignore_dirs: [node_modules, .git]",
+      "    bootstrap_on_create: true",
+    ].join("\n");
+    await fs.writeFile(path.join(cwd, "config.yaml"), config, "utf-8");
 
     const result = runCli(
-      ["setup", "--config", "config.yaml", "--json", "--load-retries", "1"],
+      ["setup", "--config", "config.yaml", "--json", "--bootstrap-retries", "1"],
       cwd,
       {
         REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
-        REPO_EXPERT_TEST_FAIL_LOAD_ONCE: "1",
+        REPO_EXPERT_TEST_FAIL_BOOTSTRAP_ONCE: "1",
         REPO_EXPERT_TELEMETRY_PATH: telemetryPath,
       },
     );

@@ -266,6 +266,50 @@ function gitHeadCommit(cwd: string): string | null {
   }
 }
 
+function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+function whichAll(binary: string): string[] {
+  try {
+    const output = execFileSync("which", ["-a", binary], {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+    return output ? output.split("\n").map((line) => line.trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    const fs = await import("fs/promises");
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveNodeExecutable(): Promise<string | null> {
+  const candidates = uniqueNonEmpty([process.execPath, ...whichAll("node")]);
+  for (const candidate of candidates) {
+    if (await pathExists(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 function requireAgent(state: AppState, repoName: string): AgentState | null {
   const agentInfo = state.agents[repoName];
   if (!agentInfo) {
@@ -1390,20 +1434,18 @@ program
     const os = await import("os");
     const home = os.default.homedir();
 
-    // Resolve pnpm: prefer mise shims (stable across node versions), fallback to which
-    const shimPath = path.join(home, ".local/share/mise/shims/pnpm");
-    let pnpmPath: string;
-    try {
-      await fs.access(shimPath);
-      pnpmPath = shimPath;
-    } catch {
-      try {
-        pnpmPath = execFileSync("which", ["pnpm"], { encoding: "utf-8" }).trim();
-      } catch {
-        console.error("Cannot find pnpm. Install it and try again.");
-        process.exitCode = 1;
-        return;
-      }
+    const nodePath = await resolveNodeExecutable();
+    if (!nodePath) {
+      console.error("Cannot find a usable Node.js executable. Install Node and try again.");
+      process.exitCode = 1;
+      return;
+    }
+
+    const tsxCliPath = path.resolve(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
+    if (!(await pathExists(tsxCliPath))) {
+      console.error("Cannot find local tsx CLI at node_modules/tsx/dist/cli.mjs. Run pnpm install and try again.");
+      process.exitCode = 1;
+      return;
     }
 
     const plistPath = path.join(home, "Library/LaunchAgents", `${PLIST_LABEL}.plist`);
@@ -1411,7 +1453,8 @@ program
 
     const plist = generatePlist({
       workingDirectory: process.cwd(),
-      pnpmPath,
+      nodePath,
+      tsxCliPath,
       intervalSeconds: parseIntOrDefault(opts.interval, DEFAULT_WATCH_CONFIG.intervalMs / 1000),
       debounceMs: Math.max(50, parseIntOrDefault(opts.debounce, DEFAULT_WATCH_CONFIG.debounceMs)),
       configPath: opts.config,
