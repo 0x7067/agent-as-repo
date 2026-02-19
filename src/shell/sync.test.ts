@@ -24,6 +24,31 @@ const testAgent: AgentState = {
 };
 
 describe("syncRepo", () => {
+  it("uploads new passages before deleting old ones (copy-on-write)", async () => {
+    const provider = makeMockProvider();
+    const callOrder: string[] = [];
+    provider.storePassage = vi.fn().mockImplementation(async () => {
+      callOrder.push("store");
+      return "new-passage";
+    });
+    provider.deletePassage = vi.fn().mockImplementation(async () => {
+      callOrder.push("delete");
+    });
+
+    await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: ["src/a.ts"],
+      collectFile: async (path) => ({ path, content: "new content", sizeKb: 1 }),
+      headCommit: "def456",
+    });
+
+    // All stores happen before all deletes
+    const firstDelete = callOrder.indexOf("delete");
+    const lastStore = callOrder.lastIndexOf("store");
+    expect(lastStore).toBeLessThan(firstDelete);
+  });
+
   it("deletes old passages and stores new ones for changed files", async () => {
     const provider = makeMockProvider();
     const result = await syncRepo({
@@ -42,6 +67,7 @@ describe("syncRepo", () => {
     expect(result.passages["src/a.ts"]).toBeDefined();
     // b.ts passages unchanged
     expect(result.passages["src/b.ts"]).toEqual(["p-3"]);
+    expect(result.failedFiles).toEqual([]);
   });
 
   it("handles deleted files (collectFile returns null)", async () => {
@@ -144,5 +170,73 @@ describe("syncRepo", () => {
     expect(provider.storePassage).not.toHaveBeenCalled();
     expect(result.passages["src/a.ts"]).toBeUndefined();
     expect(result.filesReIndexed).toBe(0);
+  });
+
+  describe("per-file error isolation", () => {
+    it("continues syncing other files when one file upload fails", async () => {
+      const provider = makeMockProvider();
+      let callCount = 0;
+      provider.storePassage = vi.fn().mockImplementation(async (_agentId: string, text: string) => {
+        callCount++;
+        if (text.includes("src/a.ts")) throw new Error("upload failed");
+        return `passage-${callCount}`;
+      });
+
+      const errors: Array<{ file: string; error: Error }> = [];
+      const result = await syncRepo({
+        provider,
+        agent: testAgent,
+        changedFiles: ["src/a.ts", "src/b.ts"],
+        collectFile: async (path) => ({ path, content: `content of ${path}`, sizeKb: 1 }),
+        headCommit: "def456",
+        onFileError: (file, error) => errors.push({ file, error }),
+      });
+
+      // a.ts failed — old passages kept
+      expect(result.failedFiles).toEqual(["src/a.ts"]);
+      expect(result.passages["src/a.ts"]).toEqual(["p-1", "p-2"]);
+      // b.ts succeeded — new passages stored
+      expect(result.passages["src/b.ts"]).toBeDefined();
+      expect(result.passages["src/b.ts"]).not.toEqual(["p-3"]);
+      expect(result.filesReIndexed).toBe(1);
+      // Error callback fired
+      expect(errors).toHaveLength(1);
+      expect(errors[0].file).toBe("src/a.ts");
+    });
+
+    it("old passages for failed file are NOT deleted", async () => {
+      const provider = makeMockProvider();
+      provider.storePassage = vi.fn().mockRejectedValue(new Error("all uploads fail"));
+
+      const result = await syncRepo({
+        provider,
+        agent: testAgent,
+        changedFiles: ["src/a.ts"],
+        collectFile: async (path) => ({ path, content: "content", sizeKb: 1 }),
+        headCommit: "def456",
+      });
+
+      // Old passages preserved — deletePassage never called for p-1, p-2
+      expect(provider.deletePassage).not.toHaveBeenCalled();
+      expect(result.passages["src/a.ts"]).toEqual(["p-1", "p-2"]);
+      expect(result.failedFiles).toEqual(["src/a.ts"]);
+    });
+
+    it("delete failures in cleanup phase are silently ignored", async () => {
+      const provider = makeMockProvider();
+      provider.deletePassage = vi.fn().mockRejectedValue(new Error("delete failed"));
+
+      const result = await syncRepo({
+        provider,
+        agent: testAgent,
+        changedFiles: ["src/a.ts"],
+        collectFile: async (path) => ({ path, content: "new content", sizeKb: 1 }),
+        headCommit: "def456",
+      });
+
+      // Sync still succeeds despite delete failures
+      expect(result.passages["src/a.ts"]).toBeDefined();
+      expect(result.failedFiles).toEqual([]);
+    });
   });
 });

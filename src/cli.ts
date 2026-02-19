@@ -669,7 +669,7 @@ program
           const chunks = files.flatMap((f) => rawTextStrategy(f));
           chunksLoaded = chunks.length;
           log(`  Loading ${chunks.length} passages...`);
-          const passageMap = await withRetry(
+          const loadResult = await withRetry(
             `loading passages for "${repoName}"`,
             loadRetries,
             () => withTimeout(
@@ -680,7 +680,10 @@ program
             warn,
           );
           if (chunks.length > 0 && !opts.json) process.stdout.write("\n");
-          state = updatePassageMap(state, repoName, passageMap);
+          if (loadResult.failedChunks > 0) {
+            warn(`${loadResult.failedChunks}/${chunks.length} chunks failed to load`);
+          }
+          state = updatePassageMap(state, repoName, loadResult.passages);
           await saveState(STATE_FILE, state);
           indexMs = Date.now() - indexStart;
           log(`  Index phase completed in ${formatDurationMs(indexMs)}.`);

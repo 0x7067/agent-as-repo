@@ -5,7 +5,7 @@ import { execFileSync } from "child_process";
 import { loadState, saveState } from "./state-store.js";
 import { collectFiles } from "./file-collector.js";
 import { syncRepo } from "./sync.js";
-import { shouldSync, formatSyncLog } from "../core/watch.js";
+import { shouldSync, formatSyncLog, computeBackoffDelay } from "../core/watch.js";
 import { updateAgentField } from "../core/state.js";
 import { shouldIncludeFile } from "../core/filter.js";
 import type { AgentProvider } from "./provider.js";
@@ -107,6 +107,9 @@ export async function watchRepos(params: WatchParams): Promise<void> {
   const runningTasks = new Set<Promise<void>>();
   const ignoredEventFilesByRepo = new Map<string, Set<string>>();
   const ignoredAbsoluteEventFilesByRepo = new Map<string, Set<string>>();
+  const consecutiveFailures = new Map<string, number>();
+  const backoffUntil = new Map<string, number>();
+  let stateWriteChain: Promise<void> = Promise.resolve();
   let activeTick: Promise<void> = Promise.resolve();
 
   function trackTask(task: Promise<void>): Promise<void> {
@@ -144,6 +147,10 @@ export async function watchRepos(params: WatchParams): Promise<void> {
   async function syncRepoNow(repoName: string, eventChangedFiles?: string[]): Promise<void> {
     if (signal.aborted) return;
     if (syncing.has(repoName)) return;
+
+    // Backoff: skip this tick if we're still in the cooldown window
+    const until = backoffUntil.get(repoName) ?? 0;
+    if (Date.now() < until) return;
 
     const state = await loadState(statePath);
     const agentInfo = state.agents[repoName];
@@ -184,7 +191,10 @@ export async function watchRepos(params: WatchParams): Promise<void> {
       if (changedFiles.length === 0) {
         if (!isEventSync) {
           // HEAD changed but no indexable file diff (e.g., merge commit) — update state
-          await updateAndSaveState(statePath, repoName, { lastSyncCommit: currentHead });
+          stateWriteChain = stateWriteChain.then(() =>
+            updateAndSaveState(statePath, repoName, { lastSyncCommit: currentHead }),
+          ).catch(() => {});
+          await stateWriteChain;
           log(formatSyncLog(repoName, agentInfo.lastSyncCommit, currentHead, 0, Date.now() - start));
         }
         return;
@@ -203,16 +213,27 @@ export async function watchRepos(params: WatchParams): Promise<void> {
         maxFileSizeKb: repoConfig.maxFileSizeKb,
       });
 
-      await updateAndSaveState(statePath, repoName, {
-        passages: result.passages,
-        lastSyncCommit: result.lastSyncCommit,
-      });
+      stateWriteChain = stateWriteChain.then(() =>
+        updateAndSaveState(statePath, repoName, {
+          passages: result.passages,
+          lastSyncCommit: result.lastSyncCommit,
+        }),
+      ).catch(() => {});
+      await stateWriteChain;
 
       const suffix = isEventSync ? " [event]" : "";
       log(`${formatSyncLog(repoName, agentInfo.lastSyncCommit, currentHead, changedFiles.length, Date.now() - start)}${suffix}`);
+
+      // Reset backoff on success
+      consecutiveFailures.set(repoName, 0);
+      backoffUntil.delete(repoName);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log(`[${repoName}] sync error: ${msg}`);
+      const failures = (consecutiveFailures.get(repoName) ?? 0) + 1;
+      consecutiveFailures.set(repoName, failures);
+      const delay = computeBackoffDelay(failures, intervalMs);
+      backoffUntil.set(repoName, Date.now() + delay);
+      log(`[${repoName}] sync error (attempt ${failures}, backoff ${Math.round(delay / 1000)}s): ${msg}`);
     } finally {
       syncing.delete(repoName);
       if ((pendingFilesByRepo.get(repoName)?.size ?? 0) > 0) {

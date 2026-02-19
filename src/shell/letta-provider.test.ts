@@ -277,12 +277,68 @@ describe("LettaProvider", () => {
     });
   });
 
-  describe("retry on rate limit", () => {
+  describe("retry on transient errors", () => {
     it("retries on 429 and succeeds", async () => {
       const client = makeMockClient();
       const rateLimitError = Object.assign(new Error("Rate limited"), { statusCode: 429 });
       client.agents.passages.create
         .mockRejectedValueOnce(rateLimitError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      const id = await provider.storePassage("agent-abc", "text");
+
+      expect(id).toBe("passage-1");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries on 500 and succeeds", async () => {
+      const client = makeMockClient();
+      const serverError = Object.assign(new Error("Internal Server Error"), { status: 500 });
+      client.agents.passages.create
+        .mockRejectedValueOnce(serverError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      const id = await provider.storePassage("agent-abc", "text");
+
+      expect(id).toBe("passage-1");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries on 502 and succeeds", async () => {
+      const client = makeMockClient();
+      const gatewayError = Object.assign(new Error("Bad Gateway"), { status: 502 });
+      client.agents.passages.create
+        .mockRejectedValueOnce(gatewayError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      const id = await provider.storePassage("agent-abc", "text");
+
+      expect(id).toBe("passage-1");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries on ECONNRESET and succeeds", async () => {
+      const client = makeMockClient();
+      const networkError = Object.assign(new Error("Connection reset"), { code: "ECONNRESET" });
+      client.agents.passages.create
+        .mockRejectedValueOnce(networkError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      const id = await provider.storePassage("agent-abc", "text");
+
+      expect(id).toBe("passage-1");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries on ETIMEDOUT and succeeds", async () => {
+      const client = makeMockClient();
+      const timeoutError = Object.assign(new Error("Timed out"), { code: "ETIMEDOUT" });
+      client.agents.passages.create
+        .mockRejectedValueOnce(timeoutError)
         .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
 
       const provider = new LettaProvider(mockClientAs(client), 1);
@@ -305,16 +361,73 @@ describe("LettaProvider", () => {
       expect(client.agents.passages.create).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
     });
 
-    it("does not retry on non-429 errors", async () => {
+    it("does not retry on 400 errors", async () => {
       const client = makeMockClient();
-      client.agents.passages.create.mockImplementation(async () => {
-        throw new Error("Server error");
-      });
+      const badRequest = Object.assign(new Error("Bad Request"), { status: 400 });
+      client.agents.passages.create.mockRejectedValue(badRequest);
 
       const provider = new LettaProvider(mockClientAs(client), 1);
 
-      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("Server error");
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("Bad Request");
       expect(client.agents.passages.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not retry on non-transient errors", async () => {
+      const client = makeMockClient();
+      client.agents.passages.create.mockRejectedValue(new Error("Unknown error"));
+
+      const provider = new LettaProvider(mockClientAs(client), 1);
+
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("Unknown error");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("storePassage ID validation", () => {
+    it("throws on empty result array", async () => {
+      const client = makeMockClient();
+      client.agents.passages.create.mockResolvedValue([]);
+
+      const provider = new LettaProvider(mockClientAs(client));
+
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("no valid passage ID");
+    });
+
+    it("throws on null ID in result", async () => {
+      const client = makeMockClient();
+      client.agents.passages.create.mockResolvedValue([{ id: null, text: "" }]);
+
+      const provider = new LettaProvider(mockClientAs(client));
+
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("no valid passage ID");
+    });
+
+    it("throws on empty string ID in result", async () => {
+      const client = makeMockClient();
+      client.agents.passages.create.mockResolvedValue([{ id: "", text: "" }]);
+
+      const provider = new LettaProvider(mockClientAs(client));
+
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("no valid passage ID");
+    });
+  });
+
+  describe("listPassages filtering", () => {
+    it("filters out passages with null IDs", async () => {
+      const client = makeMockClient();
+      client.agents.passages.list.mockResolvedValue([
+        { id: "p-1", text: "content a", embedding: null, embedding_config: null },
+        { id: null, text: "content b", embedding: null, embedding_config: null },
+        { id: "p-3", text: "content c", embedding: null, embedding_config: null },
+      ]);
+      const provider = new LettaProvider(mockClientAs(client));
+
+      const passages = await provider.listPassages("agent-abc");
+
+      expect(passages).toEqual([
+        { id: "p-1", text: "content a" },
+        { id: "p-3", text: "content c" },
+      ]);
     });
   });
 });

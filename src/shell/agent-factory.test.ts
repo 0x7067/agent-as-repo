@@ -60,17 +60,41 @@ describe("loadPassages", () => {
       { text: "FILE: src/b.ts\ncontent b", sourcePath: "src/b.ts" },
     ];
 
-    const passageMap = await loadPassages(provider, "agent-abc", chunks);
+    const result = await loadPassages(provider, "agent-abc", chunks);
     expect(provider.storePassage as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(3);
-    expect(passageMap["src/a.ts"]).toHaveLength(2);
-    expect(passageMap["src/b.ts"]).toHaveLength(1);
+    expect(result.passages["src/a.ts"]).toHaveLength(2);
+    expect(result.passages["src/b.ts"]).toHaveLength(1);
+    expect(result.failedChunks).toBe(0);
   });
 
   it("handles empty chunks array", async () => {
     const provider = makeMockProvider();
-    const passageMap = await loadPassages(provider, "agent-abc", []);
-    expect(passageMap).toEqual({});
+    const result = await loadPassages(provider, "agent-abc", []);
+    expect(result.passages).toEqual({});
+    expect(result.failedChunks).toBe(0);
     expect(provider.storePassage as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  it("counts failed chunks without throwing", async () => {
+    const provider = makeMockProvider();
+    let callCount = 0;
+    (provider.storePassage as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      callCount++;
+      if (callCount === 2) throw new Error("server error");
+      return `passage-${callCount}`;
+    });
+
+    const chunks = [
+      { text: "FILE: src/a.ts\ncontent a", sourcePath: "src/a.ts" },
+      { text: "FILE: src/a.ts (continued)\nmore a", sourcePath: "src/a.ts" },
+      { text: "FILE: src/b.ts\ncontent b", sourcePath: "src/b.ts" },
+    ];
+
+    const result = await loadPassages(provider, "agent-abc", chunks, 1);
+    expect(result.failedChunks).toBe(1);
+    // src/a.ts should have 1 passage (one succeeded, one failed)
+    expect(result.passages["src/a.ts"]).toHaveLength(1);
+    expect(result.passages["src/b.ts"]).toHaveLength(1);
   });
 
   it("calls onProgress callback during loading", async () => {

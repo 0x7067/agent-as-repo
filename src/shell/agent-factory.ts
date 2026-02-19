@@ -31,36 +31,45 @@ export async function createRepoAgent(
   };
 }
 
+export interface LoadPassagesResult {
+  passages: PassageMap;
+  failedChunks: number;
+}
+
 export async function loadPassages(
   provider: AgentProvider,
   agentId: string,
   chunks: Chunk[],
   concurrency = 20,
   onProgress?: (loaded: number, total: number) => void,
-): Promise<PassageMap> {
+): Promise<LoadPassagesResult> {
   const limit = pLimit(concurrency);
   const passageMap: PassageMap = {};
   let loaded = 0;
+  let failedChunks = 0;
 
-  const results: { sourcePath: string; passageId: string }[] = new Array(chunks.length);
-
-  await Promise.all(
+  const settled = await Promise.allSettled(
     chunks.map((chunk, i) =>
       limit(async () => {
         const passageId = await provider.storePassage(agentId, chunk.text);
-        results[i] = { sourcePath: chunk.sourcePath, passageId };
         loaded++;
         onProgress?.(loaded, chunks.length);
+        return { index: i, sourcePath: chunk.sourcePath, passageId };
       }),
     ),
   );
 
-  for (const { sourcePath, passageId } of results) {
+  for (const result of settled) {
+    if (result.status === "rejected") {
+      failedChunks++;
+      continue;
+    }
+    const { sourcePath, passageId } = result.value;
     if (!passageMap[sourcePath]) {
       passageMap[sourcePath] = [];
     }
     passageMap[sourcePath].push(passageId);
   }
 
-  return passageMap;
+  return { passages: passageMap, failedChunks };
 }

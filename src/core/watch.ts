@@ -15,6 +15,15 @@ export function shouldSync(
   return lastSyncCommit !== currentHead;
 }
 
+export function computeBackoffDelay(
+  consecutiveFailures: number,
+  baseIntervalMs: number,
+  maxDelayMs = 300_000,
+): number {
+  if (consecutiveFailures <= 0) return 0;
+  return Math.min(baseIntervalMs * Math.pow(2, consecutiveFailures - 1), maxDelayMs);
+}
+
 export function formatSyncLog(
   repoName: string,
   fromCommit: string | null,

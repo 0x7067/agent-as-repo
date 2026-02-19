@@ -41,6 +41,12 @@
 - `Promise.race` with bare `setTimeout` — leaks timers; always track and clear
 
 ## Domain Notes
+- Context Repositories (MemFS) are Letta Code-only (v0.14+), NO public REST API or SDK methods — cannot use from `@letta-ai/letta-client`
+- Context Repos replace **memory blocks** (in-context), NOT archival memory (out-of-context) — they're parallel systems
+- `enable_sleeptime` flag exists in SDK v1.7.8 — sleep-time agents are API-accessible now
+- `@letta-ai/agentic-learning` is a separate SDK for conversation memory (not context repos)
+- `@letta-ai/letta-code-sdk` (v0.0.5) spawns Letta Code CLI as subprocess, doesn't expose MemFS API
+- Archival memory passages: still fully supported, no deprecation notices in docs as of 2026-02-18
 - Letta Folders API: `embedding_chunk_size` blocked on cloud API (400 error) — can't tune chunk size
 - Letta Folders API pagination: `folders.files.list()` uses `.items` (ArrayPage), `agents.files.list()` uses `.files` (NextFilesPage) — NOT `.data`
 - Letta Folders API: files namespaced under folder name (`my-folder/src/file.ts`), not bare paths

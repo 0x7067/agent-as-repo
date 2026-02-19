@@ -14,6 +14,7 @@ export interface SyncRepoParams {
   chunkingStrategy?: ChunkingStrategy;
   concurrency?: number;
   fullReIndexThreshold?: number;
+  onFileError?: (filePath: string, error: Error) => void;
 }
 
 export interface SyncResult {
@@ -22,6 +23,7 @@ export interface SyncResult {
   filesDeleted: number;
   filesReIndexed: number;
   isFullReIndex: boolean;
+  failedFiles: string[];
 }
 
 export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
@@ -35,52 +37,73 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
     chunkingStrategy = rawTextStrategy,
     concurrency = 20,
     fullReIndexThreshold = 500,
+    onFileError,
   } = params;
 
   const plan = computeSyncPlan(agent.passages, changedFiles, fullReIndexThreshold);
-
-  // Delete old passages for changed files
   const limit = pLimit(concurrency);
+  const updatedPassages: PassageMap = { ...agent.passages };
+  const stalePassageIds: string[] = [];
+  const failedFiles: string[] = [];
+  let filesReIndexed = 0;
+
+  // Phase 1: Upload new passages (copy-on-write — old passages stay intact until phase 2)
+  for (const filePath of plan.filesToReIndex) {
+    try {
+      const fileInfo = await collectFile(filePath);
+      if (!fileInfo) {
+        // File deleted — mark old passages for cleanup, remove from map
+        const oldIds = agent.passages[filePath];
+        if (oldIds) stalePassageIds.push(...oldIds);
+        delete updatedPassages[filePath];
+        continue;
+      }
+      if (maxFileSizeKb !== undefined && fileInfo.sizeKb > maxFileSizeKb) {
+        // Oversized — mark old passages for cleanup, remove from map
+        const oldIds = agent.passages[filePath];
+        if (oldIds) stalePassageIds.push(...oldIds);
+        delete updatedPassages[filePath];
+        continue;
+      }
+
+      const chunks = chunkingStrategy(fileInfo);
+      const passageIds: string[] = new Array(chunks.length);
+
+      await Promise.all(
+        chunks.map((chunk, i) =>
+          limit(async () => {
+            const id = await provider.storePassage(agent.agentId, chunk.text);
+            passageIds[i] = id;
+          }),
+        ),
+      );
+
+      // Upload succeeded — queue old passages for deletion, update map
+      const oldIds = agent.passages[filePath];
+      if (oldIds) stalePassageIds.push(...oldIds);
+      updatedPassages[filePath] = passageIds;
+      filesReIndexed++;
+    } catch (err) {
+      // Per-file failure: keep old passages intact, report the failure
+      const error = err instanceof Error ? err : new Error(String(err));
+      onFileError?.(filePath, error);
+      failedFiles.push(filePath);
+    }
+  }
+
+  // Phase 2: Delete old (now stale) passages — failures here are non-critical
   await Promise.all(
-    plan.passagesToDelete.map((passageId) =>
-      limit(() => provider.deletePassage(agent.agentId, passageId)),
+    stalePassageIds.map((passageId) =>
+      limit(() => provider.deletePassage(agent.agentId, passageId).catch(() => {})),
     ),
   );
-
-  // Remove deleted passages from map
-  const updatedPassages: PassageMap = { ...agent.passages };
-  for (const file of changedFiles) {
-    delete updatedPassages[file];
-  }
-
-  // Re-index: collect files, chunk, store
-  let filesReIndexed = 0;
-  for (const filePath of plan.filesToReIndex) {
-    const fileInfo = await collectFile(filePath);
-    if (!fileInfo) continue;
-    if (maxFileSizeKb !== undefined && fileInfo.sizeKb > maxFileSizeKb) continue;
-
-    const chunks = chunkingStrategy(fileInfo);
-    const passageIds: string[] = new Array(chunks.length);
-
-    await Promise.all(
-      chunks.map((chunk, i) =>
-        limit(async () => {
-          const id = await provider.storePassage(agent.agentId, chunk.text);
-          passageIds[i] = id;
-        }),
-      ),
-    );
-
-    updatedPassages[filePath] = passageIds;
-    filesReIndexed++;
-  }
 
   return {
     passages: updatedPassages,
     lastSyncCommit: headCommit,
-    filesDeleted: changedFiles.length - filesReIndexed,
+    filesDeleted: changedFiles.length - filesReIndexed - failedFiles.length,
     filesReIndexed,
     isFullReIndex: plan.isFullReIndex,
+    failedFiles,
   };
 }
