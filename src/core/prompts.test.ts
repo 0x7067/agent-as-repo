@@ -10,6 +10,8 @@ describe("buildPersona", () => {
     const persona = buildPersona("my-app", "A React Native mobile app");
     expect(persona).toContain("my-app");
     expect(persona).toContain("archival memory");
+    expect(persona).toContain("architecture and conventions memory blocks");
+    expect(persona).toContain("Be specific");
     expect(persona).toContain("do NOT pass tags");
   });
 

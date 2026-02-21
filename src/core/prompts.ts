@@ -19,7 +19,8 @@ export function buildPersona(
   const lines = [
     base,
     "All project source files are stored in my archival memory.",
-    "I always search archival memory to answer questions about the codebase.",
+    "When answering questions, first consult my architecture and conventions memory blocks, then search archival memory for supporting details.",
+    "Be specific: name exact tools, frameworks, and versions rather than just wrapper commands.",
     NO_TAGS_WARNING,
   ];
 

@@ -23,7 +23,7 @@ interface Question {
 const QUESTIONS: Question[] = [
   {
     text: "What package manager does this project use and how do you run tests?",
-    keywords: ["pnpm", "vitest"],
+    keywords: ["pnpm", "test"],
   },
   {
     text: "Explain the provider abstraction in src/shell/provider.ts",
