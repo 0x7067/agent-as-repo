@@ -99,8 +99,30 @@ export class LettaProvider implements AgentProvider {
   }
 
   async listPassages(agentId: string): Promise<Passage[]> {
-    const list: LettaPassage[] = await this.withRetry(() => this.client.agents.passages.list(agentId));
-    return list.filter((p) => p.id).map((p) => ({ id: p.id as string, text: p.text }));
+    const PAGE_SIZE = 1000;
+    const all: Passage[] = [];
+    let cursor: string | undefined;
+
+    while (true) {
+      const params: { limit: number; after?: string; ascending: boolean } = {
+        limit: PAGE_SIZE,
+        ascending: true,
+      };
+      if (cursor) params.after = cursor;
+
+      const page = await this.withRetry(() =>
+        this.client.agents.passages.list(agentId, params),
+      );
+      const typedPage = page as LettaPassage[];
+      const valid = typedPage.filter((p) => p.id);
+      all.push(...valid.map((p) => ({ id: p.id as string, text: p.text })));
+
+      if (typedPage.length < PAGE_SIZE) break;
+      cursor = typedPage[typedPage.length - 1]?.id ?? undefined;
+      if (!cursor) break;
+    }
+
+    return all;
   }
 
   async getBlock(agentId: string, label: string): Promise<MemoryBlock> {

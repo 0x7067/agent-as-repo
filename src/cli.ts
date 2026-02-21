@@ -9,8 +9,6 @@ import { execFileSync } from "child_process";
 import { loadConfig } from "./shell/config-loader.js";
 import { runInit } from "./shell/init.js";
 import { runAllChecks, runDoctorFixes } from "./shell/doctor.js";
-import { formatEvalReport } from "./core/eval.js";
-import { runEvalFromFile } from "./shell/eval-runner.js";
 import { formatSelfChecks, runSelfChecks } from "./shell/self-check.js";
 import { completionFileName, generateCompletionScript, type CompletionShell } from "./core/completion.js";
 import { formatDoctorReport } from "./core/doctor.js";
@@ -30,21 +28,12 @@ import { exportAgent } from "./shell/export.js";
 import { onboardAgent } from "./shell/onboard.js";
 import { BROADCAST_ASK_DEFAULT_TIMEOUT_MS, broadcastAsk } from "./shell/group-provider.js";
 import { watchRepos } from "./shell/watch.js";
-import { beginCommandTelemetry, endCommandTelemetry, recordCommandRetry } from "./shell/telemetry.js";
 import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
 import { generateMcpEntry, checkMcpEntry } from "./core/mcp-config.js";
 import { buildPostSetupNextSteps, getSetupMode } from "./core/setup.js";
 import type { AgentState, AppState, Config } from "./core/types.js";
-import {
-  ASK_DEFAULT_CACHE_TTL_MS,
-  ASK_DEFAULT_FAST_TIMEOUT_MS,
-  ASK_DEFAULT_TIMEOUT_MS,
-  buildAskRoutePlan,
-  parseAskRoutingMode,
-  type AskRoutingMode,
-} from "./core/ask-routing.js";
-import { InMemoryAnswerCache, toModelCacheKey } from "./shell/answer-cache.js";
+import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
 
 interface SetupOpts {
   repo?: string;
@@ -81,13 +70,11 @@ interface SelfCheckOpts {
 
 interface AskOpts {
   all?: boolean;
-  interactive?: boolean;
   timeout: string;
-  routing?: string;
+  fast?: boolean;
   fastModel?: string;
   askTimeoutMs?: string;
   maxSteps?: string;
-  cache?: boolean;
   config?: string;
 }
 
@@ -129,26 +116,25 @@ interface ConfigLintOpts {
   json?: boolean;
 }
 
-interface EvalRunOpts {
-  repo: string;
-  file: string;
+interface ListOpts {
   json?: boolean;
-  maxTasks: string;
-  minPassRate: string;
-  save?: string;
+  live?: boolean;
+}
+
+interface ReconcileOpts {
+  repo?: string;
+  fix?: boolean;
+  json?: boolean;
+  verbose?: boolean;
 }
 
 const STATE_FILE = ".repo-expert-state.json";
-const askAnswerCache = new InMemoryAnswerCache(ASK_DEFAULT_CACHE_TTL_MS);
 
 interface AskRuntimeSettings {
-  routing: AskRoutingMode;
   fastModel?: string;
   askTimeoutMs: number;
-  fastAskTimeoutMs: number;
-  cacheTtlMs: number;
   maxSteps?: number;
-  cacheEnabled: boolean;
+  useFast: boolean;
 }
 
 // --- Helpers ---
@@ -195,6 +181,8 @@ class FakeProvider implements AgentProvider {
     delete this.passagesByAgent[agentId];
     delete this.blocksByAgent[agentId];
   }
+
+  async enableSleeptime(_agentId: string): Promise<void> {}
 
   async storePassage(agentId: string, text: string): Promise<string> {
     const delayMs = parseInt(process.env.REPO_EXPERT_TEST_DELAY_STORE_MS ?? "0", 10);
@@ -385,7 +373,6 @@ async function withRetry<T>(
       lastErr = err;
       if (attempt === retries) break;
       const waitMs = 500 * Math.pow(2, attempt);
-      recordCommandRetry();
       onRetry(`  ${label} failed (attempt ${attempt + 1}/${retries + 1}): ${(err as Error).message}. Retrying in ${waitMs}ms...`);
       await delay(waitMs);
     }
@@ -409,17 +396,13 @@ function readDebugEnabled(argv: string[]): boolean {
   return argv.includes("--debug");
 }
 
+const ASK_DEFAULT_TIMEOUT_MS = 60_000;
+
 async function loadAskConfigDefaults(configPath: string | undefined): Promise<{
   fastModel?: string;
   askTimeoutMs: number;
-  fastAskTimeoutMs: number;
-  cacheTtlMs: number;
 }> {
-  const defaults = {
-    askTimeoutMs: ASK_DEFAULT_TIMEOUT_MS,
-    fastAskTimeoutMs: ASK_DEFAULT_FAST_TIMEOUT_MS,
-    cacheTtlMs: ASK_DEFAULT_CACHE_TTL_MS,
-  };
+  const defaults = { askTimeoutMs: ASK_DEFAULT_TIMEOUT_MS };
 
   const resolvedPath = configPath ? path.resolve(configPath) : path.resolve("config.yaml");
   if (!configPath) {
@@ -435,8 +418,6 @@ async function loadAskConfigDefaults(configPath: string | undefined): Promise<{
   return {
     fastModel: config.letta.fastModel,
     askTimeoutMs: config.defaults.askTimeoutMs ?? defaults.askTimeoutMs,
-    fastAskTimeoutMs: config.defaults.fastAskTimeoutMs ?? defaults.fastAskTimeoutMs,
-    cacheTtlMs: config.defaults.cacheTtlMs ?? defaults.cacheTtlMs,
   };
 }
 
@@ -446,82 +427,24 @@ async function askAgent(
   question: string,
   settings: AskRuntimeSettings,
 ): Promise<string> {
-  const plan = buildAskRoutePlan({
-    routing: settings.routing,
-    question,
-    fastModel: settings.fastModel,
-    askTimeoutMs: settings.askTimeoutMs,
-    fastAskTimeoutMs: settings.fastAskTimeoutMs,
-  });
+  const overrideModel = settings.useFast ? settings.fastModel : undefined;
+  return withTimeout(
+    `Ask "${agent.repoName}"`,
+    settings.askTimeoutMs,
+    () => provider.sendMessage(agent.agentId, question, { overrideModel, maxSteps: settings.maxSteps }),
+  );
+}
 
-  const attempts: Array<{ overrideModel?: string; timeoutMs: number }> = [
-    { overrideModel: plan.primaryOverrideModel, timeoutMs: plan.primaryTimeoutMs },
-  ];
-  if (plan.enableFallback) {
-    attempts.push({
-      overrideModel: plan.fallbackOverrideModel,
-      timeoutMs: plan.fallbackTimeoutMs,
-    });
-  }
-
-  if (settings.cacheEnabled) {
-    for (const attempt of attempts) {
-      const cached = askAnswerCache.get({
-        agentId: agent.agentId,
-        question,
-        modelKey: toModelCacheKey(attempt.overrideModel),
-        lastSyncCommit: agent.lastSyncCommit,
-      });
-      if (cached !== null) {
-        return cached;
-      }
-    }
-  }
-
-  const runAttempt = async (attempt: { overrideModel?: string; timeoutMs: number }): Promise<string> => {
-    const modelLabel = attempt.overrideModel ?? "agent-default";
-    return withTimeout(
-      `Ask "${agent.repoName}" (${modelLabel})`,
-      attempt.timeoutMs,
-      () => provider.sendMessage(agent.agentId, question, { overrideModel: attempt.overrideModel, maxSteps: settings.maxSteps }),
-    );
+function startSpinner(label: string): () => void {
+  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  let i = 0;
+  const id = setInterval(() => {
+    process.stderr.write(`\r${frames[i++ % frames.length]} ${label}`);
+  }, 80);
+  return () => {
+    clearInterval(id);
+    process.stderr.write("\r\x1b[K");
   };
-
-  let answer: string | null = null;
-  let usedModel = attempts[0].overrideModel;
-  let primaryError: unknown = null;
-
-  try {
-    answer = await runAttempt(attempts[0]);
-  } catch (err) {
-    primaryError = err;
-  }
-
-  const hasFallback = attempts.length > 1;
-  const shouldFallback = hasFallback && (primaryError !== null || (answer ?? "").trim().length === 0);
-
-  if (shouldFallback) {
-    answer = await runAttempt(attempts[1]);
-    usedModel = attempts[1].overrideModel;
-  } else if (primaryError !== null) {
-    throw primaryError;
-  }
-
-  const finalAnswer = answer ?? "";
-  if (settings.cacheEnabled && finalAnswer.trim().length > 0) {
-    askAnswerCache.set(
-      {
-        agentId: agent.agentId,
-        question,
-        modelKey: toModelCacheKey(usedModel),
-        lastSyncCommit: agent.lastSyncCommit,
-      },
-      finalAnswer,
-      settings.cacheTtlMs,
-    );
-  }
-
-  return finalAnswer;
 }
 
 // --- Program ---
@@ -529,12 +452,6 @@ async function askAgent(
 const program = new Command();
 program.name("repo-expert").description("Persistent AI agents for git repositories").version("0.1.0");
 program.option("--no-input", "Disable interactive prompts").option("--debug", "Show stack traces for unexpected errors");
-program.hook("preAction", (_thisCommand, actionCommand) => {
-  beginCommandTelemetry(actionCommand.name());
-});
-program.hook("postAction", () => {
-  endCommandTelemetry(process.exitCode && process.exitCode !== 0 ? "error" : "ok");
-});
 program.addHelpText(
   "after",
   [
@@ -827,155 +744,27 @@ configCommand
     }
   });
 
-const evalCommand = program.command("eval").description("Personal benchmark evaluation helpers");
-
-evalCommand
-  .command("run")
-  .description("Run benchmark tasks against one configured agent")
-  .requiredOption("--repo <name>", "Repo name to evaluate")
-  .option("--file <path>", "Task file path", "eval/tasks.json")
-  .option("--json", "Output evaluation report as JSON")
-  .option("--max-tasks <n>", "Limit how many tasks to run", "-1")
-  .option("--min-pass-rate <n>", "Set failing threshold for overall pass rate (0-100)", "0")
-  .option("--save <path>", "Write full JSON result to a file")
-  .action(async (opts: EvalRunOpts) => {
-    const state = await loadState(STATE_FILE);
-    const agent = requireAgent(state, opts.repo);
-    if (!agent) return;
-
-    const provider = createProviderForCommands();
-    const filePath = path.resolve(opts.file);
-    const maxTasks = parseIntOrDefault(opts.maxTasks, -1);
-    const minPassRate = parseNonNegativeInt(opts.minPassRate, 0);
-    const run = await runEvalFromFile({
-      provider,
-      agentId: agent.agentId,
-      filePath,
-      maxTasks: maxTasks < 0 ? undefined : maxTasks,
-    });
-
-    if (opts.save) {
-      const fs = await import("fs/promises");
-      const savePath = path.resolve(opts.save);
-      await fs.mkdir(path.dirname(savePath), { recursive: true });
-      await fs.writeFile(savePath, JSON.stringify(run, null, 2), "utf-8");
-    }
-
-    if (opts.json) {
-      console.log(JSON.stringify(run, null, 2));
-    } else {
-      console.log(formatEvalReport(run));
-    }
-
-    if (run.summary.overallPassRate < minPassRate) {
-      process.exitCode = 1;
-    }
-  });
-
 program
   .command("ask [repo] [question]")
   .description("Ask an agent a question")
   .option("--all", "Ask all agents and collect responses")
-  .option("-i, --interactive", "Interactive REPL mode")
   .option("--timeout <ms>", "Per-agent timeout for --all (ms)", `${BROADCAST_ASK_DEFAULT_TIMEOUT_MS}`)
-  .option("--routing <mode>", "Routing mode for single-agent asks: auto|quality|speed", "auto")
-  .option("--fast-model <model>", "Fast model handle used by routing=auto|speed")
-  .option("--ask-timeout-ms <ms>", "Timeout for single-agent asks and interactive mode")
+  .option("--fast", "Use the fast model from config for this query")
+  .option("--fast-model <model>", "Override the fast model for this query")
+  .option("--ask-timeout-ms <ms>", "Timeout for single-agent asks (ms)")
   .option("--max-steps <n>", "Maximum agent reasoning/tool steps per ask")
-  .option("--no-cache", "Disable in-memory answer cache for single-agent asks")
-  .option("--config <path>", "Optional config file path used for ask defaults")
+  .option("--config <path>", "Optional config file path for ask defaults")
   .action(async (repo: string | undefined, question: string | undefined, opts: AskOpts) => {
     const buildAskSettings = async (): Promise<AskRuntimeSettings> => {
       const configDefaults = await loadAskConfigDefaults(opts.config);
-      let routing: AskRoutingMode;
-      try {
-        routing = parseAskRoutingMode(opts.routing);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        throw new CliUserError(message);
-      }
+      const fastModel = opts.fastModel ?? configDefaults.fastModel;
       return {
-        routing,
-        fastModel: opts.fastModel ?? configDefaults.fastModel,
+        fastModel,
         askTimeoutMs: parseOptionalPositiveInt(opts.askTimeoutMs, configDefaults.askTimeoutMs),
-        fastAskTimeoutMs: configDefaults.fastAskTimeoutMs,
-        cacheTtlMs: configDefaults.cacheTtlMs,
         maxSteps: parseOptionalMaxSteps(opts.maxSteps),
-        cacheEnabled: opts.cache !== false,
+        useFast: Boolean(opts.fast) && Boolean(fastModel),
       };
     };
-
-    if (opts.interactive) {
-      if (noInputEnabled()) {
-        console.error("Interactive mode is disabled by --no-input.");
-        process.exitCode = 1;
-        return;
-      }
-      if (!interactiveInputAvailable()) {
-        console.error("Interactive mode requires an interactive terminal (TTY).");
-        process.exitCode = 1;
-        return;
-      }
-
-      const state = await loadState(STATE_FILE);
-      const repoNames = Object.keys(state.agents);
-      if (repoNames.length === 0) {
-        console.error('No agents found. Run "repo-expert setup" to create them.');
-        process.exitCode = 1;
-        return;
-      }
-
-      const provider = createProvider();
-      const defaultRepo = repo && state.agents[repo] ? repo : undefined;
-      const askSettings = await buildAskSettings();
-
-      console.log("Interactive mode. Use @repo to target a specific agent.");
-      console.log(`Available agents: ${repoNames.join(", ")}`);
-      if (defaultRepo) console.log(`Default agent: ${defaultRepo}`);
-      console.log('Type "exit" to leave.\n');
-
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      try {
-        while (true) {
-          const input = await rl.question("> ");
-          const trimmed = input.trim();
-          if (!trimmed || trimmed === "exit" || trimmed === "quit") break;
-
-          let targetRepo: string | undefined;
-          let q: string;
-
-          if (trimmed.startsWith("@")) {
-            const spaceIdx = trimmed.indexOf(" ");
-            if (spaceIdx === -1) {
-              console.log("Usage: @repo question");
-              continue;
-            }
-            targetRepo = trimmed.slice(1, spaceIdx);
-            q = trimmed.slice(spaceIdx + 1).trim();
-          } else {
-            targetRepo = defaultRepo;
-            q = trimmed;
-          }
-
-          if (!targetRepo) {
-            console.log("No default agent. Use @repo question.");
-            continue;
-          }
-
-          const agentInfo = state.agents[targetRepo];
-          if (!agentInfo) {
-            console.log(`No agent for "${targetRepo}". Available: ${repoNames.join(", ")}`);
-            continue;
-          }
-
-          const answer = await askAgent(provider, agentInfo, q, askSettings);
-          console.log(`\n${answer}\n`);
-        }
-      } finally {
-        rl.close();
-      }
-      return;
-    }
 
     if (opts.all) {
       // When --all is used, the first positional arg is the question
@@ -1017,7 +806,6 @@ program
     if (!repo || !question) {
       console.error("Usage: repo-expert ask <repo> <question>");
       console.error("       repo-expert ask --all <question>");
-      console.error("       repo-expert ask -i [repo]");
       process.exitCode = 1;
       return;
     }
@@ -1028,8 +816,15 @@ program
 
     const provider = createProvider();
     const askSettings = await buildAskSettings();
-    const answer = await askAgent(provider, agentInfo, question, askSettings);
-    console.log(answer);
+    const stop = startSpinner(`Asking ${repo}...`);
+    try {
+      const answer = await askAgent(provider, agentInfo, question, askSettings);
+      stop();
+      console.log(answer);
+    } catch (err) {
+      stop();
+      throw err;
+    }
   });
 
 program
@@ -1182,7 +977,8 @@ program
   .command("list")
   .description("List all agents")
   .option("--json", "Output agent list as JSON")
-  .action(async (opts: RepoOpts) => {
+  .option("--live", "Fetch live passage counts from Letta (slower)")
+  .action(async (opts: ListOpts) => {
     const state = await loadState(STATE_FILE);
     const entries = Object.entries(state.agents);
 
@@ -1195,13 +991,30 @@ program
       return;
     }
 
-    const rows = entries.map(([repoName, agent]) => ({
+    const rows: Array<{
+      repoName: string;
+      agentId: string;
+      files: number;
+      passages: number;
+      bootstrapped: boolean;
+      serverPassages?: number;
+      drift?: boolean;
+    }> = entries.map(([repoName, agent]) => ({
       repoName,
       agentId: agent.agentId,
       files: Object.keys(agent.passages).length,
       passages: Object.values(agent.passages).flat().length,
       bootstrapped: Boolean(agent.lastBootstrap),
     }));
+
+    if (opts.live) {
+      const provider = createProviderForCommands();
+      for (const row of rows) {
+        const serverPassages = await provider.listPassages(row.agentId);
+        row.serverPassages = serverPassages.length;
+        row.drift = row.passages !== serverPassages.length;
+      }
+    }
 
     if (opts.json) {
       console.log(JSON.stringify(rows, null, 2));
@@ -1210,7 +1023,12 @@ program
 
     for (const row of rows) {
       const bootstrap = row.bootstrapped ? "yes" : "no";
-      console.log(`  ${row.repoName}: agent=${row.agentId} files=${row.files} passages=${row.passages} bootstrapped=${bootstrap}`);
+      if (opts.live) {
+        const driftTag = row.drift ? " [drift]" : "";
+        console.log(`  ${row.repoName}: agent=${row.agentId} files=${row.files} passages=${row.passages} server=${row.serverPassages}${driftTag} bootstrapped=${bootstrap}`);
+      } else {
+        console.log(`  ${row.repoName}: agent=${row.agentId} files=${row.files} passages=${row.passages} bootstrapped=${bootstrap}`);
+      }
     }
   });
 
@@ -1332,6 +1150,78 @@ program
     }
     await saveState(STATE_FILE, newState);
     console.log("Done.");
+  });
+
+program
+  .command("reconcile")
+  .description("Compare local passage state against Letta's actual state and report drift")
+  .option("--repo <name>", "Reconcile a single repo agent (default: all)")
+  .option("--fix", "Delete orphan passages and clean up stale local entries")
+  .option("--json", "Output reconcile results as JSON")
+  .option("--verbose", "Include full passage ID lists in JSON output")
+  .action(async (opts: ReconcileOpts) => {
+    let state = await loadState(STATE_FILE);
+    const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
+    const existing = repoNames.filter((n) => state.agents[n]);
+
+    if (existing.length === 0) {
+      console.log('No agents found. Run "repo-expert setup" to create them.');
+      return;
+    }
+
+    const provider = createProviderForCommands();
+    const results: ReconcileResult[] = [];
+    let anyDrift = false;
+
+    for (const repoName of existing) {
+      const agent = state.agents[repoName];
+      const result = await reconcileAgent(provider, agent);
+      results.push(result);
+      if (!result.inSync) anyDrift = true;
+    }
+
+    if (opts.fix && anyDrift) {
+      for (const result of results) {
+        if (result.inSync) continue;
+        const agent = state.agents[result.repoName];
+        const updatedPassages = await fixReconcileDrift(provider, agent, result);
+        state = updateAgentField(state, result.repoName, { passages: updatedPassages });
+      }
+      await saveState(STATE_FILE, state);
+    }
+
+    if (opts.json) {
+      const jsonResults = results.map((r) => ({
+        repoName: r.repoName,
+        localPassageCount: r.localPassageCount,
+        serverPassageCount: r.serverPassageCount,
+        orphanCount: r.orphanPassageIds.length,
+        missingCount: r.missingPassageIds.length,
+        inSync: r.inSync,
+        fixed: Boolean(opts.fix) && !r.inSync,
+        ...(opts.verbose ? { orphanPassageIds: r.orphanPassageIds, missingPassageIds: r.missingPassageIds } : {}),
+      }));
+      console.log(JSON.stringify(jsonResults, null, 2));
+      if (anyDrift && !opts.fix) process.exitCode = 1;
+      return;
+    }
+
+    for (const result of results) {
+      if (result.inSync) {
+        console.log(`${result.repoName}: in sync (${result.serverPassageCount} passages)`);
+      } else {
+        console.log(`${result.repoName}: drift detected`);
+        if (result.orphanPassageIds.length > 0) {
+          console.log(`  orphan passages (on server, not in local map): ${result.orphanPassageIds.length}`);
+        }
+        if (result.missingPassageIds.length > 0) {
+          console.log(`  missing passages (in local map, not on server): ${result.missingPassageIds.length}`);
+        }
+        if (opts.fix) console.log(`  fixed.`);
+      }
+    }
+
+    if (anyDrift && !opts.fix) process.exitCode = 1;
   });
 
 program
@@ -1656,8 +1546,6 @@ async function main(argv = process.argv): Promise<void> {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
-    const errorClass = err instanceof Error ? err.name : "UnknownError";
-    endCommandTelemetry("error", errorClass);
     if (err instanceof CliUserError || err instanceof StateFileError) {
       console.error(err.message);
       process.exitCode = err instanceof CliUserError ? err.exitCode : 1;

@@ -231,7 +231,7 @@ describe("LettaProvider", () => {
         { id: "p-1", text: "FILE: src/a.ts\ncontent" },
         { id: "p-2", text: "FILE: src/b.ts\ncontent" },
       ]);
-      expect(client.agents.passages.list).toHaveBeenCalledWith("agent-abc");
+      expect(client.agents.passages.list).toHaveBeenCalledWith("agent-abc", { limit: 1000, ascending: true });
     });
 
     it("returns empty array when no passages", async () => {
@@ -242,6 +242,46 @@ describe("LettaProvider", () => {
       const passages = await provider.listPassages("agent-abc");
 
       expect(passages).toEqual([]);
+    });
+
+    it("paginates when server returns a full page", async () => {
+      const PAGE_SIZE = 1000;
+      const firstPage = Array.from({ length: PAGE_SIZE }, (_, i) => ({
+        id: `p-${i}`,
+        text: `chunk ${i}`,
+        embedding: null,
+        embedding_config: null,
+      }));
+      const secondPage = [
+        { id: "p-1000", text: "chunk 1000", embedding: null, embedding_config: null },
+        { id: "p-1001", text: "chunk 1001", embedding: null, embedding_config: null },
+      ];
+
+      const client = makeMockClient();
+      client.agents.passages.list
+        .mockResolvedValueOnce(firstPage)
+        .mockResolvedValueOnce(secondPage);
+      const provider = new LettaProvider(mockClientAs(client));
+
+      const passages = await provider.listPassages("agent-abc");
+
+      expect(passages).toHaveLength(PAGE_SIZE + 2);
+      expect(client.agents.passages.list).toHaveBeenCalledTimes(2);
+      expect(client.agents.passages.list).toHaveBeenNthCalledWith(1, "agent-abc", { limit: 1000, ascending: true });
+      expect(client.agents.passages.list).toHaveBeenNthCalledWith(2, "agent-abc", { limit: 1000, ascending: true, after: `p-${PAGE_SIZE - 1}` });
+    });
+
+    it("returns single page when count < PAGE_SIZE", async () => {
+      const client = makeMockClient();
+      client.agents.passages.list.mockResolvedValue(
+        Array.from({ length: 50 }, (_, i) => ({ id: `p-${i}`, text: `chunk ${i}`, embedding: null, embedding_config: null })),
+      );
+      const provider = new LettaProvider(mockClientAs(client));
+
+      const passages = await provider.listPassages("agent-abc");
+
+      expect(passages).toHaveLength(50);
+      expect(client.agents.passages.list).toHaveBeenCalledTimes(1);
     });
   });
 
