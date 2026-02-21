@@ -1,15 +1,12 @@
 import { z } from "zod/v4";
 import type { Config, RepoConfig } from "./types.js";
-import { ASK_DEFAULT_CACHE_TTL_MS, ASK_DEFAULT_FAST_TIMEOUT_MS, ASK_DEFAULT_TIMEOUT_MS } from "./ask-routing.js";
 
 const BUILT_IN_DEFAULTS = {
   maxFileSizeKb: 50,
   memoryBlockLimit: 5000,
   bootstrapOnCreate: true,
   chunking: "raw" as const,
-  askTimeoutMs: ASK_DEFAULT_TIMEOUT_MS,
-  fastAskTimeoutMs: ASK_DEFAULT_FAST_TIMEOUT_MS,
-  cacheTtlMs: ASK_DEFAULT_CACHE_TTL_MS,
+  askTimeoutMs: 60_000,
 };
 
 const defaultsSchema = z.object({
@@ -18,8 +15,6 @@ const defaultsSchema = z.object({
   bootstrap_on_create: z.boolean().optional(),
   chunking: z.enum(["raw", "tree-sitter"]).optional(),
   ask_timeout_ms: z.number().optional(),
-  fast_ask_timeout_ms: z.number().optional(),
-  cache_ttl_ms: z.number().optional(),
   tools: z.array(z.string()).optional(),
 });
 
@@ -112,8 +107,6 @@ export function parseConfig(raw: unknown): Config {
     bootstrapOnCreate: userDefaults.bootstrap_on_create ?? BUILT_IN_DEFAULTS.bootstrapOnCreate,
     chunking: userDefaults.chunking ?? BUILT_IN_DEFAULTS.chunking,
     askTimeoutMs: userDefaults.ask_timeout_ms ?? BUILT_IN_DEFAULTS.askTimeoutMs,
-    fastAskTimeoutMs: userDefaults.fast_ask_timeout_ms ?? BUILT_IN_DEFAULTS.fastAskTimeoutMs,
-    cacheTtlMs: userDefaults.cache_ttl_ms ?? BUILT_IN_DEFAULTS.cacheTtlMs,
   };
 
   const repos: Record<string, RepoConfig> = {};

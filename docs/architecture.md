@@ -106,9 +106,9 @@ graph TB
 repo-expert
  ├── setup [--repo]       Create agents, load files, bootstrap
  ├── ask <repo> <q>       Query a single agent
- │   ├── --all            Broadcast to all agents
- │   └── -i               Interactive REPL
+ │   └── --all            Broadcast to all agents
  ├── sync [--full]        Incremental sync via git diff
+ ├── reconcile [--fix]    Compare local state vs Letta, detect/fix drift
  ├── watch                Poll git HEAD, auto-sync on new commits
  ├── list                 Show agents and passage counts
  ├── status               Memory stats and health per agent

@@ -1,101 +1,66 @@
-# Repo Expert Agents
+# repo-expert
 
-Persistent AI agents that serve as institutional memory for git repositories, built on [Letta Cloud](https://docs.letta.com).
+Persistent AI agents that act as long-term memory for your git repositories. Unlike IDE tools that forget between sessions, these agents accumulate knowledge over time and answer questions about your codebase instantly.
 
-Unlike IDE tools that forget between sessions, these agents accumulate knowledge over time — refining their understanding of architecture, conventions, and cross-repo relationships through every interaction.
+## Quickstart
 
-## Prerequisites
+1. **Install dependencies**
+   ```bash
+   pnpm install
+   ```
 
-- Node.js 18+
-- [pnpm](https://pnpm.io/)
-- A [Letta Cloud](https://app.letta.com/) account and API key
+2. **Configure API key and generate `config.yaml`**
+   ```bash
+   pnpm repo-expert init
+   ```
 
-## Quick Start
+3. **Create agents and index your repo**
+   ```bash
+   pnpm repo-expert setup
+   ```
 
-```bash
-pnpm install
-pnpm repo-expert init    # guided setup: API key + repo config
-pnpm repo-expert setup   # create agents
-pnpm repo-expert doctor  # verify API/config/state/git health
-pnpm repo-expert self-check
-pnpm repo-expert onboard my-app
-pnpm repo-expert ask my-app "How does authentication work?"
-```
+4. **Ask questions**
+   ```bash
+   pnpm repo-expert ask my-app "Where is authentication handled?"
+   ```
 
-Non-interactive bootstrap:
+## MCP Server
 
-```bash
-pnpm repo-expert --no-input init --api-key "$LETTA_API_KEY" --repo-path ~/repos/my-app --yes
-pnpm repo-expert config lint --json
-pnpm repo-expert setup --reindex --json
-pnpm repo-expert sync --dry-run --json
-```
-
-## Manual Setup
-
-If you prefer manual configuration over `init`:
+Expose Letta agents to Claude Code, Cursor, or Codex via MCP (8 typed tools). See [docs/mcp-setup.md](docs/mcp-setup.md) for configuration.
 
 ```bash
-pnpm install
-
-# Configure your API key
-cp .env.example .env   # or create .env with: LETTA_API_KEY=your-key-here
-
-# Configure your repos
-cp config.example.yaml config.yaml
-# Edit config.yaml with your repo paths, extensions, and descriptions
+pnpm repo-expert mcp-install  # writes entry to ~/.claude.json
 ```
 
-## Usage
+## Command Reference
 
-```bash
-# Create agents from config
-pnpm repo-expert setup
-pnpm repo-expert setup --repo my-app    # single repo
-pnpm repo-expert setup --resume         # resume partial setup
-pnpm repo-expert setup --reindex        # force full re-index
-
-# Ask questions
-pnpm repo-expert ask my-app "How does authentication work?"
-pnpm repo-expert ask --all "What's the API contract for user creation?"
-pnpm repo-expert ask -i                 # interactive REPL
-pnpm repo-expert ask -i my-app          # REPL with default agent
-pnpm repo-expert ask my-app "where is auth?" --routing auto --fast-model openai/gpt-4.1-mini
-
-# Sync after code changes
-pnpm repo-expert sync                   # incremental (git diff)
-pnpm repo-expert sync --full            # full re-index
-pnpm repo-expert sync --repo my-app
-pnpm repo-expert watch                  # near real-time file watch + poll fallback
-
-# Inspect
-pnpm repo-expert list                   # list agents
-pnpm repo-expert status                 # memory stats and health
-pnpm repo-expert self-check             # node/pnpm/dependency health
-pnpm repo-expert config lint            # validate config.yaml
-pnpm repo-expert export --repo my-app   # dump memory to markdown
-
-# Onboarding
-pnpm repo-expert onboard my-app         # guided codebase walkthrough
-
-# Personal quality benchmark
-cp eval/tasks.example.json eval/tasks.json
-pnpm repo-expert eval run --repo my-app --file eval/tasks.json
-pnpm repo-expert eval run --repo my-app --file eval/tasks.json --json --save eval/results.json
-pnpm repo-expert eval run --repo my-app --file eval/tasks.json --min-pass-rate 85
-
-# Cleanup
-pnpm repo-expert destroy                # delete all agents (with confirmation)
-pnpm repo-expert destroy --repo my-app
-
-# Shell completions
-pnpm repo-expert completion zsh > ~/.zsh/completions/_repo-expert
-pnpm repo-expert completion fish --install-dir ~/.config/fish/completions
-```
+| Command | Description |
+|---------|-------------|
+| `init` | Interactive setup: configure API key, scan a repo, generate `config.yaml` |
+| `setup [--repo] [--reindex]` | Create agents from `config.yaml`, load file passages, bootstrap |
+| `ask <repo> <question>` | Ask a single agent a question |
+| `ask --all <question>` | Broadcast question to all agents and collect responses |
+| `sync [--repo] [--full]` | Sync file changes to agents via `git diff` |
+| `reconcile [--repo] [--fix]` | Compare local passage state vs Letta, detect and fix drift |
+| `list [--json]` | List all agents with passage counts |
+| `status [--repo]` | Show agent memory stats and health |
+| `export [--repo]` | Export agent memory to markdown |
+| `onboard <repo>` | Guided codebase walkthrough for new developers |
+| `destroy [--repo] [--force]` | Delete agents from Letta Cloud |
+| `sleeptime [--repo]` | Enable sleep-time memory consolidation on existing agents |
+| `watch [--repo] [--interval]` | Poll git HEAD and auto-sync on new commits |
+| `install-daemon` | Install launchd daemon for auto-sync on macOS |
+| `uninstall-daemon` | Remove the launchd watch daemon |
+| `mcp-install [--global\|--local]` | Write MCP server entry to Claude Code config |
+| `mcp-check` | Validate existing MCP server entry |
+| `config lint` | Validate `config.yaml` structure and semantics |
+| `doctor [--fix]` | Check API key, config, repo paths, git, state consistency |
+| `self-check` | Check local runtime/toolchain health (Node, pnpm, dependencies) |
+| `completion <shell>` | Print shell completion script (bash, zsh, fish) |
 
 ## Configuration
 
-See [`config.example.yaml`](config.example.yaml) for all options. Minimal example:
+Copy `config.example.yaml` to `config.yaml` and set `LETTA_API_KEY` in `.env`:
 
 ```yaml
 letta:
@@ -110,31 +75,28 @@ repos:
     ignore_dirs: [node_modules, .git, dist]
 ```
 
-Paths support `~` (home directory) and relative paths. Tags enable cross-agent discovery when using `--all`.
+## Architecture
 
-## How It Works
+See [docs/architecture.md](docs/architecture.md) for the full architecture diagram and design decisions.
 
-Each repo gets a Letta agent with three-tier memory:
-
-- **Core memory** (always in context): persona, architecture overview, coding conventions — self-updated by the agent over time
-- **Archival memory** (vector store): source files as searchable passages
-- **Recall memory** (conversation history): institutional memory of past interactions
-
-On `setup`, the agent loads all matching files, then bootstraps by analyzing the codebase and populating its core memory blocks. On `sync`, only changed files (via `git diff`) are re-indexed. On `watch`, file-system changes are batched with a short debounce and synced immediately, with periodic polling as a fallback.
+Key points:
+- **Functional core, imperative shell** — `src/core/` contains pure functions, `src/shell/` handles all I/O
+- **Provider abstraction** — `AgentProvider` interface decouples business logic from the Letta SDK
+- **Three-tier memory** — core (always in context), archival (vector-searchable source files), recall (conversation history)
+- **Incremental sync** — `git diff` detects changes; only affected passages are re-indexed
 
 ## Development
 
 ```bash
-pnpm build             # build dist artifacts
-pnpm changeset         # add release note entry
-pnpm version-packages  # apply version bumps/changelogs
-pnpm release           # publish with changesets
-pnpm test              # run tests
-pnpm tsx src/cli.ts    # run CLI directly
+pnpm install              # install dependencies
+pnpm test                 # run all tests (vitest)
+pnpm repo-expert --help   # CLI entry point
+pnpm mcp-server           # start MCP server (stdio)
 ```
 
-Optional command telemetry (JSONL):
-
-```bash
-REPO_EXPERT_TELEMETRY_PATH=.repo-expert-telemetry.jsonl pnpm repo-expert setup --json
-```
+Conventions:
+- TypeScript strict mode, ES2022 target
+- TDD: write failing tests first, then implement
+- Core modules (`src/core/`) have no side effects and require no mocks in tests
+- Shell modules (`src/shell/`) mock external boundaries (Letta SDK, filesystem)
+- Package manager: pnpm (never npm or yarn)

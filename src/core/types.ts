@@ -26,8 +26,6 @@ export interface Config {
     bootstrapOnCreate: boolean;
     chunking: "raw" | "tree-sitter";
     askTimeoutMs?: number;
-    fastAskTimeoutMs?: number;
-    cacheTtlMs?: number;
   };
   repos: Record<string, RepoConfig>;
 }

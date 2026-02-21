@@ -75,7 +75,7 @@ Add to `.cursor/mcp.json` in your project root:
 |------|--------|-------------|
 | `letta_list_agents` | _(none)_ | List all agents |
 | `letta_get_agent` | `agent_id` | Full agent details |
-| `letta_send_message` | `agent_id`, `content` | Send message, get response |
+| `letta_send_message` | `agent_id`, `content`, `override_model?`, `timeout_ms?`, `max_steps?` | Send message, get response |
 | `letta_get_core_memory` | `agent_id` | All memory blocks |
 | `letta_search_archival` | `agent_id`, `query`, `top_k?` | Semantic passage search |
 | `letta_insert_passage` | `agent_id`, `text` | Insert into archival memory |

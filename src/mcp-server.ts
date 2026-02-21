@@ -5,27 +5,19 @@ import { Letta } from "@letta-ai/letta-client";
 import type { AssistantMessage } from "@letta-ai/letta-client/resources/agents/messages.js";
 import { fileURLToPath } from "node:url";
 import { z } from "zod/v4";
-import {
-  ASK_DEFAULT_CACHE_TTL_MS,
-  ASK_DEFAULT_FAST_TIMEOUT_MS,
-  ASK_DEFAULT_TIMEOUT_MS,
-  buildAskRoutePlan,
-  type AskRoutingMode,
-} from "./core/ask-routing.js";
-import { InMemoryAnswerCache, toModelCacheKey } from "./shell/answer-cache.js";
 
 // Accept LETTA_PASSWORD as alias for LETTA_API_KEY (Codex compat)
 if (process.env["LETTA_PASSWORD"] && !process.env["LETTA_API_KEY"]) {
   process.env["LETTA_API_KEY"] = process.env["LETTA_PASSWORD"];
 }
 
+const ASK_DEFAULT_TIMEOUT_MS = 60_000;
+
 export function createClient(): Letta {
   return new Letta({
     baseURL: process.env["LETTA_BASE_URL"],
   });
 }
-
-const messageCache = new InMemoryAnswerCache(ASK_DEFAULT_CACHE_TTL_MS);
 
 type ToolResult = { content: Array<{ type: "text"; text: string }>; isError?: boolean };
 
@@ -98,101 +90,29 @@ export function registerTools(server: McpServer, client: Letta): void {
       agent_id: z.string().describe("The agent ID"),
       content: z.string().describe("The message content"),
       override_model: z.string().optional().describe("Optional per-request model override"),
-      routing: z.enum(["auto", "quality", "speed"]).optional().describe("Routing mode used when override_model is omitted"),
       timeout_ms: z.number().int().positive().optional().describe("Request timeout in milliseconds"),
       max_steps: z.number().int().positive().optional().describe("Maximum reasoning/tool steps for this request"),
-      cache: z.boolean().optional().describe("Enable in-memory response cache (default true)"),
     },
-    ({ agent_id, content, override_model, routing, timeout_ms, max_steps, cache }) =>
+    ({ agent_id, content, override_model, timeout_ms, max_steps }) =>
       handleTool(async () => {
-        const fastModel = process.env["LETTA_FAST_MODEL"]?.trim() || undefined;
         const askTimeoutMs = timeout_ms ?? parsePositiveInt(process.env["LETTA_ASK_TIMEOUT_MS"], ASK_DEFAULT_TIMEOUT_MS);
-        const fastAskTimeoutMs = parsePositiveInt(process.env["LETTA_FAST_ASK_TIMEOUT_MS"], ASK_DEFAULT_FAST_TIMEOUT_MS);
-        const routingMode: AskRoutingMode = routing ?? "auto";
-        const cacheEnabled = cache !== false;
 
-        const attempts: Array<{ overrideModel?: string; timeoutMs: number }> = [];
-        if (override_model) {
-          attempts.push({ overrideModel: override_model, timeoutMs: askTimeoutMs });
-        } else {
-          const plan = buildAskRoutePlan({
-            routing: routingMode,
-            question: content,
-            fastModel,
-            askTimeoutMs,
-            fastAskTimeoutMs,
-          });
-          attempts.push({ overrideModel: plan.primaryOverrideModel, timeoutMs: plan.primaryTimeoutMs });
-          if (plan.enableFallback) {
-            attempts.push({ overrideModel: plan.fallbackOverrideModel, timeoutMs: plan.fallbackTimeoutMs });
-          }
-        }
-
-        if (cacheEnabled) {
-          for (const attempt of attempts) {
-            const cached = messageCache.get({
-              agentId: agent_id,
-              question: content,
-              modelKey: toModelCacheKey(attempt.overrideModel),
-              lastSyncCommit: null,
-            });
-            if (cached !== null) return cached;
-          }
-        }
-
-        const runAttempt = async (attempt: { overrideModel?: string; timeoutMs: number }): Promise<string> => {
-          const payload: {
-            messages: Array<{ role: "user"; content: string }>;
-            override_model?: string;
-            max_steps?: number;
-          } = {
-            messages: [{ role: "user", content }],
-          };
-          if (attempt.overrideModel) payload.override_model = attempt.overrideModel;
-          if (max_steps !== undefined) payload.max_steps = max_steps;
-
-          const response = await withTimeout(
-            `letta_send_message (${attempt.overrideModel ?? "agent-default"})`,
-            attempt.timeoutMs,
-            () => client.agents.messages.create(agent_id, payload),
-          );
-          return extractAssistantText(response as { messages: unknown[] });
+        const payload: {
+          messages: Array<{ role: "user"; content: string }>;
+          override_model?: string;
+          max_steps?: number;
+        } = {
+          messages: [{ role: "user", content }],
         };
+        if (override_model) payload.override_model = override_model;
+        if (max_steps !== undefined) payload.max_steps = max_steps;
 
-        let answer: string | null = null;
-        let usedModel = attempts[0].overrideModel;
-        let primaryError: unknown = null;
-
-        try {
-          answer = await runAttempt(attempts[0]);
-        } catch (err) {
-          primaryError = err;
-        }
-
-        const hasFallback = attempts.length > 1;
-        const shouldFallback = hasFallback && (primaryError !== null || (answer ?? "").trim().length === 0);
-
-        if (shouldFallback) {
-          answer = await runAttempt(attempts[1]);
-          usedModel = attempts[1].overrideModel;
-        } else if (primaryError !== null) {
-          throw primaryError;
-        }
-
-        const finalAnswer = answer ?? "";
-        if (cacheEnabled && finalAnswer.trim().length > 0) {
-          messageCache.set(
-            {
-              agentId: agent_id,
-              question: content,
-              modelKey: toModelCacheKey(usedModel),
-              lastSyncCommit: null,
-            },
-            finalAnswer,
-          );
-        }
-
-        return finalAnswer;
+        const response = await withTimeout(
+          `letta_send_message (${override_model ?? "agent-default"})`,
+          askTimeoutMs,
+          () => client.agents.messages.create(agent_id, payload),
+        );
+        return extractAssistantText(response as { messages: unknown[] });
       }),
   );
 

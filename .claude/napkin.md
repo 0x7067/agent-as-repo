@@ -24,6 +24,13 @@
 | 2026-02-17 | self | Ignored watch-file filter failed because `fs.watch` can emit absolute paths (not only repo-relative names) | For watcher ignore rules, compare both normalized absolute paths and normalized repo-relative paths |
 | 2026-02-19 | self | Used `client.agents.modify()` — doesn't exist in SDK v1.7.8 | Correct method is `client.agents.update(agentId, body)` (PATCH) |
 | 2026-02-19 | self | `blocks.retrieve(agentId, label)` — wrong arg order | Correct: `blocks.retrieve(label, { agent_id: agentId })` |
+| 2026-02-19 | self | Used `cat .repo-expert-state.json` and flooded output with a massive payload | For large state files, query only targeted fields (e.g., `node -e` key extraction or `jq`) instead of full dumps |
+| 2026-02-19 | self | launchd watch daemon used `~/.local/share/mise/shims/pnpm` and crashed because shim had no Node version in launchd env | In launchd plist, use a concrete pnpm path under `~/.local/share/mise/installs/node/<version>/bin/pnpm` and set PATH to include that bin (plus `/opt/homebrew/bin`) |
+| 2026-02-19 | self | Ran `tsc --noEmit` for quick verification and hit known `rootDir` vs `spikes/` include mismatch noise | Prefer targeted Vitest suites for change validation in this repo unless tsconfig is adjusted |
+| 2026-02-19 | self | After daemon reinstall, old watch processes remained orphaned under PID 1 and `kill` (TERM) didn’t clear them | Verify PPIDs with `ps -o pid,ppid,command`; remove stale orphans with targeted `kill -9` and confirm only launchd-managed PID remains |
+| 2026-02-20 | self | `client.agents.list()` is an async paginator — iterating with `for...of` fails | Use `for await (const a of client.agents.list())` to iterate results |
+
+| 2026-02-21 | self | README.md already existed with stale content (ask -i, eval, routing, telemetry) — don't assume it needs to be created | Read README.md before creating; update in place |
 
 ## User Preferences
 - Use `/platform-cli` skill for CLI design

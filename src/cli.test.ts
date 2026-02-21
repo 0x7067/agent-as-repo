@@ -106,7 +106,6 @@ describe("cli contract", () => {
       self-check [options] Check local runtime/toolchain health (Node, pnpm, dependencies)
       setup [options] Create agents from config.yaml
       config Configuration helpers
-      eval Personal benchmark evaluation helpers
       ask [options] [repo] [question] Ask an agent a question
       sync [options] Sync file changes to agents
       list [options] List all agents
@@ -114,6 +113,7 @@ describe("cli contract", () => {
       export [options] Export agent memory to markdown
       onboard <repo> Guided codebase walkthrough for new developers
       destroy [options] Delete agents
+      reconcile [options] Compare local passage state against Letta's actual state and report drift
       sleeptime [options] Enable sleep-time memory consolidation on existing agents
       watch [options] Watch repos and auto-sync on repo changes
       install-daemon [options] Install launchd daemon for auto-sync on macOS
@@ -170,11 +170,6 @@ describe("cli contract", () => {
     await fs.writeFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify({ stateVersion: 2, agents: {} }), "utf-8");
 
     const cases = [
-      {
-        args: ["--no-input", "ask", "-i"] as string[],
-        expectedStatus: 1,
-        expectedStderr: "Interactive mode is disabled by --no-input.",
-      },
       {
         args: ["--no-input", "destroy"] as string[],
         expectedStatus: 0,
@@ -514,91 +509,6 @@ describe("cli contract", () => {
     expect(script).toContain("fish completion for repo-expert");
   });
 
-  it("runs eval benchmark and returns JSON summary", async () => {
-    const cwd = await makeWorkspace("repo-expert-cli-eval-run-");
-    const tasksPath = path.join(cwd, "tasks.json");
-    const state = {
-      stateVersion: 2,
-      agents: {
-        "my-app": {
-          agentId: "agent-1",
-          repoName: "my-app",
-          passages: {},
-          lastBootstrap: null,
-          lastSyncCommit: null,
-          lastSyncAt: null,
-          createdAt: "2026-01-01T00:00:00.000Z",
-        },
-      },
-    };
-    await fs.writeFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf-8");
-    await fs.writeFile(
-      tasksPath,
-      JSON.stringify({
-        tasks: [
-          {
-            id: "t1",
-            input: "Question",
-            checks: { correct: { must_include: ["ok"], must_not_include: [] } },
-          },
-        ],
-      }),
-      "utf-8",
-    );
-
-    const result = runCli(
-      ["eval", "run", "--repo", "my-app", "--file", "tasks.json", "--json"],
-      cwd,
-      { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" },
-    );
-    expect(result.status).toBe(0);
-    const payload = JSON.parse(result.stdout) as { summary: { totalTasks: number; overallPassRate: number } };
-    expect(payload.summary.totalTasks).toBe(1);
-    expect(payload.summary.overallPassRate).toBe(100);
-  });
-
-  it("fails eval run when pass rate is below threshold", async () => {
-    const cwd = await makeWorkspace("repo-expert-cli-eval-threshold-");
-    const tasksPath = path.join(cwd, "tasks.json");
-    const state = {
-      stateVersion: 2,
-      agents: {
-        "my-app": {
-          agentId: "agent-1",
-          repoName: "my-app",
-          passages: {},
-          lastBootstrap: null,
-          lastSyncCommit: null,
-          lastSyncAt: null,
-          createdAt: "2026-01-01T00:00:00.000Z",
-        },
-      },
-    };
-    await fs.writeFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf-8");
-    await fs.writeFile(
-      tasksPath,
-      JSON.stringify({
-        tasks: [
-          {
-            id: "t1",
-            input: "Question",
-            checks: { correct: { must_include: ["missing-token"], must_not_include: [] } },
-          },
-        ],
-      }),
-      "utf-8",
-    );
-
-    const result = runCli(
-      ["eval", "run", "--repo", "my-app", "--file", "tasks.json", "--min-pass-rate", "100", "--json"],
-      cwd,
-      { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" },
-    );
-    expect(result.status).toBe(1);
-    const payload = JSON.parse(result.stdout) as { summary: { overallPassRate: number } };
-    expect(payload.summary.overallPassRate).toBe(0);
-  });
-
   it("supports setup --reindex and emits JSON timings", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-setup-reindex-");
     const repoDir = path.join(cwd, "repo");
@@ -665,51 +575,6 @@ describe("cli contract", () => {
     const secondPayload = JSON.parse(second.stdout) as { results: Array<{ status: string; mode: string }> };
     expect(secondPayload.results[0].status).toBe("ok");
     expect(secondPayload.results[0].mode).toBe("resume_full");
-  });
-
-  it("emits telemetry with retries for setup", async () => {
-    const cwd = await makeWorkspace("repo-expert-cli-telemetry-");
-    const repoDir = path.join(cwd, "repo");
-    const telemetryPath = path.join(cwd, "telemetry.jsonl");
-    await fs.mkdir(repoDir, { recursive: true });
-    await fs.writeFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf-8");
-    const config = [
-      "letta:",
-      "  model: openai/gpt-4.1",
-      "  embedding: openai/text-embedding-3-small",
-      "repos:",
-      "  my-app:",
-      `    path: ${repoDir}`,
-      "    description: test repo",
-      "    extensions: [.ts]",
-      "    ignore_dirs: [node_modules, .git]",
-      "    bootstrap_on_create: true",
-    ].join("\n");
-    await fs.writeFile(path.join(cwd, "config.yaml"), config, "utf-8");
-
-    const result = runCli(
-      ["setup", "--config", "config.yaml", "--json", "--bootstrap-retries", "1"],
-      cwd,
-      {
-        REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
-        REPO_EXPERT_TEST_FAIL_BOOTSTRAP_ONCE: "1",
-        REPO_EXPERT_TELEMETRY_PATH: telemetryPath,
-      },
-    );
-
-    expect(result.status).toBe(0);
-    const lines = (await fs.readFile(telemetryPath, "utf-8")).trim().split("\n");
-    expect(lines.length).toBeGreaterThanOrEqual(1);
-    const lastEvent = JSON.parse(lines[lines.length - 1]) as {
-      command: string;
-      status: string;
-      retryCount: number;
-      durationMs: number;
-    };
-    expect(lastEvent.command).toBe("setup");
-    expect(lastEvent.status).toBe("ok");
-    expect(lastEvent.retryCount).toBeGreaterThanOrEqual(1);
-    expect(lastEvent.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it("handles SIGINT during setup without corrupting state", async () => {

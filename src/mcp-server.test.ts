@@ -160,7 +160,7 @@ describe("MCP Server tools", () => {
   describe("letta_send_message", () => {
     it("returns assistant message text", async () => {
       const handler = extractToolHandler(server, "letta_send_message");
-      const result = await handler({ agent_id: "agent-1", content: "Hi", cache: false });
+      const result = await handler({ agent_id: "agent-1", content: "Hi" });
       expect(result.content[0].text).toBe("Hello from agent");
       expect(client.agents.messages.create).toHaveBeenCalledWith("agent-1", {
         messages: [{ role: "user", content: "Hi" }],
@@ -172,14 +172,14 @@ describe("MCP Server tools", () => {
         messages: [{ message_type: "tool_call_message", id: "m1", tool_call: { name: "t", arguments: "" } }],
       });
       const handler = extractToolHandler(server, "letta_send_message");
-      const result = await handler({ agent_id: "agent-1", content: "Hi", cache: false });
+      const result = await handler({ agent_id: "agent-1", content: "Hi" });
       expect(result.content[0].text).toBe("");
     });
 
     it("returns isError on failure", async () => {
       client.agents.messages.create.mockRejectedValue(new Error("timeout"));
       const handler = extractToolHandler(server, "letta_send_message");
-      const result = await handler({ agent_id: "agent-1", content: "Hi", cache: false });
+      const result = await handler({ agent_id: "agent-1", content: "Hi" });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toBe("timeout");
     });
@@ -191,7 +191,6 @@ describe("MCP Server tools", () => {
         content: "Hi",
         override_model: "openai/gpt-4.1-mini",
         max_steps: 3,
-        cache: false,
       });
       expect(client.agents.messages.create).toHaveBeenCalledWith("agent-1", {
         messages: [{ role: "user", content: "Hi" }],
