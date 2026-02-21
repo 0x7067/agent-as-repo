@@ -9,9 +9,9 @@
  */
 import "dotenv/config";
 import Letta from "@letta-ai/letta-client";
-import * as fs from "fs/promises";
-import * as path from "path";
-import { fileURLToPath } from "url";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const client = new Letta();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -101,7 +101,7 @@ async function main() {
     const passageIds: string[] = [];
     for (const file of FILES_TO_LOAD) {
       const fullPath = path.join(PROJECT_ROOT, file);
-      const content = await fs.readFile(fullPath, "utf-8");
+      const content = await fs.readFile(fullPath, "utf8");
       const result = await client.agents.passages.create(agentId, {
         text: `FILE: ${file}\n\n${content}`,
       });
@@ -154,9 +154,9 @@ async function main() {
       console.log("\nNote: failures may be due to the agent not searching archival memory,");
       console.log("or the search not returning relevant passages. Check agent behavior.");
     }
-  } catch (err) {
+  } catch (error) {
     console.error("\n--- RETRIEVAL QUALITY TEST FAILED ---");
-    console.error(err);
+    console.error(error);
     process.exitCode = 1;
   } finally {
     if (agentId) {

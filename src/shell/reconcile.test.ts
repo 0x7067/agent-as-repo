@@ -18,7 +18,7 @@ function makeAgent(passages: AgentState["passages"]): AgentState {
 function makeProvider(serverPassages: Passage[]): AgentProvider {
   return {
     listPassages: vi.fn().mockResolvedValue(serverPassages),
-    deletePassage: vi.fn().mockResolvedValue(undefined),
+    deletePassage: vi.fn().mockResolvedValue(),
     createAgent: vi.fn(),
     deleteAgent: vi.fn(),
     enableSleeptime: vi.fn(),
@@ -35,7 +35,7 @@ describe("reconcileAgent", () => {
       { id: "p1", text: "..." },
       { id: "p2", text: "..." },
     ]);
-    const result = await reconcileAgent(provider as AgentProvider, agent);
+    const result = await reconcileAgent(provider, agent);
     expect(result.inSync).toBe(true);
     expect(result.localPassageCount).toBe(2);
     expect(result.serverPassageCount).toBe(2);
@@ -49,7 +49,7 @@ describe("reconcileAgent", () => {
       { id: "p1", text: "..." },
       { id: "p2", text: "orphan" },
     ]);
-    const result = await reconcileAgent(provider as AgentProvider, agent);
+    const result = await reconcileAgent(provider, agent);
     expect(result.inSync).toBe(false);
     expect(result.orphanPassageIds).toEqual(["p2"]);
     expect(result.missingPassageIds).toEqual([]);
@@ -58,7 +58,7 @@ describe("reconcileAgent", () => {
   it("reports missing passages (in local map, not on server)", async () => {
     const agent = makeAgent({ "a.ts": ["p1", "p2"] });
     const provider = makeProvider([{ id: "p1", text: "..." }]);
-    const result = await reconcileAgent(provider as AgentProvider, agent);
+    const result = await reconcileAgent(provider, agent);
     expect(result.inSync).toBe(false);
     expect(result.missingPassageIds).toEqual(["p2"]);
     expect(result.orphanPassageIds).toEqual([]);
@@ -69,9 +69,9 @@ describe("fixReconcileDrift", () => {
   it("deletes orphan passages and removes missing IDs from map", async () => {
     const agent = makeAgent({ "a.ts": ["p1", "p2"] });
     const provider = makeProvider([]);
-    (provider.deletePassage as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (provider.deletePassage as ReturnType<typeof vi.fn>).mockResolvedValue();
 
-    const updatedMap = await fixReconcileDrift(provider as AgentProvider, agent, {
+    const updatedMap = await fixReconcileDrift(provider, agent, {
       orphanPassageIds: ["p-orphan"],
       missingPassageIds: ["p2"],
     });
@@ -86,7 +86,7 @@ describe("fixReconcileDrift", () => {
     (provider.deletePassage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("gone"));
 
     await expect(
-      fixReconcileDrift(provider as AgentProvider, agent, {
+      fixReconcileDrift(provider, agent, {
         orphanPassageIds: ["p-gone"],
         missingPassageIds: [],
       }),

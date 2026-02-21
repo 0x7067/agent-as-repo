@@ -124,15 +124,15 @@ async function main() {
     }
 
     // Extrapolation
-    const bestRate = results[results.length - 1].perPassage;
+    const bestRate = results.at(-1).perPassage;
     console.log(`\nExtrapolated times at best rate (${bestRate.toFixed(0)}ms/passage):`);
-    for (const n of [1000, 3000, 5000, 10000]) {
+    for (const n of [1000, 3000, 5000, 10_000]) {
       const est = (n * bestRate) / 1000;
       console.log(`   ${n} files → ~${est.toFixed(0)}s (${(est / 60).toFixed(1)} min)`);
     }
-  } catch (err) {
+  } catch (error) {
     console.error("\n--- INGESTION SPEED TEST FAILED ---");
-    console.error(err);
+    console.error(error);
     process.exitCode = 1;
   } finally {
     console.log("\nCleaning up agents...");

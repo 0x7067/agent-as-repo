@@ -1,4 +1,4 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Letta } from "@letta-ai/letta-client";
@@ -19,20 +19,20 @@ export function createClient(): Letta {
   });
 }
 
-type ToolResult = { content: Array<{ type: "text"; text: string }>; isError?: boolean };
+interface ToolResult { content: Array<{ type: "text"; text: string }>; isError?: boolean }
 
 async function handleTool(fn: () => Promise<string>): Promise<ToolResult> {
   try {
     const text = await fn();
     return { content: [{ type: "text", text }] };
-  } catch (err) {
-    return { content: [{ type: "text", text: errorMessage(err) }], isError: true };
+  } catch (error) {
+    return { content: [{ type: "text", text: errorMessage(error) }], isError: true };
   }
 }
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
   if (!raw) return fallback;
-  const parsed = parseInt(raw, 10);
+  const parsed = Number.parseInt(raw, 10);
   if (Number.isNaN(parsed) || parsed <= 0) return fallback;
   return parsed;
 }
@@ -43,7 +43,7 @@ async function withTimeout<T>(label: string, timeoutMs: number, fn: () => Promis
     return await Promise.race([
       fn(),
       new Promise<T>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+        timeoutId = setTimeout(() => { reject(new Error(`${label} timed out after ${timeoutMs}ms`)); }, timeoutMs);
       }),
     ]);
   } finally {
@@ -204,8 +204,8 @@ async function main(): Promise<void> {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main().catch((err) => {
-    process.stderr.write(`letta-tools MCP server error: ${errorMessage(err)}\n`);
+  main().catch((error) => {
+    process.stderr.write(`letta-tools MCP server error: ${errorMessage(error)}\n`);
     process.exit(1);
   });
 }

@@ -1,8 +1,8 @@
-import * as fs from "fs/promises";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type * as readline from "readline/promises";
+import type * as readline from "node:readline/promises";
 import { runInit } from "./init.js";
 
 interface MockRl extends Pick<readline.Interface, "question"> {}
@@ -72,7 +72,7 @@ describe.sequential("runInit", () => {
     const result = await runInit(rl);
     expect(result.repoName).toBe("repo");
     const configPath = path.join(workspace, "config.yaml");
-    const config = await fs.readFile(configPath, "utf-8");
+    const config = await fs.readFile(configPath, "utf8");
     expect(config).toContain("repo:");
     expect(config).toContain(".ts");
   });

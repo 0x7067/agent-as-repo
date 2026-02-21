@@ -26,7 +26,7 @@ const GLOBAL_FLAGS = ["--help", "--version", "--no-input", "--debug"].join(" ");
 
 function bashCompletion(commandName: string): string {
   return `# bash completion for ${commandName}
-_${commandName.replace(/-/g, "_")}_completion() {
+_${commandName.replaceAll('-', "_")}_completion() {
   local cur prev words cword
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
@@ -58,15 +58,15 @@ _${commandName.replace(/-/g, "_")}_completion() {
   esac
 }
 
-complete -F _${commandName.replace(/-/g, "_")}_completion ${commandName}
+complete -F _${commandName.replaceAll('-', "_")}_completion ${commandName}
 `;
 }
 
 function zshCompletion(commandName: string): string {
-  return `#compdef ${commandName}
+  return String.raw`#compdef ${commandName}
 
-_arguments -C \\
-  '1:command:(${COMMANDS})' \\
+_arguments -C \
+  '1:command:(${COMMANDS})' \
   '*::arg:->args'
 
 case $state in

@@ -110,7 +110,7 @@ describe("loadPassages", () => {
     });
 
     expect(calls).toHaveLength(2);
-    expect(calls[calls.length - 1]).toEqual([2, 2]);
+    expect(calls.at(-1)).toEqual([2, 2]);
     // All calls should report total = 2
     for (const [, total] of calls) {
       expect(total).toBe(2);

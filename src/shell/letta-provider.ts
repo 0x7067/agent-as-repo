@@ -18,15 +18,15 @@ function isHttpStatus(err: unknown, code: number): boolean {
   return obj.status === code || obj.statusCode === code;
 }
 
-const TRANSIENT_HTTP_CODES = [429, 500, 502, 503];
-const TRANSIENT_NETWORK_CODES = ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EPIPE", "EAI_AGAIN"];
+const TRANSIENT_HTTP_CODES = new Set([429, 500, 502, 503]);
+const TRANSIENT_NETWORK_CODES = new Set(["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EPIPE", "EAI_AGAIN"]);
 
 export function isTransientError(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const obj = err as Record<string, unknown>;
   const status = obj.status ?? obj.statusCode;
-  if (typeof status === "number" && TRANSIENT_HTTP_CODES.includes(status)) return true;
-  if (typeof obj.code === "string" && TRANSIENT_NETWORK_CODES.includes(obj.code)) return true;
+  if (typeof status === "number" && TRANSIENT_HTTP_CODES.has(status)) return true;
+  if (typeof obj.code === "string" && TRANSIENT_NETWORK_CODES.has(obj.code)) return true;
   return false;
 }
 
@@ -50,9 +50,9 @@ export class LettaProvider implements AgentProvider {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         return await fn();
-      } catch (err) {
-        if (!isTransientError(err) || attempt === maxRetries) throw err;
-        const retryAfter = getRetryAfterMs(err);
+      } catch (error) {
+        if (!isTransientError(error) || attempt === maxRetries) throw error;
+        const retryAfter = getRetryAfterMs(error);
         const baseDelay = retryAfter ?? this.retryBaseDelay * Math.pow(2, attempt);
         const jitter = 0.5 + Math.random() * 0.5;
         await new Promise((resolve) => setTimeout(resolve, baseDelay * jitter));
@@ -92,9 +92,9 @@ export class LettaProvider implements AgentProvider {
   async deletePassage(agentId: string, passageId: string): Promise<void> {
     try {
       await this.withRetry(() => this.client.agents.passages.delete(passageId, { agent_id: agentId }));
-    } catch (err) {
-      if (isHttpStatus(err, 404)) return; // Already deleted — treat as success
-      throw err;
+    } catch (error) {
+      if (isHttpStatus(error, 404)) return; // Already deleted — treat as success
+      throw error;
     }
   }
 
@@ -118,7 +118,7 @@ export class LettaProvider implements AgentProvider {
       all.push(...valid.map((p) => ({ id: p.id as string, text: p.text })));
 
       if (typedPage.length < PAGE_SIZE) break;
-      cursor = typedPage[typedPage.length - 1]?.id ?? undefined;
+      cursor = typedPage.at(-1)?.id ?? undefined;
       if (!cursor) break;
     }
 
@@ -164,7 +164,7 @@ export class LettaProvider implements AgentProvider {
 
     for (const msg of resp.messages) {
       if (msg.message_type === "assistant_message") {
-        const assistantMsg = msg as AssistantMessage;
+        const assistantMsg = msg;
         const text = assistantMsg.content;
         return typeof text === "string" ? text : "";
       }

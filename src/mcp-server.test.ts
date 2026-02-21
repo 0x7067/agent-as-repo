@@ -58,7 +58,7 @@ function makeMockClient(): MockLettaClient {
       passages: {
         search: vi.fn().mockResolvedValue({ count: 1, results: [{ id: "p-1", content: "found it", timestamp: "2026-01-01" }] }),
         create: vi.fn().mockResolvedValue([{ id: "p-new", text: "new passage" }]),
-        delete: vi.fn().mockResolvedValue(undefined),
+        delete: vi.fn().mockResolvedValue(),
       },
       blocks: {
         update: vi.fn().mockResolvedValue({ id: "block-1", label: "persona", value: "Updated.", limit: 5000 }),
@@ -75,7 +75,7 @@ function makeMockClient(): MockLettaClient {
   };
 }
 
-type ToolResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
+interface ToolResult { content: Array<{ type: string; text: string }>; isError?: boolean }
 type ToolHandler = (args: Record<string, unknown>) => Promise<ToolResult>;
 
 interface RegisteredToolEntry {
@@ -128,7 +128,7 @@ describe("MCP Server tools", () => {
         [Symbol.asyncIterator]: async function* () {
           throw new Error("API down");
         },
-        then: (_: unknown, reject: (e: unknown) => void) => reject(new Error("API down")),
+        then: (_: unknown, reject: (e: unknown) => void) => { reject(new Error("API down")); },
       };
       client.agents.list.mockReturnValue(failing);
       const handler = extractToolHandler(server, "letta_list_agents");

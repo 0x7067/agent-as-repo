@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Config, AppState } from "../core/types.js";
-import type { FSWatcher } from "fs";
+import type { FSWatcher } from "node:fs";
 
 // Mock child_process and fs before importing watch module
 vi.mock("child_process", () => ({
@@ -24,8 +24,8 @@ vi.mock("./sync.js", () => ({
   syncRepo: vi.fn(),
 }));
 
-import { execFileSync } from "child_process";
-import { watch as fsWatch } from "fs";
+import { execFileSync } from "node:child_process";
+import { watch as fsWatch } from "node:fs";
 import { loadState, saveState } from "./state-store.js";
 import { syncRepo } from "./sync.js";
 import { watchRepos } from "./watch.js";

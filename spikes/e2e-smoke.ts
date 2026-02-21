@@ -5,18 +5,18 @@
  * Requires: LETTA_API_KEY set in .env or environment
  */
 import "dotenv/config";
-import * as fs from "fs/promises";
-import * as path from "path";
-import * as os from "os";
-import { execFileSync } from "child_process";
-import { fileURLToPath } from "url";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import * as os from "node:os";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const CLI = path.join(ROOT, "src", "cli.ts");
 const TSX = path.join(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
 
-type Result = { name: string; ok: boolean; detail?: string };
+interface Result { name: string; ok: boolean; detail?: string }
 
 const results: Result[] = [];
 
@@ -97,8 +97,8 @@ repos:
       } else {
         fail("setup", `unexpected result: ${JSON.stringify(result)}`);
       }
-    } catch (err) {
-      fail("setup", err instanceof Error ? err.message : String(err));
+    } catch (error) {
+      fail("setup", error instanceof Error ? error.message : String(error));
     }
 
     // --- Step 2: ask ---
@@ -117,8 +117,8 @@ repos:
       } else {
         fail("ask", "empty response");
       }
-    } catch (err) {
-      fail("ask", err instanceof Error ? err.message : String(err));
+    } catch (error) {
+      fail("ask", error instanceof Error ? error.message : String(error));
     }
 
     // --- Step 3: sync (modify a file) ---
@@ -139,8 +139,8 @@ repos:
       } else {
         fail("sync", `unexpected result: ${JSON.stringify(result)}`);
       }
-    } catch (err) {
-      fail("sync", err instanceof Error ? err.message : String(err));
+    } catch (error) {
+      fail("sync", error instanceof Error ? error.message : String(error));
     }
 
     // --- Step 4: reconcile ---
@@ -157,8 +157,8 @@ repos:
       } else {
         fail("reconcile", "no reconcile result returned");
       }
-    } catch (err) {
-      fail("reconcile", err instanceof Error ? err.message : String(err));
+    } catch (error) {
+      fail("reconcile", error instanceof Error ? error.message : String(error));
     }
 
     // --- Step 5: destroy ---
@@ -166,8 +166,8 @@ repos:
     try {
       cli(["destroy", "--repo", repoName, "--force"], tmpDir);
       pass("destroy");
-    } catch (err) {
-      fail("destroy", err instanceof Error ? err.message : String(err));
+    } catch (error) {
+      fail("destroy", error instanceof Error ? error.message : String(error));
     }
   } finally {
     // Always clean up temp dir
@@ -186,7 +186,7 @@ repos:
   }
 }
 
-run().catch((err) => {
-  console.error("Fatal:", err instanceof Error ? err.message : String(err));
+run().catch((error) => {
+  console.error("Fatal:", error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

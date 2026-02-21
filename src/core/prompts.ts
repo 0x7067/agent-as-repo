@@ -1,10 +1,10 @@
 const NO_TAGS_WARNING =
   "IMPORTANT: When using archival_memory_search, do NOT pass tags — just use the query parameter.";
 
-const CROSS_AGENT_TOOLS = [
+const CROSS_AGENT_TOOLS = new Set([
   "send_message_to_agents_matching_tags",
   "send_message_to_agent_and_wait_for_reply",
-];
+]);
 
 export function buildPersona(
   repoName: string,
@@ -24,7 +24,7 @@ export function buildPersona(
     NO_TAGS_WARNING,
   ];
 
-  const hasCrossAgent = tools?.some((t) => CROSS_AGENT_TOOLS.includes(t));
+  const hasCrossAgent = tools?.some((t) => CROSS_AGENT_TOOLS.has(t));
   if (hasCrossAgent) {
     lines.push(
       "If a question requires knowledge from another repository, query other repo-expert agents by their tags using send_message_to_agents_matching_tags.",

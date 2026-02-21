@@ -1,5 +1,5 @@
-import * as fs from "fs/promises";
-import * as path from "path";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import fg from "fast-glob";
 import type { RepoConfig, FileInfo } from "../core/types.js";
 
@@ -23,7 +23,7 @@ export async function collectFiles(config: RepoConfig): Promise<FileInfo[]> {
     const sizeKb = stat.size / 1024;
 
     if (sizeKb <= config.maxFileSizeKb) {
-      const content = await fs.readFile(absPath, "utf-8");
+      const content = await fs.readFile(absPath, "utf8");
       files.push({ path: relPath, content, sizeKb });
     }
   }

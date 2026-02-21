@@ -70,7 +70,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
       }
 
       const chunks = chunkingStrategy(fileInfo);
-      const passageIds: string[] = new Array(chunks.length);
+      const passageIds: string[] = Array.from({length: chunks.length});
 
       await Promise.all(
         chunks.map((chunk, i) =>
@@ -86,9 +86,9 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
       if (oldIds) stalePassageIds.push(...oldIds);
       updatedPassages[filePath] = passageIds;
       filesReIndexed++;
-    } catch (err) {
+    } catch (error_) {
       // Per-file failure: keep old passages intact, report the failure
-      const error = err instanceof Error ? err : new Error(String(err));
+      const error = error_ instanceof Error ? error_ : new Error(String(error_));
       onFileError?.(filePath, error);
       failedFiles.push(filePath);
     }

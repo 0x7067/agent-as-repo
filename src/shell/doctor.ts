@@ -1,6 +1,6 @@
-import * as fs from "fs/promises";
-import * as path from "path";
-import { execFileSync } from "child_process";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import type { CheckResult } from "../core/doctor.js";
 import { createEmptyState } from "../core/state.js";
 import { saveState } from "./state-store.js";
@@ -17,8 +17,8 @@ export async function checkApiConnection(provider: AgentProvider, agentId: strin
   try {
     await provider.listPassages(agentId);
     return { name: "API connection", status: "pass", message: "Connected to Letta Cloud" };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     return { name: "API connection", status: "fail", message: `Cannot reach Letta API: ${msg}` };
   }
 }
@@ -47,10 +47,10 @@ export async function checkRepoPaths(configPath: string): Promise<CheckResult[]>
   for (const [name, repo] of Object.entries(repos)) {
     try {
       const stat = await fs.stat(repo.path);
-      if (!stat.isDirectory()) {
-        results.push({ name: `Repo "${name}"`, status: "fail", message: `${repo.path} is not a directory` });
-      } else {
+      if (stat.isDirectory()) {
         results.push({ name: `Repo "${name}"`, status: "pass", message: repo.path });
+      } else {
+        results.push({ name: `Repo "${name}"`, status: "fail", message: `${repo.path} is not a directory` });
       }
     } catch {
       results.push({ name: `Repo "${name}"`, status: "fail", message: `${repo.path} does not exist` });

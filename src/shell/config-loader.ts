@@ -1,6 +1,6 @@
-import * as fs from "fs/promises";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import yaml from "js-yaml";
 import { parseConfig } from "../core/config.js";
 import type { Config } from "../core/types.js";
@@ -11,7 +11,7 @@ function resolvePath(p: string): string {
 }
 
 export async function loadConfig(filePath: string): Promise<Config> {
-  const content = await fs.readFile(filePath, "utf-8");
+  const content = await fs.readFile(filePath, "utf8");
   const raw = yaml.load(content);
   const config = parseConfig(raw);
 

@@ -12,10 +12,10 @@
  */
 import "dotenv/config";
 import Letta from "@letta-ai/letta-client";
-import { createReadStream } from "fs";
-import * as fs from "fs/promises";
-import * as path from "path";
-import { fileURLToPath } from "url";
+import { createReadStream } from "node:fs";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { chunkFile } from "../src/core/chunker.js";
 
 const client = new Letta();
@@ -62,7 +62,7 @@ async function waitForProcessing(folderId: string): Promise<void> {
       }
       return;
     }
-    await new Promise((r) => setTimeout(r, 3_000));
+    await new Promise((r) => setTimeout(r, 3000));
   }
   throw new Error("Processing timed out");
 }
@@ -198,7 +198,7 @@ async function setupArchivalVariant(): Promise<Variant> {
   const chunkParts: string[] = [];
   for (const relPath of TEST_FILES) {
     const absPath = path.join(PROJECT_ROOT, relPath);
-    const content = await fs.readFile(absPath, "utf-8");
+    const content = await fs.readFile(absPath, "utf8");
     const chunks = chunkFile(relPath, content);
     for (const chunk of chunks) {
       await client.agents.passages.create(agent.id, { text: chunk.text });
@@ -256,8 +256,8 @@ async function main() {
     );
     console.log("-".repeat(col1 + col2 * 2));
 
-    for (let i = 0; i < QUESTIONS.length; i++) {
-      const qShort = QUESTIONS[i].q.slice(0, col1 - 2).padEnd(col1);
+    for (const [i, QUESTION] of QUESTIONS.entries()) {
+      const qShort = QUESTION.q.slice(0, col1 - 2).padEnd(col1);
       const cells = variants.map((v) => {
         const r = v.results[i];
         const mark = r.passed ? "PASS" : "FAIL";
@@ -301,8 +301,8 @@ async function main() {
         console.log(`  Answer: ${f.answer.slice(0, 300)}`);
       }
     }
-  } catch (err) {
-    console.error(err);
+  } catch (error) {
+    console.error(error);
     process.exitCode = 1;
   } finally {
     console.log("\nCleaning up...");

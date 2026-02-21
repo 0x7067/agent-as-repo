@@ -9,9 +9,9 @@
  */
 import "dotenv/config";
 import Letta from "@letta-ai/letta-client";
-import * as fs from "fs/promises";
-import * as path from "path";
-import { fileURLToPath } from "url";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const client = new Letta();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -19,7 +19,7 @@ const PROJECT_ROOT = path.resolve(__dirname, "..");
 
 // Simple chunker: split file by double newlines, group into ~2000 char chunks
 function chunkFile(filePath: string, content: string, maxChars = 2000): string[] {
-  const sections = content.split(/\n\n+/);
+  const sections = content.split(/\n{2,}/);
   const chunks: string[] = [];
   let current = `FILE: ${filePath}\n\n`;
 
@@ -51,9 +51,9 @@ async function main() {
     });
     agents.push(agentA.id);
 
-    const ideaContent = await fs.readFile(path.join(PROJECT_ROOT, "idea.md"), "utf-8");
+    const ideaContent = await fs.readFile(path.join(PROJECT_ROOT, "idea.md"), "utf8");
     await client.agents.passages.create(agentA.id, { text: `FILE: idea.md\n\n${ideaContent}` });
-    const pkgContent = await fs.readFile(path.join(PROJECT_ROOT, "package.json"), "utf-8");
+    const pkgContent = await fs.readFile(path.join(PROJECT_ROOT, "package.json"), "utf8");
     await client.agents.passages.create(agentA.id, { text: `FILE: package.json\n\n${pkgContent}` });
     console.log(`Loaded 2 whole-file passages (idea.md: ${ideaContent.length} chars, package.json: ${pkgContent.length} chars)`);
 
@@ -110,7 +110,7 @@ async function main() {
     });
     agents.push(agentC.id);
 
-    const feasContent = await fs.readFile(path.join(PROJECT_ROOT, "feasibility-analysis.md"), "utf-8");
+    const feasContent = await fs.readFile(path.join(PROJECT_ROOT, "feasibility-analysis.md"), "utf8");
     const feasChunks = chunkFile("feasibility-analysis.md", feasContent);
     console.log(`Loading: idea.md (${ideaChunks.length} chunks), feasibility (${feasChunks.length} chunks), package.json (${pkgChunks.length} chunks)`);
     const allChunks = [...ideaChunks, ...feasChunks, ...pkgChunks];
@@ -143,9 +143,9 @@ async function main() {
     }
     console.log(`\nChunked Q&A: ${passed}/${qaTests.length} passed`);
 
-  } catch (err) {
+  } catch (error) {
     console.error("\n--- TEST FAILED ---");
-    console.error(err);
+    console.error(error);
     process.exitCode = 1;
   } finally {
     console.log("\nCleaning up...");

@@ -5,16 +5,16 @@
  */
 import "dotenv/config";
 import Letta from "@letta-ai/letta-client";
-import * as fs from "fs/promises";
-import * as path from "path";
-import { fileURLToPath } from "url";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const client = new Letta();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 
 function chunkFile(filePath: string, content: string, maxChars = 2000): string[] {
-  const sections = content.split(/\n\n+/);
+  const sections = content.split(/\n{2,}/);
   const chunks: string[] = [];
   let current = `FILE: ${filePath}\n\n`;
   for (const section of sections) {
@@ -59,9 +59,9 @@ async function main() {
     for (const t of agent.tools ?? []) console.log(`  ${(t as any).name}`);
 
     // Load chunks
-    const ideaContent = await fs.readFile(path.join(PROJECT_ROOT, "idea.md"), "utf-8");
-    const feasContent = await fs.readFile(path.join(PROJECT_ROOT, "feasibility-analysis.md"), "utf-8");
-    const pkgContent = await fs.readFile(path.join(PROJECT_ROOT, "package.json"), "utf-8");
+    const ideaContent = await fs.readFile(path.join(PROJECT_ROOT, "idea.md"), "utf8");
+    const feasContent = await fs.readFile(path.join(PROJECT_ROOT, "feasibility-analysis.md"), "utf8");
+    const pkgContent = await fs.readFile(path.join(PROJECT_ROOT, "package.json"), "utf8");
     const allChunks = [
       ...chunkFile("idea.md", ideaContent),
       ...chunkFile("feasibility-analysis.md", feasContent),
@@ -90,16 +90,27 @@ async function main() {
       let answer = "";
       for (const msg of resp.messages) {
         const type = (msg as any).message_type;
-        if (type === "tool_call_message") {
+        switch (type) {
+        case "tool_call_message": {
           const name = (msg as any).tool_call?.name || "";
           const args = (msg as any).tool_call?.arguments || "";
           console.log(`  [tool] ${name}(${args.slice(0, 100)})`);
-        } else if (type === "tool_return_message") {
+        
+        break;
+        }
+        case "tool_return_message": {
           const ret = (msg as any).tool_return || "";
           console.log(`  [return] ${ret.slice(0, 200)}`);
-        } else if (type === "assistant_message") {
+        
+        break;
+        }
+        case "assistant_message": {
           answer = (msg as any).content || "";
           console.log(`  [answer] ${answer.slice(0, 400)}`);
+        
+        break;
+        }
+        // No default
         }
       }
 
@@ -109,8 +120,8 @@ async function main() {
     }
 
     console.log(`\n=== RESULTS: ${passed}/${tests.length} passed ===`);
-  } catch (err) {
-    console.error(err);
+  } catch (error) {
+    console.error(error);
     process.exitCode = 1;
   } finally {
     if (agentId) {

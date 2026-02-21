@@ -88,11 +88,11 @@ export function parseConfig(raw: unknown): Config {
   let parsed: z.infer<typeof rawConfigSchema>;
   try {
     parsed = rawConfigSchema.parse(raw);
-  } catch (err) {
-    if (err instanceof z.ZodError) {
-      throw new ConfigError(zodIssuesToStrings(err));
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new ConfigError(zodIssuesToStrings(error));
     }
-    throw err;
+    throw error;
   }
 
   const semanticIssues = validateSemantics(parsed);

@@ -36,8 +36,8 @@ async function main() {
     for await (const tool of allTools) {
       console.log(`  ${tool.name} (${tool.id})`);
     }
-  } catch (err) {
-    console.error(err);
+  } catch (error) {
+    console.error(error);
     process.exitCode = 1;
   } finally {
     if (agentId) {

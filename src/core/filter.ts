@@ -10,7 +10,7 @@ export function shouldIncludeFile(
   options: FilterOptions,
 ): boolean {
   const dotIdx = filePath.lastIndexOf(".");
-  const ext = dotIdx >= 0 ? filePath.slice(dotIdx) : "";
+  const ext = dotIdx === -1 ? "" : filePath.slice(dotIdx);
   if (!options.extensions.includes(ext)) return false;
 
   if (fileSizeKb > options.maxFileSizeKb) return false;

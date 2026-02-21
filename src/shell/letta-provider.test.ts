@@ -49,11 +49,11 @@ function makeMockClient(): MockLettaClient {
   return {
     agents: {
       create: vi.fn().mockResolvedValue({ id: "agent-abc" }),
-      delete: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(),
       update: vi.fn().mockResolvedValue({ id: "agent-abc" }),
       passages: {
         create: vi.fn().mockResolvedValue([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]),
-        delete: vi.fn().mockResolvedValue(undefined),
+        delete: vi.fn().mockResolvedValue(),
         list: vi.fn().mockResolvedValue([
           { id: "p-1", text: "FILE: src/a.ts\ncontent", embedding: null, embedding_config: null },
           { id: "p-2", text: "FILE: src/b.ts\ncontent", embedding: null, embedding_config: null },

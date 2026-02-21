@@ -8,16 +8,16 @@
  */
 import "dotenv/config";
 import Letta from "@letta-ai/letta-client";
-import * as fs from "fs/promises";
-import * as path from "path";
-import { fileURLToPath } from "url";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const client = new Letta();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 
 function chunkFile(filePath: string, content: string, maxChars = 2000): string[] {
-  const sections = content.split(/\n\n+/);
+  const sections = content.split(/\n{2,}/);
   const chunks: string[] = [];
   let current = `FILE: ${filePath}\n\n`;
   for (const section of sections) {
@@ -52,10 +52,10 @@ async function main() {
     agentId = agent.id;
 
     // Load just a few chunks
-    const pkgContent = await fs.readFile(path.join(PROJECT_ROOT, "package.json"), "utf-8");
+    const pkgContent = await fs.readFile(path.join(PROJECT_ROOT, "package.json"), "utf8");
     await client.agents.passages.create(agentId, { text: `FILE: package.json\n\n${pkgContent}` });
 
-    const ideaContent = await fs.readFile(path.join(PROJECT_ROOT, "idea.md"), "utf-8");
+    const ideaContent = await fs.readFile(path.join(PROJECT_ROOT, "idea.md"), "utf8");
     const chunks = chunkFile("idea.md", ideaContent).slice(0, 3); // just first 3 chunks
     for (const chunk of chunks) {
       await client.agents.passages.create(agentId, { text: chunk });
@@ -83,8 +83,8 @@ async function main() {
       console.log(JSON.stringify(msg, null, 2).slice(0, 1000));
     }
 
-  } catch (err) {
-    console.error(err);
+  } catch (error) {
+    console.error(error);
     process.exitCode = 1;
   } finally {
     if (agentId) {

@@ -9,10 +9,10 @@
  */
 import "dotenv/config";
 import Letta from "@letta-ai/letta-client";
-import { createReadStream } from "fs";
-import * as fs from "fs/promises";
-import * as path from "path";
-import { fileURLToPath } from "url";
+import { createReadStream } from "node:fs";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const client = new Letta();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -33,7 +33,7 @@ const TEST_FILES = [
 async function waitForProcessing(
   folderId: string,
   maxWaitMs = 120_000,
-  pollMs = 3_000,
+  pollMs = 3000,
 ): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
@@ -189,17 +189,28 @@ async function main() {
         const m = msg as unknown as Record<string, unknown>;
         const type = m.message_type as string;
 
-        if (type === "tool_call_message") {
+        switch (type) {
+        case "tool_call_message": {
           const call = m.tool_call as Record<string, unknown> | undefined;
           const name = call?.name ?? "";
           const args = String(call?.arguments ?? "").slice(0, 120);
           console.log(`  [tool] ${name}(${args})`);
-        } else if (type === "tool_return_message") {
+        
+        break;
+        }
+        case "tool_return_message": {
           const ret = String(m.tool_return ?? "").slice(0, 200);
           console.log(`  [return] ${ret}`);
-        } else if (type === "assistant_message") {
+        
+        break;
+        }
+        case "assistant_message": {
           answer = String(m.content ?? "");
           console.log(`  [answer] ${answer.slice(0, 400)}`);
+        
+        break;
+        }
+        // No default
         }
       }
 
@@ -209,8 +220,8 @@ async function main() {
     }
 
     console.log(`\n=== RESULTS: ${passed}/${tests.length} passed ===`);
-  } catch (err) {
-    console.error(err);
+  } catch (error) {
+    console.error(error);
     process.exitCode = 1;
   } finally {
     // Cleanup

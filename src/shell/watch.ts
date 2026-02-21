@@ -1,7 +1,7 @@
-import * as path from "path";
-import * as fs from "fs/promises";
-import { watch as fsWatch, type FSWatcher } from "fs";
-import { execFileSync } from "child_process";
+import * as path from "node:path";
+import * as fs from "node:fs/promises";
+import { watch as fsWatch, type FSWatcher } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { loadState, saveState } from "./state-store.js";
 import { collectFiles } from "./file-collector.js";
 import { syncRepo } from "./sync.js";
@@ -59,7 +59,7 @@ async function updateAndSaveState(
 async function collectFile(repoPath: string, filePath: string): Promise<FileInfo | null> {
   const absPath = path.join(repoPath, filePath);
   try {
-    const content = await fs.readFile(absPath, "utf-8");
+    const content = await fs.readFile(absPath, "utf8");
     const stat = await fs.stat(absPath);
     return { path: filePath, content, sizeKb: stat.size / 1024 };
   } catch {
@@ -68,7 +68,7 @@ async function collectFile(repoPath: string, filePath: string): Promise<FileInfo
 }
 
 function normalizeRelativePath(filePath: string): string {
-  return filePath.replace(/\\/g, "/").replace(/^\.\//, "");
+  return filePath.replaceAll('\\', "/").replace(/^\.\//, "");
 }
 
 function toAgentPath(repoConfig: RepoConfig, repoRelativePath: string): string | null {
@@ -85,7 +85,7 @@ function toAgentPath(repoConfig: RepoConfig, repoRelativePath: string): string |
 function filterChangedFiles(repoConfig: RepoConfig, changedFiles: string[]): string[] {
   return changedFiles
     .map((filePath) => toAgentPath(repoConfig, filePath))
-    .filter((filePath): filePath is string => Boolean(filePath))
+    .filter(Boolean)
     .filter((filePath) => shouldIncludeFile(filePath, 0, repoConfig));
 }
 
@@ -187,7 +187,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
         changedFiles = files.map((f) => f.path);
       }
 
-      changedFiles = Array.from(new Set(changedFiles));
+      changedFiles = [...new Set(changedFiles)];
       if (changedFiles.length === 0) {
         if (!isEventSync) {
           // HEAD changed but no indexable file diff (e.g., merge commit) — update state
@@ -227,8 +227,8 @@ export async function watchRepos(params: WatchParams): Promise<void> {
       // Reset backoff on success
       consecutiveFailures.set(repoName, 0);
       backoffUntil.delete(repoName);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
       const failures = (consecutiveFailures.get(repoName) ?? 0) + 1;
       consecutiveFailures.set(repoName, failures);
       const delay = computeBackoffDelay(failures, intervalMs);
@@ -250,7 +250,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     if (!pending || pending.size === 0) return;
 
     pendingFilesByRepo.delete(repoName);
-    await syncRepoNow(repoName, Array.from(pending));
+    await syncRepoNow(repoName, [...pending]);
   }
 
   async function tick(): Promise<void> {
@@ -301,8 +301,8 @@ export async function watchRepos(params: WatchParams): Promise<void> {
         log(`[${repoName}] file watch error: ${msg}`);
       });
       watchers.push(watcher);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
       log(`[${repoName}] file watcher unavailable; using poll only (${msg})`);
     }
   }
@@ -336,7 +336,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
         watcher.close();
       }
       await activeTick;
-      await Promise.allSettled(Array.from(runningTasks));
+      await Promise.allSettled(runningTasks);
       resolve();
     }, { once: true });
   });

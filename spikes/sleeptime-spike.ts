@@ -56,10 +56,10 @@ async function main() {
       "How does the satisfies operator work?",
       "What's the difference between type and interface?",
     ];
-    for (let i = 0; i < questions.length; i++) {
-      console.log(`\n4.${i + 1}. Sending message: "${questions[i].slice(0, 50)}..."`);
+    for (const [i, question] of questions.entries()) {
+      console.log(`\n4.${i + 1}. Sending message: "${question.slice(0, 50)}..."`);
       const resp = await client.agents.messages.create(agent.id, {
-        messages: [{ role: "user", content: questions[i] }],
+        messages: [{ role: "user", content: question }],
       });
       const msg = resp.messages.find((m) => m.message_type === "assistant_message");
       if (msg && "content" in msg) {
@@ -88,7 +88,7 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("Spike failed:", err);
+main().catch((error) => {
+  console.error("Spike failed:", error);
   process.exit(1);
 });

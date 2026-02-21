@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
+import type { vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { bootstrapAgent } from "./bootstrap.js";
 import { makeMockProvider } from "./__test__/mock-provider.js";
 

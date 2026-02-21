@@ -4,7 +4,7 @@ export interface WatchConfig {
 }
 
 export const DEFAULT_WATCH_CONFIG: WatchConfig = {
-  intervalMs: 5_000,
+  intervalMs: 5000,
   debounceMs: 250,
 };
 

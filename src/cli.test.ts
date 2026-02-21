@@ -1,7 +1,7 @@
-import * as fs from "fs/promises";
-import * as os from "os";
-import * as path from "path";
-import { spawn, spawnSync } from "child_process";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { spawn, spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 
 interface CliResult {
@@ -31,18 +31,18 @@ function runCli(args: string[], cwd: string, extraEnv: NodeJS.ProcessEnv = {}): 
 }
 
 function normalizeOutput(text: string): string {
-  const rawLines = text.replace(/\r\n/g, "\n").trim().split("\n");
+  const rawLines = text.replaceAll('\r\n', "\n").trim().split("\n");
   const normalized: string[] = [];
 
   for (const rawLine of rawLines) {
-    const collapsed = rawLine.trim().replace(/\s+/g, " ");
+    const collapsed = rawLine.trim().replaceAll(/\s+/g, " ");
     if (!collapsed) {
       normalized.push("");
       continue;
     }
     const isContinuation = /^\s{20,}\S/.test(rawLine);
-    if (isContinuation && normalized.length > 0 && normalized[normalized.length - 1] !== "") {
-      normalized[normalized.length - 1] = `${normalized[normalized.length - 1]} ${collapsed}`;
+    if (isContinuation && normalized.length > 0 && normalized.at(-1) !== "") {
+      normalized[normalized.length - 1] = `${normalized.at(-1)} ${collapsed}`;
       continue;
     }
     normalized.push(collapsed);
@@ -265,7 +265,7 @@ describe("cli contract", () => {
 
     const localConfigPath = path.join(cwd, ".claude.json");
     const homeConfigPath = path.join(home, ".claude.json");
-    const localRaw = await fs.readFile(localConfigPath, "utf-8");
+    const localRaw = await fs.readFile(localConfigPath, "utf8");
     const localConfig = JSON.parse(localRaw) as { mcpServers?: { letta?: unknown } };
 
     await expect(fs.access(homeConfigPath)).rejects.toThrow();
@@ -505,7 +505,7 @@ describe("cli contract", () => {
     const result = runCli(["completion", "fish", "--install-dir", installDir], cwd);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Completion script written");
-    const script = await fs.readFile(path.join(installDir, "repo-expert.fish"), "utf-8");
+    const script = await fs.readFile(path.join(installDir, "repo-expert.fish"), "utf8");
     expect(script).toContain("fish completion for repo-expert");
   });
 
@@ -562,7 +562,7 @@ describe("cli contract", () => {
     const firstPayload = JSON.parse(first.stdout) as { results: Array<{ status: string }> };
     expect(firstPayload.results[0].status).toBe("error");
 
-    const stateRaw = await fs.readFile(path.join(cwd, ".repo-expert-state.json"), "utf-8");
+    const stateRaw = await fs.readFile(path.join(cwd, ".repo-expert-state.json"), "utf8");
     const state = JSON.parse(stateRaw) as { agents: Record<string, unknown> };
     expect(state.agents["my-app"]).toBeDefined();
 
@@ -598,19 +598,19 @@ describe("cli contract", () => {
     });
 
     await new Promise<void>((resolve) => {
-      child.stdout!.on("data", (chunk: Buffer) => {
+      child.stdout.on("data", (chunk: Buffer) => {
         if (chunk.toString().includes("Loading")) resolve();
       });
     });
     child.kill("SIGINT");
     const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-      child.on("exit", (code, signal) => resolve({ code, signal }));
+      child.on("exit", (code, signal) => { resolve({ code, signal }); });
     });
 
     expect(exit.code === 130 || exit.signal === "SIGINT").toBe(true);
 
     const statePath = path.join(cwd, ".repo-expert-state.json");
-    const raw = await fs.readFile(statePath, "utf-8");
+    const raw = await fs.readFile(statePath, "utf8");
     const parsed = JSON.parse(raw) as { agents: Record<string, unknown> };
     expect(parsed.agents["my-app"]).toBeDefined();
   });
@@ -636,6 +636,6 @@ describe("cli contract", () => {
       results: Array<{ totalMs: number; filesFound: number }>;
     };
     expect(payload.results[0].filesFound).toBe(120);
-    expect(payload.results[0].totalMs).toBeLessThan(12000);
+    expect(payload.results[0].totalMs).toBeLessThan(12_000);
   });
 });

@@ -92,13 +92,13 @@ async function run(): Promise<void> {
       const lower = response.toLowerCase();
       const matchedKeyword = c.expectedKeywords.find((kw) => lower.includes(kw)) ?? null;
       const passed = matchedKeyword !== null;
-      const snippet = response.slice(0, 200).replace(/\n/g, " ");
+      const snippet = response.slice(0, 200).replaceAll('\n', " ");
 
       results.push({ repo: c.repo, latencyMs, passed, matchedKeyword, snippet });
       console.log(`${latencyMs}ms — ${passed ? "PASS" : "FAIL"}`);
-    } catch (err) {
+    } catch (error_) {
       const latencyMs = Math.round(performance.now() - t0);
-      const error = err instanceof Error ? err.message : String(err);
+      const error = error_ instanceof Error ? error_.message : String(error_);
       results.push({ repo: c.repo, latencyMs, passed: false, matchedKeyword: null, snippet: "", error });
       console.log(`${latencyMs}ms — ERROR`);
     }
@@ -132,7 +132,7 @@ async function run(): Promise<void> {
   }
 }
 
-run().catch((err) => {
-  console.error("Fatal:", err instanceof Error ? err.message : String(err));
+run().catch((error) => {
+  console.error("Fatal:", error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

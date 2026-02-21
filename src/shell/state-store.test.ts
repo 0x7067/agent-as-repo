@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadState, saveState, setRenameFnForTests } from "./state-store.js";
 import { STATE_SCHEMA_VERSION, addAgentToState, createEmptyState } from "../core/state.js";
-import * as fs from "fs/promises";
-import * as path from "path";
-import * as os from "os";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import * as os from "node:os";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -62,8 +62,8 @@ describe("state store", () => {
       let message = "";
       try {
         await loadState(filePath);
-      } catch (err) {
-        message = err instanceof Error ? err.message : String(err);
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
       }
       expect(message).toContain("Invalid state file");
       expect(message).toContain(filePath);
@@ -115,7 +115,7 @@ describe("state store", () => {
       state = addAgentToState(state, "my-app", "agent-123", "2026-01-01T00:00:00.000Z");
 
       await saveState(filePath, state);
-      const content = await fs.readFile(filePath, "utf-8");
+      const content = await fs.readFile(filePath, "utf8");
       expect(JSON.parse(content)).toMatchObject({
         stateVersion: STATE_SCHEMA_VERSION,
         agents: {
@@ -198,7 +198,7 @@ describe("state store", () => {
       });
 
       await Promise.all(saves);
-      const raw = await fs.readFile(filePath, "utf-8");
+      const raw = await fs.readFile(filePath, "utf8");
       expect(() => JSON.parse(raw)).not.toThrow();
       const loaded = await loadState(filePath);
       expect(Object.keys(loaded.agents).length).toBe(1);

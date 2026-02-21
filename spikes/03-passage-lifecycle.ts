@@ -106,9 +106,9 @@ async function main() {
     console.log(`   Passages after bulk delete: ${passages4.length}`);
 
     console.log("\n--- PASSAGE LIFECYCLE TEST PASSED ---");
-  } catch (err) {
+  } catch (error) {
     console.error("\n--- PASSAGE LIFECYCLE TEST FAILED ---");
-    console.error(err);
+    console.error(error);
     process.exitCode = 1;
   } finally {
     if (agentId) {

@@ -41,9 +41,9 @@ describe("computeBackoffDelay", () => {
   });
 
   it("grows exponentially", () => {
-    expect(computeBackoffDelay(2, 5000)).toBe(10000);
-    expect(computeBackoffDelay(3, 5000)).toBe(20000);
-    expect(computeBackoffDelay(4, 5000)).toBe(40000);
+    expect(computeBackoffDelay(2, 5000)).toBe(10_000);
+    expect(computeBackoffDelay(3, 5000)).toBe(20_000);
+    expect(computeBackoffDelay(4, 5000)).toBe(40_000);
   });
 
   it("caps at maxDelayMs", () => {

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { loadConfig } from "./config-loader.js";
-import * as fs from "fs/promises";
-import * as path from "path";
-import * as os from "os";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import * as os from "node:os";
 
 async function withTempConfig(yamlContent: string, fn: (filePath: string) => Promise<void>) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "config-test-"));

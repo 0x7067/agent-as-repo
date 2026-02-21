@@ -1,6 +1,6 @@
-import * as fs from "fs/promises";
-import * as path from "path";
-import { execFileSync } from "child_process";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 
 export type SelfCheckStatus = "pass" | "warn" | "fail";
 
@@ -33,13 +33,13 @@ function runCommand(cmd: string, args: string[], cwd: string): string {
 async function readPackageJson(cwd: string): Promise<PackageJsonShape | null> {
   const packagePath = path.join(cwd, "package.json");
   try {
-    const raw = await fs.readFile(packagePath, "utf-8");
+    const raw = await fs.readFile(packagePath, "utf8");
     return JSON.parse(raw) as PackageJsonShape;
-  } catch (err) {
-    if (typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT") {
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
       return null;
     }
-    throw err;
+    throw error;
   }
 }
 

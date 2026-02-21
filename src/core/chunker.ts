@@ -8,7 +8,7 @@ export function chunkFile(
   if (!content.trim()) return [];
 
   const header = `${FILE_PREFIX}${filePath}`;
-  const sections = content.split(/\n\n+/);
+  const sections = content.split(/\n{2,}/);
   const chunks: Chunk[] = [];
   let current = `${header}\n\n`;
 

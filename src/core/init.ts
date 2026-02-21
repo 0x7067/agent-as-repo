@@ -1,4 +1,4 @@
-import * as path from "path";
+import * as path from "node:path";
 import yaml from "js-yaml";
 
 /** Extensions to exclude from detection (binary/asset files). */

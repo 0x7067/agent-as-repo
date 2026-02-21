@@ -96,9 +96,9 @@ async function testModel(
       totalLatency += latencyMs;
       const missing = checkKeywords(response, q.keywords);
       results.push({ passed: missing.length === 0, latencyMs, missingKeywords: missing });
-    } catch (err) {
+    } catch (error) {
       const latencyMs = Math.round(performance.now() - t0);
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = error instanceof Error ? error.message : String(error);
       return {
         tier: candidate.tier,
         model: candidate.model,
@@ -209,7 +209,7 @@ async function run(): Promise<void> {
   console.log(`\n${perfect}/${total} models scored 3/3, ${errored} errored`);
 }
 
-run().catch((err) => {
-  console.error("Fatal:", err instanceof Error ? err.message : String(err));
+run().catch((error) => {
+  console.error("Fatal:", error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

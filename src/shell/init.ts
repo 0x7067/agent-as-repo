@@ -1,7 +1,7 @@
-import * as fs from "fs/promises";
-import * as os from "os";
-import * as path from "path";
-import * as readline from "readline/promises";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import type * as readline from "node:readline/promises";
 import fg from "fast-glob";
 import {
   detectExtensions,
@@ -67,7 +67,7 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
   } else {
     let hasEnvFile = false;
     try {
-      const envContent = await fs.readFile(envPath, "utf-8");
+      const envContent = await fs.readFile(envPath, "utf8");
       hasEnvFile = envContent.includes("LETTA_API_KEY=") &&
         !envContent.includes("LETTA_API_KEY=your-key-here");
     } catch {
@@ -116,13 +116,13 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
       process.exitCode = 1;
       throw new Error("Not a directory");
     }
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       console.error(`Directory not found: ${resolvedPath}`);
       process.exitCode = 1;
       throw new Error("Directory not found");
     }
-    throw err;
+    throw error;
   }
 
   try {
@@ -153,7 +153,7 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
   // 4. Description
   let defaultDescription = "";
   try {
-    const pkgRaw = await fs.readFile(path.join(resolvedPath, "package.json"), "utf-8");
+    const pkgRaw = await fs.readFile(path.join(resolvedPath, "package.json"), "utf8");
     const pkg = JSON.parse(pkgRaw) as Record<string, unknown>;
     if (typeof pkg.description === "string" && pkg.description) {
       defaultDescription = pkg.description;

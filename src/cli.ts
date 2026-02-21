@@ -2,10 +2,10 @@
 import "dotenv/config";
 import { Command } from "commander";
 import { Letta } from "@letta-ai/letta-client";
-import * as path from "path";
-import * as readline from "readline/promises";
-import { fileURLToPath } from "url";
-import { execFileSync } from "child_process";
+import * as path from "node:path";
+import * as readline from "node:readline/promises";
+import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { loadConfig } from "./shell/config-loader.js";
 import { runInit } from "./shell/init.js";
 import { runAllChecks, runDoctorFixes } from "./shell/doctor.js";
@@ -185,7 +185,7 @@ class FakeProvider implements AgentProvider {
   async enableSleeptime(_agentId: string): Promise<void> {}
 
   async storePassage(agentId: string, text: string): Promise<string> {
-    const delayMs = parseInt(process.env.REPO_EXPERT_TEST_DELAY_STORE_MS ?? "0", 10);
+    const delayMs = Number.parseInt(process.env.REPO_EXPERT_TEST_DELAY_STORE_MS ?? "0", 10);
     if (!Number.isNaN(delayMs) && delayMs > 0) {
       await delay(delayMs);
     }
@@ -213,7 +213,7 @@ class FakeProvider implements AgentProvider {
   }
 
   async sendMessage(_agentId: string, _content: string, _options?: SendMessageOptions): Promise<string> {
-    const delayMs = parseInt(process.env.REPO_EXPERT_TEST_DELAY_BOOTSTRAP_MS ?? "0", 10);
+    const delayMs = Number.parseInt(process.env.REPO_EXPERT_TEST_DELAY_BOOTSTRAP_MS ?? "0", 10);
     if (!Number.isNaN(delayMs) && delayMs > 0) {
       await delay(delayMs);
     }
@@ -235,14 +235,14 @@ function createProviderForCommands(): AgentProvider {
 async function loadConfigSafe(configPath: string): Promise<Config> {
   try {
     return await loadConfig(configPath);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new CliUserError(`Config file not found: ${configPath}\nRun "repo-expert init" or copy config.example.yaml to config.yaml.`);
     }
-    if (err instanceof ConfigError) {
-      throw new CliUserError(formatConfigError(err));
+    if (error instanceof ConfigError) {
+      throw new CliUserError(formatConfigError(error));
     }
-    throw err;
+    throw error;
   }
 }
 
@@ -280,7 +280,7 @@ function whichAll(binary: string): string[] {
 
 async function pathExists(filePath: string): Promise<boolean> {
   try {
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
     await fs.access(filePath);
     return true;
   } catch {
@@ -313,7 +313,7 @@ function requireAgent(state: AppState, repoName: string): AgentState | null {
 }
 
 function parseIntOrDefault(value: string, fallback: number): number {
-  const n = parseInt(value, 10);
+  const n = Number.parseInt(value, 10);
   return Number.isNaN(n) ? fallback : n;
 }
 
@@ -324,14 +324,14 @@ function parseNonNegativeInt(value: string, fallback: number): number {
 
 function parseOptionalPositiveInt(value: string | undefined, fallback: number): number {
   if (value === undefined) return fallback;
-  const parsed = parseInt(value, 10);
+  const parsed = Number.parseInt(value, 10);
   if (Number.isNaN(parsed) || parsed <= 0) return fallback;
   return parsed;
 }
 
 function parseOptionalMaxSteps(value: string | undefined): number | undefined {
   if (value === undefined) return undefined;
-  const parsed = parseInt(value, 10);
+  const parsed = Number.parseInt(value, 10);
   if (Number.isNaN(parsed) || parsed <= 0) return undefined;
   return parsed;
 }
@@ -351,7 +351,7 @@ async function withTimeout<T>(label: string, timeoutMs: number, fn: () => Promis
     return await Promise.race([
       fn(),
       new Promise<T>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+        timeoutId = setTimeout(() => { reject(new Error(`${label} timed out after ${timeoutMs}ms`)); }, timeoutMs);
       }),
     ]);
   } finally {
@@ -363,17 +363,17 @@ async function withRetry<T>(
   label: string,
   retries: number,
   fn: (attempt: number) => Promise<T>,
-  onRetry: (message: string) => void = (message) => console.warn(message),
+  onRetry: (message: string) => void = (message) => { console.warn(message); },
 ): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       return await fn(attempt);
-    } catch (err) {
-      lastErr = err;
+    } catch (error) {
+      lastErr = error;
       if (attempt === retries) break;
       const waitMs = 500 * Math.pow(2, attempt);
-      onRetry(`  ${label} failed (attempt ${attempt + 1}/${retries + 1}): ${(err as Error).message}. Retrying in ${waitMs}ms...`);
+      onRetry(`  ${label} failed (attempt ${attempt + 1}/${retries + 1}): ${(error as Error).message}. Retrying in ${waitMs}ms...`);
       await delay(waitMs);
     }
   }
@@ -407,7 +407,7 @@ async function loadAskConfigDefaults(configPath: string | undefined): Promise<{
   const resolvedPath = configPath ? path.resolve(configPath) : path.resolve("config.yaml");
   if (!configPath) {
     try {
-      const fs = await import("fs/promises");
+      const fs = await import("node:fs/promises");
       await fs.access(resolvedPath);
     } catch {
       return defaults;
@@ -443,7 +443,7 @@ function startSpinner(label: string): () => void {
   }, 80);
   return () => {
     clearInterval(id);
-    process.stderr.write("\r\x1b[K");
+    process.stderr.write("\r\u001B[K");
   };
 }
 
@@ -550,8 +550,8 @@ program
       return;
     }
 
-    const log = opts.json ? (_: string) => {} : (line: string) => console.log(line);
-    const warn = opts.json ? (_: string) => {} : (line: string) => console.warn(line);
+    const log = opts.json ? (_: string) => {} : (line: string) => { console.log(line); };
+    const warn = opts.json ? (_: string) => {} : (line: string) => { console.warn(line); };
     const loadRetries = parseNonNegativeInt(opts.loadRetries, 2);
     const bootstrapRetries = parseNonNegativeInt(opts.bootstrapRetries, 2);
     const loadTimeoutMs = parseNonNegativeInt(opts.loadTimeoutMs, 300_000);
@@ -583,12 +583,12 @@ program
       });
 
       if (mode === "skip") {
-        log(`Agent for "${repoName}" already exists (${existingAgent!.agentId}), skipping`);
+        log(`Agent for "${repoName}" already exists (${existingAgent.agentId}), skipping`);
         setupResults.push({
           repoName,
           status: "skipped",
           mode,
-          agentId: existingAgent!.agentId,
+          agentId: existingAgent.agentId,
           totalMs: Date.now() - repoStart,
         });
         continue;
@@ -612,7 +612,7 @@ program
           state = addAgentToState(state, repoName, agentId, new Date().toISOString());
           await saveState(STATE_FILE, state);
         } else {
-          agentId = existingAgent!.agentId;
+          agentId = existingAgent.agentId;
           if (mode === "resume_bootstrap") {
             log(`  Resuming bootstrap for existing agent (${agentId})...`);
           } else {
@@ -686,8 +686,8 @@ program
           bootstrapMs,
           totalMs,
         });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         console.error(`Setup failed for "${repoName}": ${message}`);
         setupResults.push({
           repoName,
@@ -733,8 +733,8 @@ configCommand
       } else {
         console.log(`Config OK: ${summary.repoCount} repo(s) in ${configPath}`);
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       if (opts.json) {
         console.log(JSON.stringify({ ok: false, configPath, issues: [message] }, null, 2));
       } else {
@@ -821,9 +821,9 @@ program
       const answer = await askAgent(provider, agentInfo, question, askSettings);
       stop();
       console.log(answer);
-    } catch (err) {
+    } catch (error) {
       stop();
-      throw err;
+      throw error;
     }
   });
 
@@ -837,7 +837,7 @@ program
   .option("--json", "Output sync results as JSON")
   .option("--dry-run", "Preview sync plan without writing state or calling Letta")
   .action(async (opts: SyncOpts) => {
-    const log = opts.json ? (_: string) => {} : (line: string) => console.log(line);
+    const log = opts.json ? (_: string) => {} : (line: string) => { console.log(line); };
     const configPath = path.resolve(opts.config);
     const config = await loadConfigSafe(configPath);
     const provider = opts.dryRun ? null : createProviderForCommands();
@@ -860,7 +860,7 @@ program
       }
 
       const headCommit = gitHeadCommit(repoConfig.path);
-      if (!headCommit && !(opts.dryRun && opts.full)) {
+      if (!headCommit && (!opts.dryRun || !opts.full)) {
         const message = `"${repoName}": not a git repository or git is not available (${repoConfig.path})`;
         console.error(message);
         syncResults.push({ repoName, status: "error", error: message });
@@ -936,8 +936,8 @@ program
         collectFile: async (filePath) => {
           const absPath = path.join(repoConfig.path, filePath);
           try {
-            const fs = await import("fs/promises");
-            const content = await fs.readFile(absPath, "utf-8");
+            const fs = await import("node:fs/promises");
+            const content = await fs.readFile(absPath, "utf8");
             const stat = await fs.stat(absPath);
             return { path: filePath, content, sizeKb: stat.size / 1024 };
           } catch {
@@ -1245,8 +1245,8 @@ program
       try {
         await provider.enableSleeptime(agentInfo.agentId);
         console.log("done.");
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
         console.log(`failed: ${msg}`);
         process.exitCode = 1;
       }
@@ -1286,7 +1286,7 @@ program
     const provider = createProvider();
     const ac = new AbortController();
 
-    const shutdown = () => ac.abort();
+    const shutdown = () => { ac.abort(); };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
 
@@ -1320,8 +1320,8 @@ program
       return;
     }
 
-    const fs = await import("fs/promises");
-    const os = await import("os");
+    const fs = await import("node:fs/promises");
+    const os = await import("node:os");
     const home = os.default.homedir();
 
     const nodePath = await resolveNodeExecutable();
@@ -1378,8 +1378,8 @@ program
       return;
     }
 
-    const os = await import("os");
-    const fs = await import("fs/promises");
+    const os = await import("node:os");
+    const fs = await import("node:fs/promises");
     const home = os.default.homedir();
     const plistPath = path.join(home, "Library/LaunchAgents", `${PLIST_LABEL}.plist`);
 
@@ -1426,23 +1426,23 @@ program
       return;
     }
 
-    const fs = await import("fs/promises");
-    const os = await import("os");
+    const fs = await import("node:fs/promises");
+    const os = await import("node:os");
     const home = os.default.homedir();
     const mcpServerPath = path.resolve("src/mcp-server.ts");
     const configFile = opts.local ? path.resolve(".claude.json") : path.join(home, ".claude.json");
 
     let config: Record<string, unknown> = {};
     try {
-      const raw = await fs.readFile(configFile, "utf-8");
+      const raw = await fs.readFile(configFile, "utf8");
       try {
         config = JSON.parse(raw) as Record<string, unknown>;
       } catch {
         throw new CliUserError(`Failed to parse ${configFile}: invalid JSON.`);
       }
-    } catch (err) {
-      if (err instanceof CliUserError) throw err;
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    } catch (error) {
+      if (error instanceof CliUserError) throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
 
     const mcpServers = (config.mcpServers ?? {}) as Record<string, unknown>;
@@ -1464,15 +1464,15 @@ program
   .description("Validate existing MCP server entry in Claude Code config")
   .option("--json", "Output check result as JSON")
   .action(async (opts: McpCheckOpts) => {
-    const fs = await import("fs/promises");
-    const os = await import("os");
+    const fs = await import("node:fs/promises");
+    const os = await import("node:os");
     const home = os.default.homedir();
     const mcpServerPath = path.resolve("src/mcp-server.ts");
     const configFile = path.join(home, ".claude.json");
 
     let config: Record<string, unknown> = {};
     try {
-      const raw = await fs.readFile(configFile, "utf-8");
+      const raw = await fs.readFile(configFile, "utf8");
       try {
         config = JSON.parse(raw) as Record<string, unknown>;
       } catch {
@@ -1480,13 +1480,13 @@ program
         process.exitCode = 1;
         return;
       }
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         console.error(`Config file not found: ${configFile}`);
         process.exitCode = 1;
         return;
       }
-      throw err;
+      throw error;
     }
 
     const mcpServers = (config.mcpServers ?? {}) as Record<string, unknown>;
@@ -1530,7 +1530,7 @@ program
       return;
     }
 
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
     const installDir = path.resolve(opts.installDir);
     const fileName = completionFileName(selectedShell, "repo-expert");
     const targetPath = path.join(installDir, fileName);
@@ -1545,17 +1545,17 @@ async function main(argv = process.argv): Promise<void> {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main().catch((err) => {
-    if (err instanceof CliUserError || err instanceof StateFileError) {
-      console.error(err.message);
-      process.exitCode = err instanceof CliUserError ? err.exitCode : 1;
+  main().catch((error) => {
+    if (error instanceof CliUserError || error instanceof StateFileError) {
+      console.error(error.message);
+      process.exitCode = error instanceof CliUserError ? error.exitCode : 1;
       return;
     }
-    const message = err instanceof Error ? err.message : String(err);
+    const message = error instanceof Error ? error.message : String(error);
     console.error(`Unexpected error: ${message}`);
     console.error("Run with --debug for stack trace.");
-    if (readDebugEnabled(process.argv) && err instanceof Error && err.stack) {
-      console.error(err.stack);
+    if (readDebugEnabled(process.argv) && error instanceof Error && error.stack) {
+      console.error(error.stack);
     }
     process.exitCode = 1;
   });

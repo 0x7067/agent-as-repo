@@ -5,7 +5,7 @@
 import { Letta } from "@letta-ai/letta-client";
 import { buildPersona } from "../src/core/prompts.js";
 import * as yaml from "js-yaml";
-import * as fs from "fs";
+import * as fs from "node:fs";
 
 const MODEL = "chatgpt-plus-pro/gpt-5.1";
 
@@ -53,7 +53,7 @@ async function main() {
   console.log("\nDone.");
 }
 
-main().catch((err) => {
-  console.error(err);
+main().catch((error) => {
+  console.error(error);
   process.exit(1);
 });

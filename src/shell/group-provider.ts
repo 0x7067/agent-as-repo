@@ -91,12 +91,12 @@ export async function broadcastAsk(
         const response = await Promise.race([
           provider.sendMessage(agentId, question),
           new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => reject(new Error(`Agent "${repoName}" timed out after ${timeoutMs}ms`)), timeoutMs);
+            timeoutId = setTimeout(() => { reject(new Error(`Agent "${repoName}" timed out after ${timeoutMs}ms`)); }, timeoutMs);
           }),
         ]);
         return { repoName, response, error: null };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         return { repoName, response: null, error: message };
       } finally {
         if (timeoutId !== undefined) clearTimeout(timeoutId);

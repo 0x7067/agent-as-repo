@@ -88,9 +88,9 @@ async function main() {
     }
 
     console.log("\n--- SMOKE TEST PASSED ---");
-  } catch (err) {
+  } catch (error) {
     console.error("\n--- SMOKE TEST FAILED ---");
-    console.error(err);
+    console.error(error);
     process.exitCode = 1;
   } finally {
     // Cleanup: delete the agent

@@ -68,18 +68,29 @@ async function main() {
     console.log("\n4. Full response:");
     for (const msg of response.messages) {
       const msgType = msg.message_type;
-      if (msgType === "assistant_message") {
+      switch (msgType) {
+      case "assistant_message": {
         const content = (msg as { content?: string }).content;
         console.log(`   [assistant] ${typeof content === "string" ? content : JSON.stringify(content)}`);
-      } else if (msgType === "tool_call_message") {
+      
+      break;
+      }
+      case "tool_call_message": {
         const toolCall = msg as { tool_call?: { name?: string; arguments?: string } };
         console.log(`   [tool_call] ${toolCall.tool_call?.name}(${toolCall.tool_call?.arguments})`);
-      } else if (msgType === "tool_return_message") {
+      
+      break;
+      }
+      case "tool_return_message": {
         const toolReturn = msg as { tool_return?: string };
         const text = toolReturn.tool_return ?? "";
         console.log(`   [tool_return] ${text.slice(0, 200)}${text.length > 200 ? "..." : ""}`);
-      } else {
+      
+      break;
+      }
+      default: {
         console.log(`   [${msgType}]`);
+      }
       }
     }
 
@@ -112,7 +123,7 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("Spike failed:", err);
+main().catch((error) => {
+  console.error("Spike failed:", error);
   process.exit(1);
 });

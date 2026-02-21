@@ -45,14 +45,14 @@ describe("parseConfig", () => {
         max_file_size_kb: 100,
         memory_block_limit: 3000,
         bootstrap_on_create: false,
-        ask_timeout_ms: 12345,
+        ask_timeout_ms: 12_345,
       },
     };
     const config = parseConfig(raw);
     expect(config.repos["my-app"].maxFileSizeKb).toBe(100);
     expect(config.repos["my-app"].memoryBlockLimit).toBe(3000);
     expect(config.repos["my-app"].bootstrapOnCreate).toBe(false);
-    expect(config.defaults.askTimeoutMs).toBe(12345);
+    expect(config.defaults.askTimeoutMs).toBe(12_345);
   });
 
   it("accepts optional letta.fast_model", () => {
@@ -192,9 +192,9 @@ describe("parseConfig", () => {
         repos: { app: { path: 123, extensions: "not-array" } },
       });
       expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(ConfigError);
-      const configErr = err as ConfigError;
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError);
+      const configErr = error as ConfigError;
       expect(configErr.issues.length).toBeGreaterThan(0);
       // Should have readable path-based messages
       expect(configErr.issues.some((i) => i.includes("letta.model"))).toBe(true);
@@ -214,9 +214,9 @@ describe("parseConfig", () => {
         },
       });
       expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(ConfigError);
-      const configErr = err as ConfigError;
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError);
+      const configErr = error as ConfigError;
       expect(configErr.issues.some((i) => i.includes('"js"'))).toBe(true);
       expect(configErr.issues.some((i) => i.includes("start with"))).toBe(true);
     }
@@ -229,9 +229,9 @@ describe("parseConfig", () => {
         repos: {},
       });
       expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(ConfigError);
-      const configErr = err as ConfigError;
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError);
+      const configErr = error as ConfigError;
       expect(configErr.issues.some((i) => i.includes("at least one repo"))).toBe(true);
     }
   });
@@ -248,9 +248,9 @@ describe("parseConfig", () => {
         },
       });
       expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(ConfigError);
-      const configErr = err as ConfigError;
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError);
+      const configErr = error as ConfigError;
       expect(configErr.issues.some((i) => i.includes("src/dist"))).toBe(true);
     }
   });
