@@ -8,6 +8,8 @@ import { syncRepo } from "./sync.js";
 import { shouldSync, formatSyncLog, computeBackoffDelay } from "../core/watch.js";
 import { updateAgentField } from "../core/state.js";
 import { shouldIncludeFile } from "../core/filter.js";
+import { partitionDiffPaths } from "../core/submodule.js";
+import { listSubmodules, expandSubmoduleFiles } from "./submodule-collector.js";
 import type { AgentProvider } from "./provider.js";
 import type { AgentState, Config, FileInfo, RepoConfig } from "../core/types.js";
 
@@ -82,11 +84,24 @@ function toAgentPath(repoConfig: RepoConfig, repoRelativePath: string): string |
   return normalized.slice(normalizedBase.length + 1);
 }
 
-function filterChangedFiles(repoConfig: RepoConfig, changedFiles: string[]): string[] {
-  return changedFiles
+async function filterChangedFiles(repoConfig: RepoConfig, changedFiles: string[]): Promise<string[]> {
+  const regularFiles = changedFiles
     .map((filePath) => toAgentPath(repoConfig, filePath))
     .filter(Boolean)
-    .filter((filePath) => shouldIncludeFile(filePath, 0, repoConfig));
+    .filter((filePath) => shouldIncludeFile(filePath, 0, repoConfig)) as string[];
+
+  if (!repoConfig.includeSubmodules) return regularFiles;
+
+  const submodules = listSubmodules(repoConfig.path);
+  const { changedSubmodules } = partitionDiffPaths(changedFiles, submodules, () => true);
+
+  const expanded: string[] = [];
+  for (const sub of changedSubmodules) {
+    const paths = await expandSubmoduleFiles(repoConfig, sub);
+    expanded.push(...paths);
+  }
+
+  return [...regularFiles, ...expanded];
 }
 
 export async function watchRepos(params: WatchParams): Promise<void> {
@@ -181,7 +196,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
           log(`[${repoName}] git diff failed, skipping`);
           return;
         }
-        changedFiles = filterChangedFiles(repoConfig, diffResult);
+        changedFiles = await filterChangedFiles(repoConfig, diffResult);
       } else {
         const files = await collectFiles(repoConfig);
         changedFiles = files.map((f) => f.path);

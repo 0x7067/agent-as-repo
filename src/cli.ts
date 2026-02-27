@@ -21,6 +21,8 @@ import type { AgentProvider, CreateAgentParams, SendMessageOptions } from "./she
 import { LettaProvider } from "./shell/letta-provider.js";
 import { rawTextStrategy } from "./core/chunker.js";
 import { shouldIncludeFile } from "./core/filter.js";
+import { partitionDiffPaths } from "./core/submodule.js";
+import { listSubmodules, expandSubmoduleFiles } from "./shell/submodule-collector.js";
 import { addAgentToState, removeAgentFromState, updateAgentField, updatePassageMap } from "./core/state.js";
 import { syncRepo } from "./shell/sync.js";
 import { getAgentStatus, getAgentStatusData } from "./shell/status.js";
@@ -895,7 +897,22 @@ program
           process.exitCode = 1;
           continue;
         }
-        changedFiles = (diff ? diff.split("\n") : []).filter((f) => shouldIncludeFile(f, 0, repoConfig));
+        const diffPaths = diff ? diff.split("\n") : [];
+        if (repoConfig.includeSubmodules) {
+          const submodules = listSubmodules(repoConfig.path);
+          const { changedSubmodules, regularFiles } = partitionDiffPaths(
+            diffPaths,
+            submodules,
+            (f) => shouldIncludeFile(f, 0, repoConfig),
+          );
+          const expandedSubFiles: string[] = [];
+          for (const sub of changedSubmodules) {
+            expandedSubFiles.push(...(await expandSubmoduleFiles(repoConfig, sub)));
+          }
+          changedFiles = [...regularFiles, ...expandedSubFiles];
+        } else {
+          changedFiles = diffPaths.filter((f) => shouldIncludeFile(f, 0, repoConfig));
+        }
         log(`Syncing "${repoName}" (${changedFiles.length} changed files since ${sinceRef.slice(0, 7)})...`);
       }
 

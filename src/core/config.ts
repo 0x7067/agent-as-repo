@@ -30,6 +30,7 @@ const repoRawSchema = z.object({
   max_file_size_kb: z.number().optional(),
   memory_block_limit: z.number().optional(),
   bootstrap_on_create: z.boolean().optional(),
+  include_submodules: z.boolean().optional(),
 });
 
 const rawConfigSchema = z.object({
@@ -123,6 +124,7 @@ export function parseConfig(raw: unknown): Config {
       maxFileSizeKb: repo.max_file_size_kb ?? defaults.maxFileSizeKb,
       memoryBlockLimit: repo.memory_block_limit ?? defaults.memoryBlockLimit,
       bootstrapOnCreate: repo.bootstrap_on_create ?? defaults.bootstrapOnCreate,
+      includeSubmodules: repo.include_submodules ?? false,
     };
   }
 

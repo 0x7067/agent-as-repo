@@ -256,6 +256,24 @@ describe("parseConfig", () => {
   });
 });
 
+describe("include_submodules config field", () => {
+  it("defaults to false when omitted", () => {
+    const config = parseConfig(validRaw);
+    expect(config.repos["my-app"].includeSubmodules).toBe(false);
+  });
+
+  it("parses include_submodules: true", () => {
+    const raw = {
+      ...validRaw,
+      repos: {
+        "my-app": { ...validRaw.repos["my-app"], include_submodules: true },
+      },
+    };
+    const config = parseConfig(raw);
+    expect(config.repos["my-app"].includeSubmodules).toBe(true);
+  });
+});
+
 describe("formatConfigError", () => {
   it("formats a ConfigError into readable lines", () => {
     const err = new ConfigError(["letta.model: Required", "repos.app.path: Expected string"]);

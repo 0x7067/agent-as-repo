@@ -106,6 +106,41 @@ describe("collectFiles", () => {
     );
   });
 
+  it("collects submodule files with repo-root-relative paths when includeSubmodules is true", async () => {
+    await withTempRepo(
+      {
+        "src/root.ts": "export const root = true;",
+        "libs/my-lib/src/index.ts": "export const lib = true;",
+        "libs/my-lib/src/util.ts": "export const util = true;",
+      },
+      async (repoPath) => {
+        // Simulate an initialized submodule: create .git file (pointer)
+        const subGitFile = path.join(repoPath, "libs/my-lib/.git");
+        await fs.writeFile(subGitFile, "gitdir: ../../.git/modules/my-lib");
+
+        const files = await collectFiles(makeConfig(repoPath, { includeSubmodules: true }));
+        const paths = files.map((f) => f.path);
+
+        expect(paths).toContain("src/root.ts");
+        expect(paths).toContain("libs/my-lib/src/index.ts");
+        expect(paths).toContain("libs/my-lib/src/util.ts");
+      },
+    );
+  });
+
+  it("does not traverse hidden .git dirs inside submodule paths when includeSubmodules is true", async () => {
+    await withTempRepo(
+      {
+        "libs/my-lib/src/index.ts": "export const lib = true;",
+      },
+      async (repoPath) => {
+        const files = await collectFiles(makeConfig(repoPath, { includeSubmodules: true }));
+        const paths = files.map((f) => f.path);
+        expect(paths.some((p) => p.includes(".git"))).toBe(false);
+      },
+    );
+  });
+
   it("meets collection performance budget on medium fixture repo", async () => {
     const fixtureFiles: Record<string, string> = {};
     for (let i = 0; i < 300; i++) {

@@ -1,3 +1,13 @@
+/** A git submodule entry parsed from `git submodule status`. */
+export interface SubmoduleInfo {
+  /** Relative path from repo root (e.g. "libs/my-lib"). */
+  path: string;
+  /** The git commit hash the submodule is pinned to. */
+  commit: string;
+  /** False when the submodule has not been initialized (`git submodule update --init`). */
+  initialized: boolean;
+}
+
 /** Validated configuration for a single repo. */
 export interface RepoConfig {
   path: string;
@@ -11,6 +21,8 @@ export interface RepoConfig {
   maxFileSizeKb: number;
   memoryBlockLimit: number;
   bootstrapOnCreate: boolean;
+  /** When true, files inside git submodules are indexed alongside the parent repo. */
+  includeSubmodules?: boolean;
 }
 
 /** Top-level validated config. */

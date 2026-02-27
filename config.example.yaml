@@ -25,6 +25,9 @@ repos:
     extensions: [.ts, .tsx, .js, .jsx, .json]  # File types to index
     ignore_dirs: [node_modules, .git, dist]    # Directories to skip
     tags: [frontend, mobile]                   # For cross-agent discovery
+    # include_submodules: false     # Set to true to index git submodule contents.
+    #                               # Requires submodules to be initialized first
+    #                               # (`git submodule update --init`).
     # Optional: custom persona (auto-generated from description if omitted)
     # persona: |
     #   I am an expert on the mobile app.

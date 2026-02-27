@@ -24,10 +24,16 @@ vi.mock("./sync.js", () => ({
   syncRepo: vi.fn(),
 }));
 
+vi.mock("./submodule-collector.js", () => ({
+  listSubmodules: vi.fn().mockReturnValue([]),
+  expandSubmoduleFiles: vi.fn().mockResolvedValue([]),
+}));
+
 import { execFileSync } from "node:child_process";
 import { watch as fsWatch } from "node:fs";
 import { loadState, saveState } from "./state-store.js";
 import { syncRepo } from "./sync.js";
+import { listSubmodules, expandSubmoduleFiles } from "./submodule-collector.js";
 import { watchRepos } from "./watch.js";
 
 const mockedExecFileSync = vi.mocked(execFileSync);
@@ -35,6 +41,8 @@ const mockedFsWatch = vi.mocked(fsWatch);
 const mockedLoadState = vi.mocked(loadState);
 const mockedSaveState = vi.mocked(saveState);
 const mockedSyncRepo = vi.mocked(syncRepo);
+const mockedListSubmodules = vi.mocked(listSubmodules);
+const mockedExpandSubmoduleFiles = vi.mocked(expandSubmoduleFiles);
 
 // Import shared mock after vi.mock calls
 import { makeMockProvider } from "./__test__/mock-provider.js";
@@ -424,5 +432,64 @@ describe("watchRepos", () => {
     ac.abort();
     await vi.advanceTimersByTimeAsync(200);
     await watchPromise;
+  });
+
+  it("expands submodule pointer changes to file lists when includeSubmodules is true", async () => {
+    const subConfig: Config = {
+      ...testConfig,
+      repos: {
+        "my-app": {
+          ...testConfig.repos["my-app"],
+          includeSubmodules: true,
+        },
+      },
+    };
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "def456\n";
+      // git diff returns a submodule path (no extension)
+      if (args?.includes("--name-only")) return "libs/my-lib\n";
+      return "";
+    });
+    mockedListSubmodules.mockReturnValue([
+      { path: "libs/my-lib", commit: "abc123", initialized: true },
+    ]);
+    mockedExpandSubmoduleFiles.mockResolvedValue([
+      "libs/my-lib/src/index.ts",
+      "libs/my-lib/src/util.ts",
+    ]);
+    mockedSyncRepo.mockResolvedValue({
+      passages: {},
+      lastSyncCommit: "def456",
+      filesRemoved: 0,
+      filesReIndexed: 2,
+      isFullReIndex: false,
+    });
+
+    const ac = new AbortController();
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: subConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      signal: ac.signal,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    expect(mockedExpandSubmoduleFiles).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "/tmp/my-app" }),
+      expect.objectContaining({ path: "libs/my-lib" }),
+    );
+    expect(mockedSyncRepo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        changedFiles: expect.arrayContaining(["libs/my-lib/src/index.ts", "libs/my-lib/src/util.ts"]),
+      }),
+    );
   });
 });
