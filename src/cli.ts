@@ -946,6 +946,7 @@ program
         continue;
       }
 
+      const isTTY = !opts.json && process.stderr.isTTY;
       const result = await syncRepo({
         provider: provider!,
         agent: agentInfo,
@@ -963,7 +964,15 @@ program
         },
         headCommit,
         maxFileSizeKb: repoConfig.maxFileSizeKb,
+        onProgress: isTTY
+          ? (completed, total, filePath) => {
+              const label = filePath.length > 60 ? `...${filePath.slice(-57)}` : filePath;
+              process.stderr.write(`\r  [${completed}/${total}] ${label.padEnd(60)}`);
+            }
+          : undefined,
       });
+
+      if (isTTY) process.stderr.write(`\r${" ".repeat(72)}\r`); // clear progress line
 
       if (result.isFullReIndex) {
         log(`  Warning: ${changedFiles.length} files changed — consider --full re-index`);

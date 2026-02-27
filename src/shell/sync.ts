@@ -15,6 +15,7 @@ export interface SyncRepoParams {
   concurrency?: number;
   fullReIndexThreshold?: number;
   onFileError?: (filePath: string, error: Error) => void;
+  onProgress?: (completed: number, total: number, filePath: string) => void;
 }
 
 export interface SyncResult {
@@ -38,6 +39,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
     concurrency = 20,
     fullReIndexThreshold = 500,
     onFileError,
+    onProgress,
   } = params;
 
   const plan = computeSyncPlan(agent.passages, changedFiles, fullReIndexThreshold);
@@ -47,6 +49,8 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
   const failedFiles: string[] = [];
   let filesReIndexed = 0;
   let filesRemoved = 0;
+  let filesCompleted = 0;
+  const totalFiles = plan.filesToReIndex.length;
 
   // Phase 1: Upload new passages (copy-on-write — old passages stay intact until phase 2)
   for (const filePath of plan.filesToReIndex) {
@@ -58,39 +62,38 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
         if (oldIds) stalePassageIds.push(...oldIds);
         delete updatedPassages[filePath];
         filesRemoved++;
-        continue;
-      }
-      if (maxFileSizeKb !== undefined && fileInfo.sizeKb > maxFileSizeKb) {
+      } else if (maxFileSizeKb !== undefined && fileInfo.sizeKb > maxFileSizeKb) {
         // Oversized — mark old passages for cleanup, remove from map
         const oldIds = agent.passages[filePath];
         if (oldIds) stalePassageIds.push(...oldIds);
         delete updatedPassages[filePath];
         filesRemoved++;
-        continue;
+      } else {
+        const chunks = chunkingStrategy(fileInfo);
+        const passageIds: string[] = Array.from({length: chunks.length});
+
+        await Promise.all(
+          chunks.map((chunk, i) =>
+            limit(async () => {
+              const id = await provider.storePassage(agent.agentId, chunk.text);
+              passageIds[i] = id;
+            }),
+          ),
+        );
+
+        // Upload succeeded — queue old passages for deletion, update map
+        const oldIds = agent.passages[filePath];
+        if (oldIds) stalePassageIds.push(...oldIds);
+        updatedPassages[filePath] = passageIds;
+        filesReIndexed++;
       }
-
-      const chunks = chunkingStrategy(fileInfo);
-      const passageIds: string[] = Array.from({length: chunks.length});
-
-      await Promise.all(
-        chunks.map((chunk, i) =>
-          limit(async () => {
-            const id = await provider.storePassage(agent.agentId, chunk.text);
-            passageIds[i] = id;
-          }),
-        ),
-      );
-
-      // Upload succeeded — queue old passages for deletion, update map
-      const oldIds = agent.passages[filePath];
-      if (oldIds) stalePassageIds.push(...oldIds);
-      updatedPassages[filePath] = passageIds;
-      filesReIndexed++;
     } catch (error_) {
       // Per-file failure: keep old passages intact, report the failure
       const error = error_ instanceof Error ? error_ : new Error(String(error_));
       onFileError?.(filePath, error);
       failedFiles.push(filePath);
+    } finally {
+      onProgress?.(++filesCompleted, totalFiles, filePath);
     }
   }
 

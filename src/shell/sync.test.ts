@@ -222,6 +222,42 @@ describe("syncRepo", () => {
       expect(result.failedFiles).toEqual(["src/a.ts"]);
     });
 
+    it("calls onProgress after each file is processed", async () => {
+      const provider = makeMockProvider();
+      const progress: Array<{ completed: number; total: number; filePath: string }> = [];
+
+      await syncRepo({
+        provider,
+        agent: testAgent,
+        changedFiles: ["src/a.ts", "src/b.ts"],
+        collectFile: async (path) => ({ path, content: "content", sizeKb: 1 }),
+        headCommit: "def456",
+        onProgress: (completed, total, filePath) => {
+          progress.push({ completed, total, filePath });
+        },
+      });
+
+      expect(progress).toHaveLength(2);
+      expect(progress[0]).toEqual({ completed: 1, total: 2, filePath: "src/a.ts" });
+      expect(progress[1]).toEqual({ completed: 2, total: 2, filePath: "src/b.ts" });
+    });
+
+    it("calls onProgress even for deleted and oversized files", async () => {
+      const provider = makeMockProvider();
+      const completedCounts: number[] = [];
+
+      await syncRepo({
+        provider,
+        agent: testAgent,
+        changedFiles: ["src/a.ts", "src/b.ts"],
+        collectFile: async () => null, // all files "deleted"
+        headCommit: "def456",
+        onProgress: (completed) => completedCounts.push(completed),
+      });
+
+      expect(completedCounts).toEqual([1, 2]);
+    });
+
     it("delete failures in cleanup phase are silently ignored", async () => {
       const provider = makeMockProvider();
       provider.deletePassage = vi.fn().mockRejectedValue(new Error("delete failed"));
