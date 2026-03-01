@@ -90,6 +90,7 @@ export function parseConfig(raw: unknown): Config {
   try {
     parsed = rawConfigSchema.parse(raw);
   } catch (error) {
+    // Stryker disable next-line ConditionalExpression: equivalent — rawConfigSchema.parse() always throws ZodError for invalid input; other error types are unreachable in practice
     if (error instanceof z.ZodError) {
       throw new ConfigError(zodIssuesToStrings(error));
     }

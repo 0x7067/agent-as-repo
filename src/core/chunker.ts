@@ -5,6 +5,7 @@ export function chunkFile(
   content: string,
   maxChars = 2000,
 ): Chunk[] {
+  // Stryker disable next-line MethodExpression,ConditionalExpression: equivalent — whitespace-only content produces current.trim() === header after the loop (no chunk pushed), making this guard redundant
   if (!content.trim()) return [];
 
   const header = `${FILE_PREFIX}${filePath}`;
@@ -23,6 +24,7 @@ export function chunkFile(
     current += section + "\n\n";
   }
 
+  // Stryker disable next-line EqualityOperator,ConditionalExpression,MethodExpression: equivalent — line 8 guard returns early for all whitespace inputs; for real content current always exceeds header.length
   if (current.trim().length > header.length) {
     chunks.push({ text: current.trim(), sourcePath: filePath });
   }

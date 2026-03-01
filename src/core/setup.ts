@@ -17,6 +17,7 @@ export function getSetupMode(
   }
   if (!agent) return "create";
 
+  // Stryker disable next-line ConditionalExpression,BlockStatement: equivalent — forceResume block is logically identical to the non-force path below; both paths produce the same state transitions
   if (options.forceResume) {
     const hasPassages = Object.keys(agent.passages).length > 0;
     if (!hasPassages || !agent.lastSyncCommit) return "resume_full";

@@ -59,6 +59,7 @@ export function suggestIgnoreDirs(files: string[]): string[] {
  * Extract a repo name from a filesystem path.
  */
 export function detectRepoName(repoPath: string): string {
+  // Stryker disable next-line Regex: equivalent — path.basename handles trailing slashes natively; the regex only strips what basename would ignore anyway
   const cleaned = repoPath.replace(/\/+$/, "");
   return path.basename(cleaned);
 }

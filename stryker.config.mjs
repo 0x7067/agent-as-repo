@@ -4,6 +4,7 @@ export default {
   mutate: ["src/core/**/*.ts", "!src/core/**/*.test.ts"],
   coverageAnalysis: "perTest",
   thresholds: { high: 97, low: 90, break: 97 },
-  reporters: ["html", "clear-text", "progress"],
+  reporters: ["html", "json", "clear-text", "progress"],
+  jsonReporter: { fileName: "reports/mutation/mutation.json" },
   htmlReporter: { fileName: "reports/mutation/mutation.html" },
 };

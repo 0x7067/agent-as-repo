@@ -110,6 +110,14 @@ describe("checkMcpEntry", () => {
     expect(result.issues.length).toBeGreaterThan(0);
   });
 
+  it("handles entry with missing args (covers args ?? [], args[0] ?? \"(missing)\", args[1] ?? \"\" fallbacks)", () => {
+    const entry = { command: "npx", timeout: 300, env: validEntry.env } as any;
+    const result = checkMcpEntry(entry, "/abs/path/mcp-server.ts");
+    expect(result.issues.some((i) => i.includes("(missing)"))).toBe(true);
+    expect(result.issues.some((i) => i.includes('has ""'))).toBe(true);
+  });
+
+
   it("timeout issue message includes actual timeout value", () => {
     const entry = { ...validEntry, timeout: 45 };
     const result = checkMcpEntry(entry, "/abs/path/mcp-server.ts");

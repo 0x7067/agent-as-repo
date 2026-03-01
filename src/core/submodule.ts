@@ -7,9 +7,11 @@ import type { SubmoduleInfo } from "./types.js";
  *   - status: ' ' (synced), '+' (different commit), '-' (not initialized), 'U' (conflict)
  */
 export function parseSubmoduleStatus(output: string): SubmoduleInfo[] {
+  // Stryker disable MethodExpression,EqualityOperator,ConditionalExpression: equivalent — blank lines produce null in .map() and are caught by the second .filter(info !== null)
   return output
     .split("\n")
     .filter((line) => line.length > 0)
+    // Stryker enable MethodExpression,EqualityOperator,ConditionalExpression
     .map((line) => {
       const statusChar = line[0];
       const rest = line.slice(1).trim(); // "<hash> <path> [(desc)]"
