@@ -3,6 +3,7 @@ import { loadConfig } from "./config-loader.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
+import type { FileSystemPort } from "../ports/filesystem.js";
 
 async function withTempConfig(yamlContent: string, fn: (filePath: string) => Promise<void>) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "config-test-"));
@@ -74,6 +75,22 @@ repos:
       expect(path.isAbsolute(resolvedPath)).toBe(true);
       expect(resolvedPath).toBe(path.join(os.homedir(), "repos/my-app"));
     });
+  });
+
+  it("accepts injected FileSystemPort", async () => {
+    const mockFs: FileSystemPort = {
+      readFile: async () => validYaml,
+      writeFile: async () => {},
+      stat: async () => ({ size: 0, isDirectory: () => false }),
+      access: async () => {},
+      rename: async () => {},
+      copyFile: async () => {},
+      glob: async () => [],
+    };
+
+    const config = await loadConfig("/fake/config.yaml", mockFs);
+    expect(config.letta.model).toBe("openai/gpt-4.1");
+    expect(config.repos["my-app"]).toBeDefined();
   });
 
   it("resolves relative paths to absolute paths", async () => {

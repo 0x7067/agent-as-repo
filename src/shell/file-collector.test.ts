@@ -4,6 +4,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { RepoConfig } from "../core/types.js";
+import type { FileSystemPort } from "../ports/filesystem.js";
 
 async function withTempRepo(
   files: Record<string, string>,
@@ -139,6 +140,23 @@ describe("collectFiles", () => {
         expect(paths.some((p) => p.includes(".git"))).toBe(false);
       },
     );
+  });
+
+  it("accepts injected FileSystemPort", async () => {
+    const mockFs: FileSystemPort = {
+      readFile: async () => "mock content",
+      writeFile: async () => {},
+      stat: async () => ({ size: 100, isDirectory: () => false }),
+      access: async () => {},
+      rename: async () => {},
+      copyFile: async () => {},
+      glob: async () => ["src/mock.ts"],
+    };
+
+    const files = await collectFiles(makeConfig("/fake/path"), mockFs);
+    expect(files).toHaveLength(1);
+    expect(files[0].path).toBe("src/mock.ts");
+    expect(files[0].content).toBe("mock content");
   });
 
   it("meets collection performance budget on medium fixture repo", async () => {
