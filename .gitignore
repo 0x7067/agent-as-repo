@@ -8,3 +8,4 @@ config.yaml
 .claude.local.md
 reports/
 .stryker-tmp/
+.worktrees/
