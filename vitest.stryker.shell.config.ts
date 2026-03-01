@@ -7,7 +7,8 @@ export default defineConfig({
       "src/mcp-server.test.ts",
     ],
     exclude: [
-      // doctor.test.ts and init.test.ts use process.chdir() which fails in Stryker sandbox workers
+      // These files use process.chdir() which is not supported in Stryker sandbox workers.
+      // Port-injected versions of these tests live in *.stryker.test.ts files.
       "src/shell/doctor.test.ts",
       "src/shell/init.test.ts",
     ],
