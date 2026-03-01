@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createRepoAgent, loadPassages } from "./agent-factory.js";
-import type { RepoConfig, Config } from "../core/types.js";
+import type { RepoConfig } from "../core/types.js";
 import type { AgentProvider } from "./provider.js";
 import { makeMockProvider as makeBase } from "./__test__/mock-provider.js";
 
@@ -29,7 +29,7 @@ const testConfig: RepoConfig = {
   bootstrapOnCreate: true,
 };
 
-const testLetta: Config["letta"] = {
+const testLetta = {
   model: "openai/gpt-4.1",
   embedding: "openai/text-embedding-3-small",
 };
