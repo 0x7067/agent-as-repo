@@ -81,7 +81,7 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
     if (hasEnvFile) {
       console.log("API key: found in .env");
     } else if (apiKeyFromFlag && apiKeyFromFlag.trim()) {
-      await fs.writeFile(envPath, `LETTA_API_KEY=${apiKeyFromFlag.trim()}\n`, "utf-8");
+      await fs.writeFile(envPath, `LETTA_API_KEY=${apiKeyFromFlag.trim()}\n`);
       envWritten = envPath;
       console.log(`API key: wrote ${envPath} from --api-key`);
     } else {
@@ -96,7 +96,7 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
         process.exitCode = 1;
         throw new Error("Missing API key");
       }
-      await fs.writeFile(envPath, `LETTA_API_KEY=${apiKey.trim()}\n`, "utf-8");
+      await fs.writeFile(envPath, `LETTA_API_KEY=${apiKey.trim()}\n`);
       envWritten = envPath;
       console.log(`  Wrote ${envPath}`);
     }
@@ -197,7 +197,7 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
     ignoreDirs,
   });
 
-  await fs.writeFile(configPath, yamlContent, "utf-8");
+  await fs.writeFile(configPath, yamlContent);
   console.log(`\nWrote ${configPath}`);
   console.log(`\nNext: repo-expert setup`);
 
