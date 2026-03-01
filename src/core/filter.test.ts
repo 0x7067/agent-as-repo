@@ -37,4 +37,28 @@ describe("shouldIncludeFile", () => {
   it("does not false-positive on partial dir name matches", () => {
     expect(shouldIncludeFile("src/node_modules_helper/index.ts", 1, defaults)).toBe(true);
   });
+
+  it("rejects files without any extension (no dot)", () => {
+    expect(shouldIncludeFile("Makefile", 1, defaults)).toBe(false);
+    expect(shouldIncludeFile("src/Dockerfile", 1, defaults)).toBe(false);
+  });
+
+  it("handles single-char filename without extension", () => {
+    // Catches dotIdx === +1 mutation: "x" has no dot, lastIndexOf returns -1
+    // With +1 mutation, -1 !== 1, so false branch taken, slice(-1) = "x", not in extensions
+    // But with === false mutation (always false), it'd try to slice, which might match
+    expect(shouldIncludeFile("x", 1, defaults)).toBe(false);
+  });
+
+  it("correctly extracts extension even when empty string branch is altered", () => {
+    // When dotIdx === -1, the ternary should return "" (no extension)
+    // If mutated to return "Stryker was here!", it won't match any extension
+    // Test: a file with no extension should always be rejected
+    const withAllExtensions = {
+      ...defaults,
+      extensions: [".ts", ".tsx", ".js", ""],
+    };
+    // Even with "" in extensions, a file without a dot should have ext = ""
+    expect(shouldIncludeFile("Makefile", 1, withAllExtensions)).toBe(true);
+  });
 });

@@ -17,20 +17,36 @@ describe("formatAgentStatus", () => {
       lastSyncAt: "2026-01-15T10:05:00.000Z",
     };
 
-    const lines = formatAgentStatus(data);
+    const output = formatAgentStatus(data);
 
-    expect(lines).toContain("my-app");
-    expect(lines).toContain("agent-abc");
-    expect(lines).toContain("42");
-    expect(lines).toContain("persona");
-    expect(lines).toContain("120/5000");
-    expect(lines).toContain("architecture");
-    expect(lines).toContain("3200/5000");
-    expect(lines).toContain("abc1234");
-    expect(lines).toContain("2026-01-15T10:05:00.000Z");
+    expect(output).toContain("my-app:");
+    expect(output).toContain("agent: agent-abc");
+    expect(output).toContain("passages: 42");
+    expect(output).toContain("memory blocks:");
+    expect(output).toContain("persona: 120/5000 chars");
+    expect(output).toContain("architecture: 3200/5000 chars");
+    expect(output).toContain("last bootstrap: 2026-01-15T10:00:00.000Z");
+    expect(output).toContain("last sync: abc1234");
+    expect(output).toContain("last sync at: 2026-01-15T10:05:00.000Z");
   });
 
-  it("shows 'never' for null bootstrap and sync", () => {
+  it("uses newline as line separator", () => {
+    const data: AgentStatusData = {
+      repoName: "my-app",
+      agentId: "agent-abc",
+      passageCount: 0,
+      blocks: [],
+      lastBootstrap: null,
+      lastSyncCommit: null,
+      lastSyncAt: null,
+    };
+    const output = formatAgentStatus(data);
+    expect(output).toContain("\n");
+    const lines = output.split("\n");
+    expect(lines.length).toBeGreaterThan(1);
+  });
+
+  it("omits memory blocks section when blocks array is empty", () => {
     const data: AgentStatusData = {
       repoName: "my-app",
       agentId: "agent-abc",
@@ -41,8 +57,44 @@ describe("formatAgentStatus", () => {
       lastSyncAt: null,
     };
 
-    const lines = formatAgentStatus(data);
+    const output = formatAgentStatus(data);
+    expect(output).not.toContain("memory blocks:");
+  });
 
-    expect(lines).toContain("never");
+  it("shows 'never' for each null field individually", () => {
+    const data: AgentStatusData = {
+      repoName: "my-app",
+      agentId: "agent-abc",
+      passageCount: 0,
+      blocks: [],
+      lastBootstrap: null,
+      lastSyncCommit: null,
+      lastSyncAt: null,
+    };
+
+    const output = formatAgentStatus(data);
+
+    expect(output).toContain("last bootstrap: never");
+    expect(output).toContain("last sync: never");
+    expect(output).toContain("last sync at: never");
+  });
+
+  it("shows actual values instead of 'never' when fields are set", () => {
+    const data: AgentStatusData = {
+      repoName: "my-app",
+      agentId: "agent-abc",
+      passageCount: 0,
+      blocks: [],
+      lastBootstrap: "2026-01-01",
+      lastSyncCommit: "abc123",
+      lastSyncAt: "2026-01-02",
+    };
+
+    const output = formatAgentStatus(data);
+
+    expect(output).toContain("last bootstrap: 2026-01-01");
+    expect(output).not.toContain("last bootstrap: never");
+    expect(output).toContain("last sync: abc123");
+    expect(output).toContain("last sync at: 2026-01-02");
   });
 });

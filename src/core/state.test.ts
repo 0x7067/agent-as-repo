@@ -41,7 +41,7 @@ describe("state operations", () => {
 
   it("throws when updating passages for unknown agent", () => {
     const state = createEmptyState();
-    expect(() => updatePassageMap(state, "nope", {})).toThrow();
+    expect(() => updatePassageMap(state, "nope", {})).toThrow("No agent found for repo: nope");
   });
 
   it("updates agent fields immutably", () => {
@@ -56,7 +56,7 @@ describe("state operations", () => {
 
   it("throws when updating fields for unknown agent", () => {
     const state = createEmptyState();
-    expect(() => updateAgentField(state, "nope", { lastSyncCommit: "abc" })).toThrow();
+    expect(() => updateAgentField(state, "nope", { lastSyncCommit: "abc" })).toThrow("No agent found for repo: nope");
   });
 
   it("removes an agent from state", () => {

@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { generatePlist, PLIST_LABEL } from "./daemon.js";
 
+describe("PLIST_LABEL", () => {
+  it("has the expected value", () => {
+    expect(PLIST_LABEL).toBe("com.denguinho.repo-expert-watch");
+  });
+});
+
 describe("generatePlist", () => {
   const config = {
     workingDirectory: "/home/user/repos/my-app",

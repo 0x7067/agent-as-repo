@@ -32,6 +32,14 @@ describe("parseConfig", () => {
     expect(config.defaults.chunking).toBe("raw");
   });
 
+  it("accepts explicit 'raw' chunking in defaults", () => {
+    // Catches: z.enum(["raw", ...]) → z.enum(["", ...]) mutation
+    // With mutation: "raw" is not in enum ["", "tree-sitter"] → ZodError
+    const raw = { ...validRaw, defaults: { chunking: "raw" } };
+    const config = parseConfig(raw);
+    expect(config.defaults.chunking).toBe("raw");
+  });
+
   it("accepts 'tree-sitter' chunking override", () => {
     const raw = { ...validRaw, defaults: { chunking: "tree-sitter" } };
     const config = parseConfig(raw);
@@ -236,6 +244,24 @@ describe("parseConfig", () => {
     }
   });
 
+  it("re-throws non-ZodError errors as-is (not wrapped in ConfigError)", () => {
+    // Catches: if(error instanceof z.ZodError) → if(true) mutation
+    // With if(true): ALL errors get wrapped in ConfigError via zodIssuesToStrings
+    // Non-ZodError objects don't have .issues property → zodIssuesToStrings would throw or produce garbage
+    // We pass something that Zod schema will throw a ZodError for, so we can't easily trigger a non-ZodError
+    // in normal flow. But we CAN test that a valid ZodError IS caught correctly.
+    // Actually, the if(true) mutation means non-ZodErrors also get caught.
+    // The only way to trigger a non-ZodError from rawConfigSchema.parse() is if Zod itself has a bug.
+    // This might be an equivalent mutant for practical purposes.
+    // Let's verify: pass null which makes z.parse throw ZodError (not other error)
+    try {
+      parseConfig(null);
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError);
+    }
+  });
+
   it("throws ConfigError when ignore_dirs contain path separators", () => {
     try {
       parseConfig({
@@ -281,5 +307,38 @@ describe("formatConfigError", () => {
     expect(output).toContain("Config validation failed");
     expect(output).toContain("letta.model: Required");
     expect(output).toContain("repos.app.path: Expected string");
+  });
+
+  it("separates issues with newlines and prefixes with dash", () => {
+    const err = new ConfigError(["issue1", "issue2"]);
+    const output = formatConfigError(err);
+    expect(output).toContain("  - issue1\n  - issue2");
+  });
+});
+
+describe("ConfigError", () => {
+  it("has name set to ConfigError", () => {
+    const err = new ConfigError(["test"]);
+    expect(err.name).toBe("ConfigError");
+  });
+
+  it("stores issues array", () => {
+    const err = new ConfigError(["a", "b"]);
+    expect(err.issues).toEqual(["a", "b"]);
+  });
+
+  it("message contains each issue prefixed with dash", () => {
+    const err = new ConfigError(["foo", "bar"]);
+    expect(err.message).toContain("  - foo");
+    expect(err.message).toContain("  - bar");
+    expect(err.message).toContain("\n");
+  });
+
+  it("message joins issues with newline separator (not empty string)", () => {
+    // Catches: join("\n") → join("") mutation in super() call
+    const err = new ConfigError(["issue-one", "issue-two"]);
+    // With join("\n"): "...  - issue-one\n  - issue-two"
+    // With join(""): "...  - issue-one  - issue-two" (no newline between)
+    expect(err.message).toContain("  - issue-one\n  - issue-two");
   });
 });

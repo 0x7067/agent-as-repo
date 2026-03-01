@@ -68,4 +68,53 @@ describe("checkMcpEntry", () => {
     const result = checkMcpEntry(validEntry, "/different/path.ts");
     expect(result.issues).toEqual(expect.arrayContaining([expect.stringContaining("mismatch")]));
   });
+
+  it("reports missing base URL", () => {
+    const entry = { ...validEntry, env: { LETTA_API_KEY: "sk-test" } };
+    const result = checkMcpEntry(entry, "/abs/path/mcp-server.ts");
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([expect.stringContaining("LETTA_BASE_URL is missing")]));
+  });
+
+  it("reports wrong first arg (not tsx)", () => {
+    const entry = { ...validEntry, args: ["node", "/abs/path/mcp-server.ts"] };
+    const result = checkMcpEntry(entry, "/abs/path/mcp-server.ts");
+    expect(result.issues).toEqual(expect.arrayContaining([expect.stringContaining("tsx")]));
+  });
+
+  it("timeout exactly 60 is not flagged", () => {
+    const entry = { ...validEntry, timeout: 60 };
+    const result = checkMcpEntry(entry, "/abs/path/mcp-server.ts");
+    expect(result.issues).not.toEqual(expect.arrayContaining([expect.stringContaining("Timeout")]));
+  });
+
+  it("timeout 59 is flagged", () => {
+    const entry = { ...validEntry, timeout: 59 };
+    const result = checkMcpEntry(entry, "/abs/path/mcp-server.ts");
+    expect(result.issues).toEqual(expect.arrayContaining([expect.stringContaining("Timeout")]));
+  });
+
+  it("reports wrong first arg with actual value (not the fallback)", () => {
+    const entry = { ...validEntry, args: ["node", "/abs/path/mcp-server.ts"] };
+    const result = checkMcpEntry(entry, "/abs/path/mcp-server.ts");
+    const argIssue = result.issues.find((i) => i.includes("First arg"));
+    expect(argIssue).toBeDefined();
+    expect(argIssue).toContain('"node"');
+    expect(argIssue).not.toContain("(missing)");
+  });
+
+  it("handles entry with undefined env (optional chaining)", () => {
+    const entry = { command: "npx", args: ["tsx", "/path"], timeout: 300 } as any;
+    const result = checkMcpEntry(entry, "/path");
+    expect(result.ok).toBe(false);
+    expect(result.issues.length).toBeGreaterThan(0);
+  });
+
+  it("timeout issue message includes actual timeout value", () => {
+    const entry = { ...validEntry, timeout: 45 };
+    const result = checkMcpEntry(entry, "/abs/path/mcp-server.ts");
+    const timeoutIssue = result.issues.find((i) => i.includes("Timeout"));
+    expect(timeoutIssue).toBeDefined();
+    expect(timeoutIssue).toContain("45s");
+  });
 });
