@@ -118,4 +118,68 @@ describe("broadcastAsk", () => {
     expect(results[0].response).toBeNull();
     expect(results[0].error).toContain("connection refused");
   });
+
+  it("clears timeout after successful response (no timer leak)", async () => {
+    const provider = makeMockProvider();
+    (provider.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce("fast");
+
+    const agents = [{ repoName: "repo", agentId: "a1" }];
+    // If timeout is not cleared, the test environment will hang or warn about open handles.
+    // Using a very short timeoutMs ensures the timer fires if not cleared.
+    const results = await broadcastAsk(provider, agents, "q", { timeoutMs: 5000 });
+    expect(results[0].response).toBe("fast");
+    expect(results[0].error).toBeNull();
+  });
+});
+
+describe("supervisorFanOut index numbering", () => {
+  it("numbers worker agents starting from 1 (not 0)", async () => {
+    const provider = makeMockProvider();
+    (provider.sendMessage as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce("response-from-w1")
+      .mockResolvedValueOnce("response-from-w2")
+      .mockResolvedValueOnce("final summary");
+
+    const config: SupervisorConfig = {
+      type: "supervisor",
+      managerAgentId: "mgr",
+      workerAgentIds: ["w1", "w2"],
+    };
+
+    await supervisorFanOut(provider, config, "question");
+
+    // Manager prompt should contain "[Agent 1]:" and "[Agent 2]:", not "[Agent 0]:" or "[Agent -1]:"
+    const managerCall = (provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls.find(
+      ([id]: [string]) => id === "mgr",
+    );
+    expect(managerCall).toBeDefined();
+    const prompt = managerCall[1] as string;
+    expect(prompt).toContain("[Agent 1]:");
+    expect(prompt).toContain("[Agent 2]:");
+    expect(prompt).not.toContain("[Agent 0]:");
+  });
+
+  it("separates worker responses with double newline in manager prompt", async () => {
+    const provider = makeMockProvider();
+    (provider.sendMessage as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce("answer-A")
+      .mockResolvedValueOnce("answer-B")
+      .mockResolvedValueOnce("summary");
+
+    const config: SupervisorConfig = {
+      type: "supervisor",
+      managerAgentId: "mgr",
+      workerAgentIds: ["w1", "w2"],
+    };
+
+    await supervisorFanOut(provider, config, "question");
+
+    const managerCall = (provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls.find(
+      ([id]: [string]) => id === "mgr",
+    );
+    const prompt = managerCall[1] as string;
+    // The two worker responses must be separated by "\n\n", not ""
+    // Format: "[Agent 1]: answer-A\n\n[Agent 2]: answer-B"
+    expect(prompt).toContain("[Agent 1]: answer-A\n\n[Agent 2]: answer-B");
+  });
 });

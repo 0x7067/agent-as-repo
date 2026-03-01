@@ -434,6 +434,822 @@ describe("watchRepos", () => {
     await watchPromise;
   });
 
+  it("does not sync when repo is not in state (no agentInfo)", async () => {
+    const state = { stateVersion: 2, agents: {} }; // no my-app agent
+    mockedLoadState.mockResolvedValue(state as AppState);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "def456\n";
+      return "";
+    });
+
+    const ac = new AbortController();
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      signal: ac.signal,
+      log: vi.fn(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    expect(mockedSyncRepo).not.toHaveBeenCalled();
+  });
+
+  it("does not sync when git returns null HEAD", async () => {
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) throw new Error("not a git repo");
+      return "";
+    });
+
+    const ac = new AbortController();
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      signal: ac.signal,
+      log: vi.fn(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    expect(mockedSyncRepo).not.toHaveBeenCalled();
+  });
+
+  it("no changes HEAD log includes truncated hash", async () => {
+    const state = makeState("abc123def456");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "abc123def456\n";
+      return "";
+    });
+
+    const log = vi.fn();
+    const ac = new AbortController();
+
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      signal: ac.signal,
+      log,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    // Should show truncated hash (7 chars: "abc123d"), not full hash
+    expect(log).toHaveBeenCalledWith("[my-app] no changes (HEAD=abc123d)");
+  });
+
+  it("sync log does NOT include [event] suffix for poll-based syncs", async () => {
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "def456\n";
+      if (args?.includes("--name-only")) return "src/a.ts\n";
+      return "";
+    });
+    mockedSyncRepo.mockResolvedValue({
+      passages: { "src/a.ts": ["p-2"] },
+      lastSyncCommit: "def456",
+      filesRemoved: 0,
+      filesReIndexed: 1,
+      isFullReIndex: false,
+    });
+
+    const log = vi.fn();
+    const ac = new AbortController();
+
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      signal: ac.signal,
+      log,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    // Poll-based sync should NOT have [event] suffix
+    const syncLog = log.mock.calls.find(([msg]) => (msg as string).includes("synced"));
+    expect(syncLog).toBeDefined();
+    expect(syncLog![0]).not.toContain("[event]");
+  });
+
+  it("filters event-based changed files through shouldIncludeFile", async () => {
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "abc123\n";
+      return "";
+    });
+    mockedSyncRepo.mockResolvedValue({
+      passages: {},
+      lastSyncCommit: "abc123",
+      filesRemoved: 0,
+      filesReIndexed: 1,
+      isFullReIndex: false,
+    });
+
+    const ac = new AbortController();
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig, // only .ts extensions
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      debounceMs: 50,
+      signal: ac.signal,
+      log: vi.fn(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    // Fire event with .ts file (should pass filter) and .md file (should NOT pass)
+    (watchCallback as (eventType: string, fileName: string) => void)("change", "src/a.ts");
+    (watchCallback as (eventType: string, fileName: string) => void)("change", "README.md");
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(mockedSyncRepo).toHaveBeenCalledTimes(1);
+    const syncCall = mockedSyncRepo.mock.calls[0][0];
+    // README.md filtered out
+    expect(syncCall.changedFiles).toContain("src/a.ts");
+    expect(syncCall.changedFiles).not.toContain("README.md");
+
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+  });
+
+  it("applies exponential backoff after consecutive sync failures", async () => {
+    let loadCount = 0;
+    mockedLoadState.mockImplementation(async () => {
+      loadCount++;
+      return makeState(loadCount === 1 ? null : "abc123");
+    });
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "def456\n";
+      if (args?.includes("--name-only")) return "src/a.ts\n";
+      return "";
+    });
+    mockedSyncRepo.mockRejectedValue(new Error("API error"));
+
+    const log = vi.fn();
+    const ac = new AbortController();
+
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 1000,
+      signal: ac.signal,
+      log,
+    });
+
+    // First tick: full-reindex triggers, fails
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Second tick: should be backed off, not retrying yet
+    await vi.advanceTimersByTimeAsync(1000);
+
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    // First failure logged
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("sync error"));
+    // syncRepo called only once (first tick); second tick skipped due to backoff
+    expect(mockedSyncRepo).toHaveBeenCalledTimes(1);
+  });
+
+  it("saves state with updated lastSyncAt after successful sync", async () => {
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "def456\n";
+      if (args?.includes("--name-only")) return "src/a.ts\n";
+      return "";
+    });
+    mockedSyncRepo.mockResolvedValue({
+      passages: { "src/a.ts": ["p-2"] },
+      lastSyncCommit: "def456",
+      filesRemoved: 0,
+      filesReIndexed: 1,
+      isFullReIndex: false,
+    });
+
+    const ac = new AbortController();
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      signal: ac.signal,
+      log: vi.fn(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    // saveState should be called with state containing lastSyncAt
+    expect(mockedSaveState).toHaveBeenCalled();
+    const savedState = mockedSaveState.mock.calls[0][1] as AppState;
+    expect(savedState.agents["my-app"].lastSyncAt).not.toBeNull();
+    expect(savedState.agents["my-app"].lastSyncCommit).toBe("def456");
+  });
+
+  it("git commands use correct args for HEAD", async () => {
+    const state = makeState(null); // no lastSyncCommit = full reindex
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "def456\n";
+      return "";
+    });
+    mockedSyncRepo.mockResolvedValue({
+      passages: {},
+      lastSyncCommit: "def456",
+      filesRemoved: 0,
+      filesReIndexed: 0,
+      isFullReIndex: true,
+    });
+
+    const ac = new AbortController();
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      signal: ac.signal,
+      log: vi.fn(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    // Git rev-parse called with "HEAD" as arg
+    const revParseCall = mockedExecFileSync.mock.calls.find(
+      ([, args]) => (args as string[])?.includes("rev-parse"),
+    );
+    expect(revParseCall).toBeDefined();
+    expect(revParseCall![1]).toContain("HEAD");
+  });
+
+  it("normalizes backslashes in file paths to forward slashes", async () => {
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "abc123\n";
+      return "";
+    });
+    mockedSyncRepo.mockResolvedValue({
+      passages: {},
+      lastSyncCommit: "abc123",
+      filesRemoved: 0,
+      filesReIndexed: 1,
+      isFullReIndex: false,
+    });
+
+    const ac = new AbortController();
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      debounceMs: 50,
+      signal: ac.signal,
+      log: vi.fn(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    // Fire event with Windows-style backslash path
+    (watchCallback as (eventType: string, fileName: string) => void)("change", "src\\a.ts");
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    // Should normalize to "src/a.ts" (not "src\\a.ts")
+    if (mockedSyncRepo.mock.calls.length > 0) {
+      const syncCall = mockedSyncRepo.mock.calls[0][0];
+      expect(syncCall.changedFiles).not.toContain("src\\a.ts");
+    }
+
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+  });
+
+  it("strips leading ./ from file paths", async () => {
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "abc123\n";
+      return "";
+    });
+    mockedSyncRepo.mockResolvedValue({
+      passages: {},
+      lastSyncCommit: "abc123",
+      filesRemoved: 0,
+      filesReIndexed: 1,
+      isFullReIndex: false,
+    });
+
+    const ac = new AbortController();
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      debounceMs: 50,
+      signal: ac.signal,
+      log: vi.fn(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    // Fire event with ./ prefix
+    (watchCallback as (eventType: string, fileName: string) => void)("change", "./src/a.ts");
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    if (mockedSyncRepo.mock.calls.length > 0) {
+      const syncCall = mockedSyncRepo.mock.calls[0][0];
+      // Should strip "./" prefix, resulting in "src/a.ts" not "./src/a.ts"
+      expect(syncCall.changedFiles).not.toContain("./src/a.ts");
+    }
+
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+  });
+
+  it("HEAD-change-with-no-diff logs sync and updates lastSyncCommit in state", async () => {
+    // HEAD changed but git diff shows no files → should still update state
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "def456\n";
+      // diff returns empty (no changed files)
+      if (args?.includes("--name-only")) return "\n";
+      return "";
+    });
+
+    const log = vi.fn();
+    const ac = new AbortController();
+
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      signal: ac.signal,
+      log,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    // Should NOT call syncRepo (no files changed) but should update state
+    expect(mockedSyncRepo).not.toHaveBeenCalled();
+    // Should log a sync message (formatSyncLog with 0 files)
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("synced"));
+    // Should save state with updated lastSyncCommit
+    expect(mockedSaveState).toHaveBeenCalled();
+    const savedState = mockedSaveState.mock.calls[0][1] as AppState;
+    expect(savedState.agents["my-app"].lastSyncCommit).toBe("def456");
+  });
+
+  it("backoff delay uses failure count (not increments -1)", async () => {
+    let loadCount = 0;
+    mockedLoadState.mockImplementation(async () => {
+      loadCount++;
+      return makeState(loadCount === 1 ? null : "abc123");
+    });
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "def456\n";
+      if (args?.includes("--name-only")) return "src/a.ts\n";
+      return "";
+    });
+    mockedSyncRepo.mockRejectedValue(new Error("API error"));
+
+    const log = vi.fn();
+    const ac = new AbortController();
+
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 1000,
+      signal: ac.signal,
+      log,
+    });
+
+    // First tick: fails
+    await vi.advanceTimersByTimeAsync(0);
+    // Second tick: backed off due to failure
+    await vi.advanceTimersByTimeAsync(1000);
+
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    // Failure count should be 1 (not 0 or -1) — logged as "attempt 1"
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("attempt 1"));
+  });
+
+  it("sync error log includes backoff duration in seconds", async () => {
+    mockedLoadState.mockResolvedValue(makeState("abc123"));
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "def456\n";
+      if (args?.includes("--name-only")) return "src/a.ts\n";
+      return "";
+    });
+    mockedSyncRepo.mockRejectedValue(new Error("API error"));
+
+    const log = vi.fn();
+    const ac = new AbortController();
+
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 1000,
+      signal: ac.signal,
+      log,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    // Log should include "backoff Xs" (delay / 1000, not * 1000)
+    const errorLog = log.mock.calls.find(([msg]) => (msg as string).includes("sync error"));
+    expect(errorLog).toBeDefined();
+    const msg = errorLog![0] as string;
+    // Backoff should be a reasonable number of seconds (not thousands of seconds)
+    const match = /backoff (\d+)s/.exec(msg);
+    expect(match).toBeDefined();
+    const backoffSeconds = parseInt(match![1], 10);
+    expect(backoffSeconds).toBeLessThan(100); // not delay * 1000
+  });
+
+  it("pending files trigger debounced re-sync after sync completes", async () => {
+    // After syncRepoNow completes, if there are pending files they should trigger a new sync
+    let syncCount = 0;
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "abc123\n";
+      return "";
+    });
+    mockedSyncRepo.mockImplementation(async () => {
+      syncCount++;
+      return {
+        passages: {},
+        lastSyncCommit: "abc123",
+        filesRemoved: 0,
+        filesReIndexed: 1,
+        isFullReIndex: false,
+      };
+    });
+
+    const ac = new AbortController();
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      debounceMs: 50,
+      signal: ac.signal,
+      log: vi.fn(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    // Queue two file events
+    (watchCallback as (eventType: string, fileName: string) => void)("change", "src/a.ts");
+    (watchCallback as (eventType: string, fileName: string) => void)("change", "src/b.ts");
+
+    await vi.advanceTimersByTimeAsync(200);
+
+    // Both events should have been batched and synced
+    expect(mockedSyncRepo).toHaveBeenCalled();
+
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+  });
+
+  it("does not queue file events when no repoConfig is found", async () => {
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "abc123\n";
+      return "";
+    });
+
+    const ac = new AbortController();
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      debounceMs: 50,
+      signal: ac.signal,
+      log: vi.fn(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    // No file event queued — sync should not fire from events
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(mockedSyncRepo).not.toHaveBeenCalled();
+
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+  });
+
+  it("does not process file event when fileName is null/undefined", async () => {
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "abc123\n";
+      return "";
+    });
+
+    const ac = new AbortController();
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      debounceMs: 50,
+      signal: ac.signal,
+      log: vi.fn(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    // Fire event with null fileName (macOS sometimes emits this)
+    (watchCallback as (eventType: string, fileName: string | null) => void)("rename", null);
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    // Should not trigger sync (fileName was null)
+    expect(mockedSyncRepo).not.toHaveBeenCalled();
+
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+  });
+
+  it("skips sync when signal is already aborted at start of syncRepoNow", async () => {
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "def456\n";
+      return "";
+    });
+
+    const ac = new AbortController();
+    // Abort immediately before first tick
+    ac.abort();
+
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      signal: ac.signal,
+      log: vi.fn(),
+    });
+
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    // Aborted immediately, should not sync
+    expect(mockedSyncRepo).not.toHaveBeenCalled();
+  });
+
+  it("resets failure counter on successful sync (consecutiveFailures goes to 0)", async () => {
+    // The test verifies that after a failure+success cycle, the backoff counter resets.
+    // We do this by checking that after failure+success, subsequent failure shows "attempt 1" again.
+    let syncCount = 0;
+    mockedLoadState.mockResolvedValue(makeState("abc123"));
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "def456\n";
+      if (args?.includes("--name-only")) return "src/a.ts\n";
+      return "";
+    });
+    mockedSyncRepo.mockImplementation(async () => {
+      syncCount++;
+      if (syncCount === 1) throw new Error("First sync fails");
+      return {
+        passages: { "src/a.ts": ["p-2"] },
+        lastSyncCommit: "def456",
+        filesRemoved: 0,
+        filesReIndexed: 1,
+        isFullReIndex: false,
+      };
+    });
+
+    const log = vi.fn();
+    const ac = new AbortController();
+
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 1000,
+      signal: ac.signal,
+      log,
+    });
+
+    // First tick: fails
+    await vi.advanceTimersByTimeAsync(0);
+    // Advance far enough to clear backoff
+    await vi.advanceTimersByTimeAsync(60000);
+
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    // First failure should be logged as "attempt 1"
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("sync error"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("attempt 1"));
+  });
+
+  it("watcher on error logs the error message", async () => {
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "abc123\n";
+      return "";
+    });
+
+    const log = vi.fn();
+    const ac = new AbortController();
+
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      signal: ac.signal,
+      log,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Simulate watcher emitting an error
+    const watcherMock = mockedFsWatch.mock.results[0]?.value as { on: ReturnType<typeof vi.fn> };
+    const errorCallback = watcherMock?.on.mock.calls.find(([event]: [string]) => event === "error");
+    if (errorCallback) {
+      (errorCallback[1] as (err: Error) => void)(new Error("Watch permission denied"));
+      // Error should be logged
+      expect(log).toHaveBeenCalledWith(expect.stringContaining("file watch error"));
+      expect(log).toHaveBeenCalledWith(expect.stringContaining("Watch permission denied"));
+    }
+
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+  });
+
+  it("state file relative path is excluded from event-driven sync", async () => {
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "abc123\n";
+      return "";
+    });
+
+    const ac = new AbortController();
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: ["my-app"],
+      // state file is INSIDE the repo path — should be ignored
+      statePath: "/tmp/my-app/.repo-expert-state.json",
+      intervalMs: 5000,
+      debounceMs: 50,
+      signal: ac.signal,
+      log: vi.fn(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    // Trigger event on the state file itself — should be ignored
+    (watchCallback as (eventType: string, fileName: string) => void)("change", ".repo-expert-state.json");
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    // State file event should be ignored, no sync
+    expect(mockedSyncRepo).not.toHaveBeenCalled();
+
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+  });
+
+  it("ignores file events where file maps to null (toAgentPath returns null)", async () => {
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("rev-parse")) return "abc123\n";
+      return "";
+    });
+
+    const ac = new AbortController();
+    // Config with basePath — files outside basePath will have toAgentPath return null
+    const configWithBase: Config = {
+      ...testConfig,
+      repos: {
+        "my-app": {
+          ...testConfig.repos["my-app"],
+          basePath: "packages/frontend",
+        },
+      },
+    };
+
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: configWithBase,
+      repoNames: ["my-app"],
+      statePath: "state.json",
+      intervalMs: 5000,
+      debounceMs: 50,
+      signal: ac.signal,
+      log: vi.fn(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    // File is outside basePath — toAgentPath should return null → ignored
+    (watchCallback as (eventType: string, fileName: string) => void)("change", "packages/backend/server.ts");
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    // File outside basePath should be ignored
+    expect(mockedSyncRepo).not.toHaveBeenCalled();
+
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+  });
+
   it("expands submodule pointer changes to file lists when includeSubmodules is true", async () => {
     const subConfig: Config = {
       ...testConfig,

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { registerTools } from "./mcp-server.js";
+import { registerTools, parsePositiveInt, withTimeout } from "./mcp-server.js";
 import type { AgentProvider } from "./shell/provider.js";
 import type { AdminPort } from "./ports/admin.js";
 
@@ -57,6 +57,64 @@ function extractToolHandler(server: McpServer, toolName: string): ToolHandler {
   return (args) => tool.handler(args, {});
 }
 
+describe("parsePositiveInt", () => {
+  it("returns fallback when raw is undefined", () => {
+    expect(parsePositiveInt(undefined, 60_000)).toBe(60_000);
+  });
+
+  it("returns fallback when raw is empty string", () => {
+    expect(parsePositiveInt("", 60_000)).toBe(60_000);
+  });
+
+  it("returns fallback when raw is NaN", () => {
+    expect(parsePositiveInt("abc", 60_000)).toBe(60_000);
+  });
+
+  it("returns fallback when raw is zero", () => {
+    expect(parsePositiveInt("0", 60_000)).toBe(60_000);
+  });
+
+  it("returns fallback when raw is negative", () => {
+    expect(parsePositiveInt("-5", 60_000)).toBe(60_000);
+  });
+
+  it("returns parsed int when raw is a positive integer string", () => {
+    expect(parsePositiveInt("30000", 60_000)).toBe(30_000);
+  });
+
+  it("returns parsed int when raw is '1'", () => {
+    expect(parsePositiveInt("1", 60_000)).toBe(1);
+  });
+});
+
+describe("withTimeout", () => {
+  it("resolves with the function result when it completes in time", async () => {
+    const result = await withTimeout("test", 1000, async () => "ok");
+    expect(result).toBe("ok");
+  });
+
+  it("rejects with a timeout error when function exceeds timeoutMs", async () => {
+    await expect(
+      withTimeout("my-op", 10, () => new Promise((resolve) => setTimeout(resolve, 5000))),
+    ).rejects.toThrow("my-op timed out after 10ms");
+  });
+
+  it("clears timeout after function resolves (no timer leak)", async () => {
+    // If timeout is not cleared, the test would run indefinitely after resolving
+    const start = Date.now();
+    await withTimeout("fast", 500, async () => "done");
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+
+  it("calls clearTimeout with the actual timer ID when function resolves", async () => {
+    const spy = vi.spyOn(global, "clearTimeout");
+    await withTimeout("test", 5000, async () => "done");
+    expect(spy).toHaveBeenCalledOnce();
+    expect(spy.mock.calls[0][0]).toBeDefined();
+    spy.mockRestore();
+  });
+});
+
 describe("MCP Server tools", () => {
   let server: McpServer;
   let provider: AgentProvider;
@@ -67,6 +125,20 @@ describe("MCP Server tools", () => {
     provider = makeMockProvider();
     admin = makeMockAdmin();
     registerTools(server, provider, admin);
+  });
+
+  it("content type is 'text' on success", async () => {
+    const handler = extractToolHandler(server, "letta_list_agents");
+    const result = await handler({});
+    expect(result.content[0].type).toBe("text");
+  });
+
+  it("content type is 'text' on error", async () => {
+    (admin.listAgents as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("boom"));
+    const handler = extractToolHandler(server, "letta_list_agents");
+    const result = await handler({});
+    expect(result.content[0].type).toBe("text");
+    expect(result.isError).toBe(true);
   });
 
   it("registers all 8 tools", () => {
@@ -156,6 +228,137 @@ describe("MCP Server tools", () => {
         overrideModel: "openai/gpt-4.1-mini",
         maxSteps: 3,
       });
+    });
+
+    it("does not set overrideModel when override_model is absent", async () => {
+      const handler = extractToolHandler(server, "letta_send_message");
+      await handler({ agent_id: "agent-1", content: "Hi" });
+      const callArgs = (provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(callArgs[2]).toEqual({});
+      expect(callArgs[2].overrideModel).toBeUndefined();
+    });
+
+    it("does not set maxSteps when max_steps is absent", async () => {
+      const handler = extractToolHandler(server, "letta_send_message");
+      await handler({ agent_id: "agent-1", content: "Hi" });
+      const callArgs = (provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(callArgs[2].maxSteps).toBeUndefined();
+    });
+
+    it("uses LETTA_ASK_TIMEOUT_MS env var when timeout_ms not provided", async () => {
+      const originalEnv = process.env["LETTA_ASK_TIMEOUT_MS"];
+      try {
+        process.env["LETTA_ASK_TIMEOUT_MS"] = "5000";
+        // Make sendMessage hang to verify timeout is used
+        let resolveHang: () => void;
+        (provider.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+          () => new Promise<string>((resolve) => { resolveHang = () => resolve(""); }),
+        );
+        const handler = extractToolHandler(server, "letta_send_message");
+        const resultPromise = handler({ agent_id: "agent-1", content: "Hi" });
+        // The tool should complete (env var parsed correctly as 5000ms; we won't wait that long)
+        // Just verify sending works with the env var set (no crash on parsing)
+        resolveHang!();
+        const result = await resultPromise;
+        expect(result.isError).toBeFalsy();
+      } finally {
+        if (originalEnv === undefined) {
+          delete process.env["LETTA_ASK_TIMEOUT_MS"];
+        } else {
+          process.env["LETTA_ASK_TIMEOUT_MS"] = originalEnv;
+        }
+      }
+    });
+
+    it("falls back to default timeout when LETTA_ASK_TIMEOUT_MS is invalid", async () => {
+      const originalEnv = process.env["LETTA_ASK_TIMEOUT_MS"];
+      try {
+        process.env["LETTA_ASK_TIMEOUT_MS"] = "notanumber";
+        const handler = extractToolHandler(server, "letta_send_message");
+        const result = await handler({ agent_id: "agent-1", content: "Hi" });
+        expect(result.content[0].text).toBe("Hello from agent");
+      } finally {
+        if (originalEnv === undefined) {
+          delete process.env["LETTA_ASK_TIMEOUT_MS"];
+        } else {
+          process.env["LETTA_ASK_TIMEOUT_MS"] = originalEnv;
+        }
+      }
+    });
+
+    it("options object has no overrideModel property key when override_model is absent", async () => {
+      const handler = extractToolHandler(server, "letta_send_message");
+      await handler({ agent_id: "agent-1", content: "Hi" });
+      const callArgs = (provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect("overrideModel" in (callArgs[2] as object)).toBe(false);
+    });
+
+    it("options object has no maxSteps property key when max_steps is absent", async () => {
+      const handler = extractToolHandler(server, "letta_send_message");
+      await handler({ agent_id: "agent-1", content: "Hi" });
+      const callArgs = (provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect("maxSteps" in (callArgs[2] as object)).toBe(false);
+    });
+
+    it("explicit timeout_ms wins over LETTA_ASK_TIMEOUT_MS env var", async () => {
+      const origEnv = process.env["LETTA_ASK_TIMEOUT_MS"];
+      process.env["LETTA_ASK_TIMEOUT_MS"] = "1"; // 1ms — would cause timeout if used
+      try {
+        (provider.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+          () => new Promise<string>((resolve) => setTimeout(() => resolve("ok"), 20)),
+        );
+        const handler = extractToolHandler(server, "letta_send_message");
+        // Explicit 10s timeout: should NOT time out even though env=1ms
+        const result = await handler({ agent_id: "agent-1", content: "Hi", timeout_ms: 10_000 });
+        expect(result.isError).toBeFalsy();
+      } finally {
+        if (origEnv === undefined) delete process.env["LETTA_ASK_TIMEOUT_MS"];
+        else process.env["LETTA_ASK_TIMEOUT_MS"] = origEnv;
+      }
+    });
+
+    it("reads timeout from LETTA_ASK_TIMEOUT_MS env var (not empty string key)", async () => {
+      const origEnv = process.env["LETTA_ASK_TIMEOUT_MS"];
+      process.env["LETTA_ASK_TIMEOUT_MS"] = "1"; // 1ms
+      try {
+        (provider.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+          () => new Promise<string>((resolve) => setTimeout(() => resolve("ok"), 50)),
+        );
+        const handler = extractToolHandler(server, "letta_send_message");
+        const result = await handler({ agent_id: "agent-1", content: "Hi" });
+        // With correct env var: 1ms timeout fires before 50ms response → isError
+        expect(result.isError).toBe(true);
+        expect(result.content[0].text).toContain("timed out");
+      } finally {
+        if (origEnv === undefined) delete process.env["LETTA_ASK_TIMEOUT_MS"];
+        else process.env["LETTA_ASK_TIMEOUT_MS"] = origEnv;
+      }
+    });
+
+    it("timeout error label includes override_model when provided (not 'agent-default')", async () => {
+      (provider.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+        () => new Promise<string>((resolve) => setTimeout(resolve, 5000)),
+      );
+      const handler = extractToolHandler(server, "letta_send_message");
+      const result = await handler({
+        agent_id: "agent-1",
+        content: "Hi",
+        override_model: "openai/gpt-4.1",
+        timeout_ms: 10,
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("openai/gpt-4.1");
+      expect(result.content[0].text).not.toContain("agent-default");
+    });
+
+    it("timeout error label uses 'agent-default' when override_model is absent", async () => {
+      (provider.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+        () => new Promise<string>((resolve) => setTimeout(resolve, 5000)),
+      );
+      const handler = extractToolHandler(server, "letta_send_message");
+      const result = await handler({ agent_id: "agent-1", content: "Hi", timeout_ms: 10 });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("agent-default");
     });
   });
 

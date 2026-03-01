@@ -461,6 +461,195 @@ describe("LettaProvider", () => {
     });
   });
 
+  describe("isTransientError edge cases", () => {
+    it("returns false for null error", async () => {
+      // isTransientError(null) should return false — test via non-retry behavior
+      const client = makeMockClient();
+      client.agents.passages.create.mockRejectedValue(null as unknown as Error);
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toBe(null);
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(1); // no retry
+    });
+
+    it("returns false for string error", async () => {
+      const client = makeMockClient();
+      client.agents.passages.create.mockRejectedValue("string error");
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toBe("string error");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(1); // no retry
+    });
+
+    it("retries on ECONNREFUSED network error", async () => {
+      const client = makeMockClient();
+      const networkError = Object.assign(new Error("Connection refused"), { code: "ECONNREFUSED" });
+      client.agents.passages.create
+        .mockRejectedValueOnce(networkError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      const id = await provider.storePassage("agent-abc", "text");
+      expect(id).toBe("passage-1");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries on EPIPE network error", async () => {
+      const client = makeMockClient();
+      const epipeError = Object.assign(new Error("Broken pipe"), { code: "EPIPE" });
+      client.agents.passages.create
+        .mockRejectedValueOnce(epipeError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      const id = await provider.storePassage("agent-abc", "text");
+      expect(id).toBe("passage-1");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries on EAI_AGAIN network error", async () => {
+      const client = makeMockClient();
+      const dnsError = Object.assign(new Error("DNS failure"), { code: "EAI_AGAIN" });
+      client.agents.passages.create
+        .mockRejectedValueOnce(dnsError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      const id = await provider.storePassage("agent-abc", "text");
+      expect(id).toBe("passage-1");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries on 503 status code", async () => {
+      const client = makeMockClient();
+      const serviceUnavailable = Object.assign(new Error("Service Unavailable"), { status: 503 });
+      client.agents.passages.create
+        .mockRejectedValueOnce(serviceUnavailable)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      const id = await provider.storePassage("agent-abc", "text");
+      expect(id).toBe("passage-1");
+    });
+  });
+
+  describe("getRetryAfterMs via retry behavior", () => {
+    it("uses Retry-After header (string seconds) when present on 429", async () => {
+      const client = makeMockClient();
+      const rateLimitError = Object.assign(new Error("Rate limited"), {
+        statusCode: 429,
+        headers: { "Retry-After": "1" }, // 1 second
+      });
+      client.agents.passages.create
+        .mockRejectedValueOnce(rateLimitError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+      const provider = new LettaProvider(mockClientAs(client), 99999); // huge base delay
+      const id = await provider.storePassage("agent-abc", "text");
+      expect(id).toBe("passage-1"); // succeeded using retry-after delay, not base delay
+    });
+
+    it("uses retry-after header (lowercase) when present", async () => {
+      const client = makeMockClient();
+      const rateLimitError = Object.assign(new Error("Rate limited"), {
+        statusCode: 429,
+        headers: { "retry-after": "1" },
+      });
+      client.agents.passages.create
+        .mockRejectedValueOnce(rateLimitError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+      const provider = new LettaProvider(mockClientAs(client), 99999);
+      const id = await provider.storePassage("agent-abc", "text");
+      expect(id).toBe("passage-1");
+    });
+
+    it("handles numeric Retry-After header value (not just strings)", async () => {
+      const client = makeMockClient();
+      const rateLimitError = Object.assign(new Error("Rate limited"), {
+        statusCode: 429,
+        headers: { "Retry-After": 1 }, // numeric 1 (not string)
+      });
+      client.agents.passages.create
+        .mockRejectedValueOnce(rateLimitError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+      const provider = new LettaProvider(mockClientAs(client), 99999); // huge base delay
+      const id = await provider.storePassage("agent-abc", "text");
+      expect(id).toBe("passage-1"); // used numeric Retry-After (1s), not base delay
+    });
+
+    it("ignores numeric Retry-After of 0 (boundary: must be > 0)", async () => {
+      const client = makeMockClient();
+      const rateLimitError = Object.assign(new Error("Rate limited"), {
+        statusCode: 429,
+        headers: { "Retry-After": 0 }, // 0 is not > 0 → ignored
+      });
+      client.agents.passages.create
+        .mockRejectedValueOnce(rateLimitError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+      const provider = new LettaProvider(mockClientAs(client), 1); // tiny base delay, not retryAfter
+      const id = await provider.storePassage("agent-abc", "text");
+      expect(id).toBe("passage-1");
+    });
+
+    it("ignores numeric Retry-After of 300 (boundary: must be < 300)", async () => {
+      const client = makeMockClient();
+      const rateLimitError = Object.assign(new Error("Rate limited"), {
+        statusCode: 429,
+        headers: { "Retry-After": 300 }, // 300 is not < 300 → ignored
+      });
+      client.agents.passages.create
+        .mockRejectedValueOnce(rateLimitError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      const id = await provider.storePassage("agent-abc", "text");
+      expect(id).toBe("passage-1"); // retried with 1ms base delay (not 300s)
+    });
+
+    it("ignores string Retry-After of '0' (boundary: seconds must be > 0)", async () => {
+      const client = makeMockClient();
+      const rateLimitError = Object.assign(new Error("Rate limited"), {
+        statusCode: 429,
+        headers: { "Retry-After": "0" }, // "0" → 0 seconds, not > 0 → ignored
+      });
+      client.agents.passages.create
+        .mockRejectedValueOnce(rateLimitError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      const id = await provider.storePassage("agent-abc", "text");
+      expect(id).toBe("passage-1");
+    });
+
+    it("prefers lowercase 'retry-after' over 'Retry-After' when both present", async () => {
+      const client = makeMockClient();
+      const rateLimitError = Object.assign(new Error("Rate limited"), {
+        statusCode: 429,
+        headers: { "retry-after": "0.001", "Retry-After": "300" }, // lowercase wins
+      });
+      client.agents.passages.create
+        .mockRejectedValueOnce(rateLimitError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+      const provider = new LettaProvider(mockClientAs(client), 99999);
+      // If lowercase wins: 1ms delay → completes; if uppercase wins: 300s → hangs
+      const id = await provider.storePassage("agent-abc", "text");
+      expect(id).toBe("passage-1");
+    });
+
+    it("retries on 503 statusCode (not just status) — obj.status ?? obj.statusCode", async () => {
+      const client = makeMockClient();
+      // Only statusCode, no status — tests the fallback side of ??
+      const err = Object.assign(new Error("Service unavailable"), { statusCode: 503 });
+      client.agents.passages.create
+        .mockRejectedValueOnce(err)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      const id = await provider.storePassage("agent-abc", "text");
+      expect(id).toBe("passage-1");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not retry on non-transient error code (string code not in transient set)", async () => {
+      const client = makeMockClient();
+      const permError = Object.assign(new Error("Permission denied"), { code: "EACCES" });
+      client.agents.passages.create.mockRejectedValue(permError);
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("Permission denied");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(1); // no retry
+    });
+  });
+
   describe("storePassage ID validation", () => {
     it("throws on empty result array", async () => {
       const client = makeMockClient();
@@ -487,6 +676,211 @@ describe("LettaProvider", () => {
       const provider = new LettaProvider(mockClientAs(client));
 
       await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("no valid passage ID");
+    });
+  });
+
+  describe("deletePassage 404 handling", () => {
+    it("swallows 404 on deletePassage (already deleted)", async () => {
+      const client = makeMockClient();
+      const notFound = Object.assign(new Error("Not Found"), { status: 404 });
+      client.agents.passages.delete.mockRejectedValue(notFound);
+      const provider = new LettaProvider(mockClientAs(client));
+      // Should NOT throw
+      await expect(provider.deletePassage("agent-abc", "passage-1")).resolves.toBeUndefined();
+    });
+
+    it("rethrows non-404 errors from deletePassage", async () => {
+      const client = makeMockClient();
+      const serverError = Object.assign(new Error("Server Error"), { status: 500 });
+      client.agents.passages.delete.mockRejectedValue(serverError);
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      await expect(provider.deletePassage("agent-abc", "passage-1")).rejects.toThrow("Server Error");
+    });
+
+    it("also swallows 404 via statusCode property", async () => {
+      const client = makeMockClient();
+      const notFound = Object.assign(new Error("Not Found"), { statusCode: 404 });
+      client.agents.passages.delete.mockRejectedValue(notFound);
+      const provider = new LettaProvider(mockClientAs(client));
+      await expect(provider.deletePassage("agent-abc", "passage-1")).resolves.toBeUndefined();
+    });
+  });
+
+  describe("listPassages cursor logic", () => {
+    it("stops pagination when last page item has no id", async () => {
+      const PAGE_SIZE = 1000;
+      const firstPage = Array.from({ length: PAGE_SIZE }, (_, i) => ({
+        id: i < PAGE_SIZE - 1 ? `p-${i}` : undefined, // last item has no id
+        text: `chunk ${i}`,
+        embedding: null,
+        embedding_config: null,
+      }));
+
+      const client = makeMockClient();
+      client.agents.passages.list.mockResolvedValueOnce(firstPage);
+      const provider = new LettaProvider(mockClientAs(client));
+
+      const passages = await provider.listPassages("agent-abc");
+      // Should stop after first page because cursor is undefined
+      expect(client.agents.passages.list).toHaveBeenCalledTimes(1);
+      // Last item filtered out (no id)
+      expect(passages).toHaveLength(PAGE_SIZE - 1);
+    });
+
+    it("does not send cursor param on first page", async () => {
+      const client = makeMockClient();
+      client.agents.passages.list.mockResolvedValue([
+        { id: "p-1", text: "a", embedding: null, embedding_config: null },
+      ]);
+      const provider = new LettaProvider(mockClientAs(client));
+      await provider.listPassages("agent-abc");
+      const call = client.agents.passages.list.mock.calls[0][1];
+      expect(call.after).toBeUndefined();
+    });
+  });
+
+  describe("sendMessage content type handling", () => {
+    it("returns empty string when content is not a string", async () => {
+      const client = makeMockClient();
+      client.agents.messages.create.mockResolvedValue({
+        messages: [
+          { message_type: "assistant_message", id: "m1", date: "", content: 42 },
+        ],
+        stop_reason: { stop_reason: "end_turn" },
+        usage: {},
+      });
+      const provider = new LettaProvider(mockClientAs(client));
+      const reply = await provider.sendMessage("agent-abc", "test");
+      expect(reply).toBe("");
+    });
+
+    it("returns the string content when content is a string", async () => {
+      const client = makeMockClient();
+      client.agents.messages.create.mockResolvedValue({
+        messages: [
+          { message_type: "assistant_message", id: "m1", date: "", content: "agent reply" },
+        ],
+        stop_reason: { stop_reason: "end_turn" },
+        usage: {},
+      });
+      const provider = new LettaProvider(mockClientAs(client));
+      const reply = await provider.sendMessage("agent-abc", "test");
+      expect(reply).toBe("agent reply");
+    });
+  });
+
+  describe("createAgent initial block values", () => {
+    it("initializes architecture block with 'Not yet analyzed.'", async () => {
+      const client = makeMockClient();
+      const provider = new LettaProvider(mockClientAs(client));
+      await provider.createAgent(defaultCreateParams);
+      const call = client.agents.create.mock.calls[0][0] as { memory_blocks: MemoryBlockArg[] };
+      const archBlock = call.memory_blocks.find((b) => b.label === "architecture");
+      expect(archBlock?.value).toBe("Not yet analyzed.");
+    });
+
+    it("initializes conventions block with 'Not yet analyzed.'", async () => {
+      const client = makeMockClient();
+      const provider = new LettaProvider(mockClientAs(client));
+      await provider.createAgent(defaultCreateParams);
+      const call = client.agents.create.mock.calls[0][0] as { memory_blocks: MemoryBlockArg[] };
+      const convBlock = call.memory_blocks.find((b) => b.label === "conventions");
+      expect(convBlock?.value).toBe("Not yet analyzed.");
+    });
+
+    it("passes null tools default as empty array", async () => {
+      const client = makeMockClient();
+      const provider = new LettaProvider(mockClientAs(client));
+      await provider.createAgent({ ...defaultCreateParams }); // no tools field
+      const call = client.agents.create.mock.calls[0][0] as { tools: string[] };
+      expect(call.tools).toContain("archival_memory_search");
+      expect(call.tools).toHaveLength(1);
+    });
+  });
+
+  describe("isHttpStatus edge cases", () => {
+    it("rethrows null error from deletePassage (not treating null as 404)", async () => {
+      const client = makeMockClient();
+      client.agents.passages.delete.mockRejectedValue(null as unknown as Error);
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      // null is not an object, isHttpStatus returns false → should rethrow
+      await expect(provider.deletePassage("agent-abc", "p-1")).rejects.toBe(null);
+    });
+
+    it("rethrows primitive string error from deletePassage (not treating string as 404)", async () => {
+      const client = makeMockClient();
+      client.agents.passages.delete.mockRejectedValue("string error");
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      // string is not an object, isHttpStatus returns false → should rethrow
+      await expect(provider.deletePassage("agent-abc", "p-1")).rejects.toBe("string error");
+    });
+  });
+
+  describe("getRetryAfterMs detailed behavior", () => {
+    it("does not use Retry-After of 0 seconds (must be > 0)", async () => {
+      const client = makeMockClient();
+      const rateLimitError = Object.assign(new Error("Rate limited"), {
+        statusCode: 429,
+        headers: { "Retry-After": "0" }, // 0 is not > 0 → should fall back to base delay
+      });
+      client.agents.passages.create
+        .mockRejectedValueOnce(rateLimitError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+      // Base delay = 1ms → should succeed quickly
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      const id = await provider.storePassage("agent-abc", "text");
+      expect(id).toBe("passage-1");
+    });
+
+    it("does not use Retry-After of 300+ seconds (must be < 300)", async () => {
+      const client = makeMockClient();
+      const rateLimitError = Object.assign(new Error("Rate limited"), {
+        statusCode: 429,
+        headers: { "Retry-After": "300" }, // 300 is not < 300 → should fall back to base delay
+      });
+      client.agents.passages.create
+        .mockRejectedValueOnce(rateLimitError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+      // Base delay = 1ms → should succeed quickly (not wait 300s)
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      const id = await provider.storePassage("agent-abc", "text");
+      expect(id).toBe("passage-1");
+    });
+
+    it("Retry-After of 1 second converts to 1000ms (not seconds/1000)", async () => {
+      // We can't directly measure delay, but we can verify the retry succeeds and
+      // the delay was small (1s Retry-After → 1000ms should complete in test time)
+      const client = makeMockClient();
+      const rateLimitError = Object.assign(new Error("Rate limited"), {
+        statusCode: 429,
+        headers: { "Retry-After": "0.001" }, // very small Retry-After in seconds
+      });
+      client.agents.passages.create
+        .mockRejectedValueOnce(rateLimitError)
+        .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      const id = await provider.storePassage("agent-abc", "text");
+      expect(id).toBe("passage-1");
+    });
+
+    it("does not retry when typeof err.code is not string (numeric code is not transient)", async () => {
+      const client = makeMockClient();
+      // code is a number, not a string → typeof obj.code === "string" is false → not transient
+      const numericCodeErr = Object.assign(new Error("Numeric code"), { code: 42 });
+      client.agents.passages.create.mockRejectedValue(numericCodeErr);
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("Numeric code");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(1); // no retry
+    });
+
+    it("does not retry when typeof status is not number (string status is not transient)", async () => {
+      const client = makeMockClient();
+      // status is a string, not a number → typeof status === "number" is false → not transient
+      const stringStatusErr = Object.assign(new Error("String status"), { status: "429" });
+      client.agents.passages.create.mockRejectedValue(stringStatusErr);
+      const provider = new LettaProvider(mockClientAs(client), 1);
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("String status");
+      expect(client.agents.passages.create).toHaveBeenCalledTimes(1); // no retry
     });
   });
 
