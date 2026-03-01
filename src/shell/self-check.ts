@@ -1,6 +1,7 @@
-import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
+import type { FileSystemPort } from "../ports/filesystem.js";
+import { nodeFileSystem } from "./adapters/node-filesystem.js";
 
 export type SelfCheckStatus = "pass" | "warn" | "fail";
 
@@ -22,7 +23,7 @@ function parseNodeMajor(version: string): number | null {
   return Number.parseInt(match[1], 10);
 }
 
-function runCommand(cmd: string, args: string[], cwd: string): string {
+function defaultRunCommand(cmd: string, args: string[], cwd: string): string {
   return execFileSync(cmd, args, {
     cwd,
     encoding: "utf-8",
@@ -30,7 +31,7 @@ function runCommand(cmd: string, args: string[], cwd: string): string {
   }).trim();
 }
 
-async function readPackageJson(cwd: string): Promise<PackageJsonShape | null> {
+async function readPackageJson(cwd: string, fs: FileSystemPort): Promise<PackageJsonShape | null> {
   const packagePath = path.join(cwd, "package.json");
   try {
     const raw = await fs.readFile(packagePath, "utf8");
@@ -54,7 +55,10 @@ async function checkNodeVersion(minMajor: number): Promise<SelfCheckResult> {
   return { name: "Node.js", status: "pass", message: `Found ${process.version}` };
 }
 
-async function checkPnpm(cwd: string): Promise<SelfCheckResult> {
+async function checkPnpm(
+  cwd: string,
+  runCommand: (cmd: string, args: string[], cwd: string) => string,
+): Promise<SelfCheckResult> {
   try {
     const version = runCommand("pnpm", ["--version"], cwd);
     return { name: "pnpm", status: "pass", message: `Found ${version}` };
@@ -77,7 +81,7 @@ function checkPackageManagerDeclaration(pkg: PackageJsonShape | null): SelfCheck
   return { name: "packageManager", status: "pass", message: declared };
 }
 
-async function checkDependencies(cwd: string, pkg: PackageJsonShape | null): Promise<SelfCheckResult> {
+async function checkDependencies(cwd: string, pkg: PackageJsonShape | null, fs: FileSystemPort): Promise<SelfCheckResult> {
   if (!pkg) {
     return { name: "dependencies", status: "warn", message: "No package.json, skipping dependency checks" };
   }
@@ -116,13 +120,18 @@ async function checkDependencies(cwd: string, pkg: PackageJsonShape | null): Pro
   return { name: "dependencies", status: "pass", message: `${depNames.length} dependencies installed` };
 }
 
-export async function runSelfChecks(cwd = process.cwd(), minNodeMajor = 18): Promise<SelfCheckResult[]> {
-  const packageJson = await readPackageJson(cwd);
+export async function runSelfChecks(
+  cwd = process.cwd(),
+  minNodeMajor = 18,
+  fs: FileSystemPort = nodeFileSystem,
+  runCommand: (cmd: string, args: string[], cwd: string) => string = defaultRunCommand,
+): Promise<SelfCheckResult[]> {
+  const packageJson = await readPackageJson(cwd, fs);
   const results: SelfCheckResult[] = [];
   results.push(await checkNodeVersion(minNodeMajor));
-  results.push(await checkPnpm(cwd));
+  results.push(await checkPnpm(cwd, runCommand));
   results.push(checkPackageManagerDeclaration(packageJson));
-  results.push(await checkDependencies(cwd, packageJson));
+  results.push(await checkDependencies(cwd, packageJson, fs));
   return results;
 }
 

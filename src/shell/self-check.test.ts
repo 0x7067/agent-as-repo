@@ -1,7 +1,8 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
 import { formatSelfChecks, runSelfChecks } from "./self-check.js";
 
 async function withTempDir(prefix: string, fn: (dir: string) => Promise<void>): Promise<void> {
@@ -336,5 +337,76 @@ describe("self-check", () => {
       const pkgResult = results.find((r) => r.name === "package.json");
       expect(pkgResult?.status).toBe("warn");
     });
+  });
+});
+
+function makeFakeFs(files: Record<string, string> = {}): FileSystemPort {
+  const store = new Map(Object.entries(files));
+  return {
+    readFile: async (p) => {
+      const v = store.get(p);
+      if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      return v;
+    },
+    writeFile: async (p, d) => { store.set(p, d); },
+    stat: async (p) => {
+      if (store.has(p)) return { size: 0, isDirectory: () => false };
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    },
+    access: async (p) => {
+      if (!store.has(p)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    },
+    rename: async () => {},
+    copyFile: async () => {},
+    glob: async () => [],
+    watch: () => ({ close: vi.fn(), on: vi.fn().mockReturnThis() } as unknown as WatcherHandle),
+  };
+}
+
+describe("runSelfChecks (port-injected)", () => {
+  it("reports pnpm pass when runCommand returns a version", async () => {
+    const fakeFs = makeFakeFs({
+      "/project/package.json": JSON.stringify({ packageManager: "pnpm@8.0.0", dependencies: {} }),
+      "/project/node_modules": "",
+      "/project/node_modules/.bin": "",
+    });
+    const fakeRunCommand = vi.fn().mockReturnValue("8.0.0");
+
+    const results = await runSelfChecks("/project", 18, fakeFs, fakeRunCommand);
+    const pnpm = results.find((r) => r.name === "pnpm");
+    expect(pnpm?.status).toBe("pass");
+    expect(fakeRunCommand).toHaveBeenCalledWith("pnpm", ["--version"], "/project");
+  });
+
+  it("reports pnpm fail when runCommand throws", async () => {
+    const fakeFs = makeFakeFs({
+      "/project/package.json": JSON.stringify({ packageManager: "pnpm@8.0.0" }),
+    });
+    const fakeRunCommand = vi.fn().mockImplementation(() => { throw new Error("not found"); });
+
+    const results = await runSelfChecks("/project", 18, fakeFs, fakeRunCommand);
+    const pnpm = results.find((r) => r.name === "pnpm");
+    expect(pnpm?.status).toBe("fail");
+  });
+
+  it("reports dependencies fail when node_modules missing", async () => {
+    const fakeFs = makeFakeFs({
+      "/project/package.json": JSON.stringify({ packageManager: "pnpm@8.0.0", dependencies: { vitest: "^1.0.0" } }),
+    });
+    const fakeRunCommand = vi.fn().mockReturnValue("8.0.0");
+
+    const results = await runSelfChecks("/project", 18, fakeFs, fakeRunCommand);
+    const deps = results.find((r) => r.name === "dependencies");
+    expect(deps?.status).toBe("fail");
+    expect(deps?.message).toContain("node_modules");
+  });
+
+  it("reports warn when no package.json exists", async () => {
+    const fakeFs = makeFakeFs({});
+    const fakeRunCommand = vi.fn().mockReturnValue("8.0.0");
+
+    const results = await runSelfChecks("/project", 18, fakeFs, fakeRunCommand);
+    const pkg = results.find((r) => r.name === "package.json");
+    expect(pkg?.status).toBe("warn");
   });
 });
