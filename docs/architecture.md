@@ -4,57 +4,117 @@ A CLI framework that creates **persistent AI agents** (on Letta Cloud) that act 
 
 ---
 
-## Architecture Diagram
+## Hexagonal Architecture: Functional Core, Imperative Shell
+
+The codebase follows the **Ports and Adapters** (hexagonal) pattern:
+
+- **Core** (`src/core/`) — pure functions with no side effects; the domain logic
+- **Ports** (`src/ports/`) — TypeScript interfaces that define what the core needs from the outside world
+- **Shell / Adapters** (`src/shell/`, `src/shell/adapters/`) — concrete implementations of ports; all I/O lives here
 
 ```mermaid
 graph TB
+    subgraph "External Systems"
+        FS["Filesystem (node:fs)"]
+        GIT["Git (execFileSync)"]
+        LETTA["Letta Cloud (SDK)"]
+    end
+
+    subgraph "src/shell/adapters/ — Port Implementations"
+        NFS["NodeFilesystem\nimplements FileSystemPort"]
+        NGIT["NodeGit\nimplements GitPort"]
+        LAA["LettaAdminAdapter\nimplements AdminPort"]
+    end
+
+    subgraph "src/ports/ — Interfaces (boundary)"
+        FP["FileSystemPort"]
+        GP["GitPort"]
+        AP["AdminPort"]
+    end
+
+    subgraph "src/core/ — Pure Functions (no I/O)"
+        CORE["chunker · filter · sync\nstate · config · prompts\nonboard · export · watch"]
+    end
+
+    subgraph "src/shell/ — Imperative Shell"
+        SHELL["config-loader\nfile-collector\nstate-store\nagent-factory\nletta-provider"]
+    end
+
     subgraph "User Interfaces"
         CLI["repo-expert CLI"]
         MCP["MCP Server (stdio)"]
-        API["Other AI tools<br/>(Claude Code, Codex)"]
     end
 
-    API --> MCP
-    CLI --> Shell
-    MCP --> Shell
-
-    subgraph "src/shell/ — Imperative Shell (I/O boundary)"
-        Shell["config-loader<br/>file-collector<br/>state-store<br/>agent-factory<br/>letta-provider"]
-    end
-
-    subgraph "src/core/ — Pure Functions (no side effects)"
-        Core["chunker · filter · sync<br/>state · config · prompts<br/>onboard · export · watch"]
-    end
-
-    Shell --> Core
-    Shell --> Letta
-
-    subgraph "Letta Cloud"
-        direction TB
-        A1["Agent: mobile<br/>🏷 mobile, frontend"]
-        A2["Agent: backend<br/>🏷 backend, api"]
-        A3["Agent: data-etl<br/>🏷 data, integration"]
-
-        subgraph "Per-Agent Memory"
-            CM["Core Memory (always in context)<br/>persona · architecture · conventions"]
-            AM["Archival Memory (vector store)<br/>source files as searchable passages"]
-            RM["Recall Memory<br/>conversation history"]
-        end
-
-        A1 -.->|tag-based discovery| A2
-        A2 -.->|cross-agent messaging| A3
-    end
-
-    subgraph "Git Repos (local filesystem)"
-        R1["~/repos/mobile-app"]
-        R2["~/repos/backend"]
-        R3["~/repos/data-etl"]
-    end
-
-    Shell -->|"collect files<br/>git diff"| R1
-    Shell -->|"collect files<br/>git diff"| R2
-    Shell -->|"collect files<br/>git diff"| R3
+    CLI --> SHELL
+    MCP --> SHELL
+    SHELL --> CORE
+    SHELL --> NFS
+    SHELL --> NGIT
+    SHELL --> LAA
+    NFS -->|implements| FP
+    NGIT -->|implements| GP
+    LAA -->|implements| AP
+    NFS --> FS
+    NGIT --> GIT
+    LAA --> LETTA
+    CORE -.->|depends on types only| FP
+    CORE -.->|depends on types only| GP
+    CORE -.->|depends on types only| AP
 ```
+
+---
+
+## Layer Rules
+
+### `src/core/` — Pure Functions
+
+- **Can import**: other `../core/*` modules, `zod/v4`, standard type-only utilities
+- **Cannot import**: `../shell/*`, `../ports/*` (implementations), `node:fs`, `node:child_process`, `fast-glob`, or any module with I/O side effects
+- Every function must be deterministic: same inputs always produce the same outputs
+- No `console.log`, no network calls, no filesystem access
+
+### `src/ports/` — Interfaces Only
+
+- **Contains**: TypeScript `interface` and `type` declarations only
+- **Cannot contain**: `class` declarations, function implementations, any runtime code
+- These files define the contract between core and the outside world
+
+### `src/shell/` and `src/shell/adapters/` — Imperative Shell
+
+- **Can import**: anything — core, ports, Node.js built-ins, third-party SDKs
+- Adapters implement port interfaces and translate between the domain and external APIs
+- All side effects (filesystem, network, environment variables, process spawning) live here
+
+---
+
+## Enforcement
+
+Architecture rules are enforced at two levels:
+
+1. **Compile-time (ESLint)** — `eslint.config.mjs` has a `no-restricted-imports` rule on `src/core/**/*.ts` blocking imports of `../shell/*`, `node:fs*`, and `node:child_process`
+2. **Test-time (Vitest)** — `src/__tests__/architecture.test.ts` uses `node:fs` to scan source files and assert no violations exist
+
+Run both checks before merging:
+
+```bash
+pnpm lint   # ESLint catches violations at the import level
+pnpm test   # architecture.test.ts catches violations at the file content level
+```
+
+---
+
+## Key Files
+
+| Concept | File |
+|---|---|
+| Port: filesystem | `src/ports/filesystem.ts` |
+| Port: git | `src/ports/git.ts` |
+| Port: admin (Letta) | `src/ports/admin.ts` |
+| Adapter: filesystem | `src/shell/adapters/node-filesystem.ts` |
+| Adapter: git | `src/shell/adapters/node-git.ts` |
+| Adapter: admin | `src/shell/adapters/letta-admin-adapter.ts` |
+| Shell provider | `src/shell/provider.ts` |
+| Architecture tests | `src/__tests__/architecture.test.ts` |
 
 ---
 
@@ -80,21 +140,6 @@ graph TB
  │  │ files since     │    passages,   │                     │     │
  │  │ last commit     │    insert new  └─────────────────────┘     │
  │  └─────────────────┘                                            │
- │                                                                  │
- │       ask                                                        │
- │  ┌─────────────────┐     ┌─────────────────┐                    │
- │  │ "How does auth  │────▶│ Agent searches   │──▶ answer         │
- │  │  work?"         │     │ archival + core  │                    │
- │  └─────────────────┘     │ memory, reasons  │                    │
- │                          └─────────────────┘                    │
- │       ask --all                                                  │
- │  ┌─────────────────┐     ┌──────┐ ┌──────┐ ┌──────┐            │
- │  │ "What's the API │────▶│ A    │ │ B    │ │ C    │ fan-out    │
- │  │  contract?"     │     │      │ │      │ │      │            │
- │  └─────────────────┘     └──┬───┘ └──┬───┘ └──┬───┘            │
- │                             └────┬────┘────────┘                │
- │                                  ▼                               │
- │                          combined answers                        │
  └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -116,14 +161,3 @@ repo-expert
  ├── onboard <repo>       Guided codebase walkthrough
  └── destroy [--repo]     Delete agents from Letta Cloud
 ```
-
----
-
-## Key Design Decisions
-
-- **Functional core, imperative shell** — `src/core/` has pure functions (no I/O), `src/shell/` handles all side effects
-- **Provider abstraction** — `AgentProvider` interface decouples from Letta SDK; `LettaProvider` is the current adapter
-- **Three-tier memory** — core (always in context, self-updating), archival (vector-searchable source), recall (conversation history)
-- **Tag-based discovery** — agents find each other via `["repo-expert", ...tags]`, no hardcoded IDs
-- **Incremental sync** — `git diff` detects changes, only affected passages are re-indexed
-- **Config-driven** — YAML config defines repos, one `setup` command creates everything
