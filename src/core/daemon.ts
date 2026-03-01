@@ -12,8 +12,26 @@ export interface DaemonConfig {
   logPath: string;
 }
 
-export function generatePlist(config: DaemonConfig): string {
-  const nodeBinDir = path.dirname(config.nodePath);
+export interface DaemonBinaryConfig {
+  workingDirectory: string;
+  binaryPath: string;
+  intervalSeconds: number;
+  debounceMs: number;
+  configPath: string;
+  logPath: string;
+}
+
+export function generatePlist(config: DaemonConfig | DaemonBinaryConfig): string {
+  const programArgs =
+    "binaryPath" in config
+      ? `\t\t<string>${config.binaryPath}</string>\n\t\t<string>watch</string>`
+      : `\t\t<string>${config.nodePath}</string>\n\t\t<string>${config.tsxCliPath}</string>\n\t\t<string>src/cli.ts</string>\n\t\t<string>watch</string>`;
+
+  const binDir =
+    "binaryPath" in config
+      ? path.dirname(config.binaryPath)
+      : path.dirname(config.nodePath);
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -26,10 +44,7 @@ export function generatePlist(config: DaemonConfig): string {
 
 \t<key>ProgramArguments</key>
 \t<array>
-\t\t<string>${config.nodePath}</string>
-\t\t<string>${config.tsxCliPath}</string>
-\t\t<string>src/cli.ts</string>
-\t\t<string>watch</string>
+${programArgs}
 \t\t<string>--interval</string>
 \t\t<string>${config.intervalSeconds}</string>
 \t\t<string>--debounce</string>
@@ -41,7 +56,7 @@ export function generatePlist(config: DaemonConfig): string {
 \t<key>EnvironmentVariables</key>
 \t<dict>
 \t\t<key>PATH</key>
-\t\t<string>${nodeBinDir}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+\t\t<string>${binDir}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
 \t</dict>
 
 \t<key>RunAtLoad</key>

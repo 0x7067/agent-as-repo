@@ -5,15 +5,25 @@ export interface McpServerEntry {
   env: Record<string, string>;
 }
 
-export function generateMcpEntry(mcpServerPath: string, apiKey: string, baseUrl = "https://api.letta.com"): McpServerEntry {
+export function generateMcpEntry(
+  mcpServerPath: string,
+  apiKey: string,
+  baseUrl = "https://api.letta.com",
+  binaryPath?: string,
+): McpServerEntry {
+  if (binaryPath) {
+    return {
+      command: binaryPath,
+      args: [],
+      timeout: 300,
+      env: { LETTA_BASE_URL: baseUrl, LETTA_API_KEY: apiKey },
+    };
+  }
   return {
     command: "npx",
     args: ["tsx", mcpServerPath],
     timeout: 300,
-    env: {
-      LETTA_BASE_URL: baseUrl,
-      LETTA_API_KEY: apiKey,
-    },
+    env: { LETTA_BASE_URL: baseUrl, LETTA_API_KEY: apiKey },
   };
 }
 
@@ -22,7 +32,11 @@ export interface McpCheckResult {
   issues: string[];
 }
 
-export function checkMcpEntry(entry: McpServerEntry | undefined, mcpServerPath: string): McpCheckResult {
+export function checkMcpEntry(
+  entry: McpServerEntry | undefined,
+  mcpServerPath: string,
+  binaryPath?: string,
+): McpCheckResult {
   const issues: string[] = [];
 
   if (!entry) {
@@ -30,19 +44,25 @@ export function checkMcpEntry(entry: McpServerEntry | undefined, mcpServerPath: 
     return { ok: false, issues };
   }
 
-  if (entry.command !== "npx") {
-    issues.push(`Command should be "npx", got "${entry.command}".`);
-  }
+  if (binaryPath) {
+    if (entry.command !== binaryPath) {
+      issues.push(`Command should be "${binaryPath}", got "${entry.command}".`);
+    }
+  } else {
+    if (entry.command !== "npx") {
+      issues.push(`Command should be "npx", got "${entry.command}".`);
+    }
 
-  const args = entry.args ?? [];
-  if (args[0] !== "tsx") {
-    const got = args[0] ?? "(missing)";
-    issues.push(`First arg should be "tsx", got "${got}". Use "npx tsx" to avoid PATH issues.`);
-  }
+    const args = entry.args ?? [];
+    if (args[0] !== "tsx") {
+      const got = args[0] ?? "(missing)";
+      issues.push(`First arg should be "tsx", got "${got}". Use "npx tsx" to avoid PATH issues.`);
+    }
 
-  const configuredPath = args[1] ?? "";
-  if (configuredPath !== mcpServerPath) {
-    issues.push(`Server path mismatch: config has "${configuredPath}", expected "${mcpServerPath}".`);
+    const configuredPath = args[1] ?? "";
+    if (configuredPath !== mcpServerPath) {
+      issues.push(`Server path mismatch: config has "${configuredPath}", expected "${mcpServerPath}".`);
+    }
   }
 
   const baseUrl = entry.env?.LETTA_BASE_URL ?? "";

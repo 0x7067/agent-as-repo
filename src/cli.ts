@@ -1357,32 +1357,37 @@ program
     const os = await import("node:os");
     const home = os.default.homedir();
 
-    const nodePath = await resolveNodeExecutable();
-    if (!nodePath) {
-      console.error("Cannot find a usable Node.js executable. Install Node and try again.");
-      process.exitCode = 1;
-      return;
-    }
-
-    const tsxCliPath = path.resolve(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
-    if (!(await pathExists(tsxCliPath))) {
-      console.error("Cannot find local tsx CLI at node_modules/tsx/dist/cli.mjs. Run pnpm install and try again.");
-      process.exitCode = 1;
-      return;
-    }
-
     const plistPath = path.join(home, "Library/LaunchAgents", `${PLIST_LABEL}.plist`);
     const logPath = path.join(home, "Library/Logs/repo-expert-watch.log");
 
-    const plist = generatePlist({
+    const seaBinary = path.resolve(process.cwd(), "dist", "repo-expert");
+    const sharedDaemonOpts = {
       workingDirectory: process.cwd(),
-      nodePath,
-      tsxCliPath,
       intervalSeconds: parseIntOrDefault(opts.interval, DEFAULT_WATCH_CONFIG.intervalMs / 1000),
       debounceMs: Math.max(50, parseIntOrDefault(opts.debounce, DEFAULT_WATCH_CONFIG.debounceMs)),
       configPath: opts.config,
       logPath,
-    });
+    };
+
+    let plist: string;
+    if (await pathExists(seaBinary)) {
+      console.log(`Using SEA binary: ${seaBinary}`);
+      plist = generatePlist({ ...sharedDaemonOpts, binaryPath: seaBinary });
+    } else {
+      const nodePath = await resolveNodeExecutable();
+      if (!nodePath) {
+        console.error("Cannot find a usable Node.js executable. Install Node and try again.");
+        process.exitCode = 1;
+        return;
+      }
+      const tsxCliPath = path.resolve(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
+      if (!(await pathExists(tsxCliPath))) {
+        console.error("Cannot find local tsx CLI at node_modules/tsx/dist/cli.mjs. Run pnpm install and try again.");
+        process.exitCode = 1;
+        return;
+      }
+      plist = generatePlist({ ...sharedDaemonOpts, nodePath, tsxCliPath });
+    }
 
     // Unload existing daemon if present
     try {
@@ -1483,7 +1488,10 @@ program
       console.log("Existing 'letta' entry found — overwriting.");
     }
 
-    const entry = generateMcpEntry(mcpServerPath, process.env.LETTA_API_KEY!, opts.baseUrl);
+    const seaLettaTools = path.resolve(process.cwd(), "dist", "letta-tools");
+    const binaryPath = (await pathExists(seaLettaTools)) ? seaLettaTools : undefined;
+    if (binaryPath) console.log(`Using SEA binary: ${binaryPath}`);
+    const entry = generateMcpEntry(mcpServerPath, process.env.LETTA_API_KEY!, opts.baseUrl, binaryPath);
     mcpServers.letta = entry;
     config.mcpServers = mcpServers;
 
@@ -1524,7 +1532,9 @@ program
 
     const mcpServers = (config.mcpServers ?? {}) as Record<string, unknown>;
     const entry = mcpServers.letta as Parameters<typeof checkMcpEntry>[0];
-    const result = checkMcpEntry(entry, mcpServerPath);
+    const seaLettaTools = path.resolve(process.cwd(), "dist", "letta-tools");
+    const binaryPath = (await pathExists(seaLettaTools)) ? seaLettaTools : undefined;
+    const result = checkMcpEntry(entry, mcpServerPath, binaryPath);
 
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));

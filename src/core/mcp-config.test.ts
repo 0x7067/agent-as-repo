@@ -126,3 +126,43 @@ describe("checkMcpEntry", () => {
     expect(timeoutIssue).toContain("45s");
   });
 });
+
+describe("generateMcpEntry (binary mode)", () => {
+  it("uses binary path as command with empty args", () => {
+    const entry = generateMcpEntry("/path/mcp-server.ts", "sk-test", undefined, "/dist/letta-tools");
+    expect(entry.command).toBe("/dist/letta-tools");
+    expect(entry.args).toEqual([]);
+  });
+
+  it("still sets env vars in binary mode", () => {
+    const entry = generateMcpEntry("/path/mcp-server.ts", "sk-test", "https://custom.letta.com", "/dist/letta-tools");
+    expect(entry.env.LETTA_BASE_URL).toBe("https://custom.letta.com");
+    expect(entry.env.LETTA_API_KEY).toBe("sk-test");
+    expect(entry.timeout).toBe(300);
+  });
+});
+
+describe("checkMcpEntry (binary mode)", () => {
+  const binaryPath = "/dist/letta-tools";
+  const validBinaryEntry = generateMcpEntry("/path/mcp-server.ts", "sk-test", undefined, binaryPath);
+
+  it("returns ok for a valid binary entry", () => {
+    const result = checkMcpEntry(validBinaryEntry, "/path/mcp-server.ts", binaryPath);
+    expect(result.ok).toBe(true);
+    expect(result.issues).toEqual([]);
+  });
+
+  it("reports wrong command in binary mode", () => {
+    const entry = { ...validBinaryEntry, command: "/wrong/binary" };
+    const result = checkMcpEntry(entry, "/path/mcp-server.ts", binaryPath);
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([expect.stringContaining("/dist/letta-tools")]));
+  });
+
+  it("reports missing env vars in binary mode", () => {
+    const entry = { ...validBinaryEntry, env: { LETTA_BASE_URL: "https://api.letta.com" } };
+    const result = checkMcpEntry(entry, "/path/mcp-server.ts", binaryPath);
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([expect.stringContaining("LETTA_API_KEY")]));
+  });
+});
