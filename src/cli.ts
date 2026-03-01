@@ -214,6 +214,13 @@ class FakeProvider implements AgentProvider {
     return this.blocksByAgent[agentId]?.[label] ?? { value: "", limit: 5000 };
   }
 
+  async updateBlock(agentId: string, label: string, value: string): Promise<{ value: string; limit: number }> {
+    if (!this.blocksByAgent[agentId]) this.blocksByAgent[agentId] = {};
+    const limit = this.blocksByAgent[agentId][label]?.limit ?? 5000;
+    this.blocksByAgent[agentId][label] = { value, limit };
+    return { value, limit };
+  }
+
   async sendMessage(_agentId: string, _content: string, _options?: SendMessageOptions): Promise<string> {
     const delayMs = Number.parseInt(process.env.REPO_EXPERT_TEST_DELAY_BOOTSTRAP_MS ?? "0", 10);
     if (!Number.isNaN(delayMs) && delayMs > 0) {

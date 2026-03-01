@@ -2,9 +2,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Letta } from "@letta-ai/letta-client";
-import type { AssistantMessage } from "@letta-ai/letta-client/resources/agents/messages.js";
 import { fileURLToPath } from "node:url";
 import { z } from "zod/v4";
+import type { AgentProvider, SendMessageOptions } from "./shell/provider.js";
+import type { AdminPort } from "./ports/admin.js";
+import { LettaProvider } from "./shell/letta-provider.js";
+import { LettaAdminAdapter } from "./shell/adapters/letta-admin-adapter.js";
 
 // Accept LETTA_PASSWORD as alias for LETTA_API_KEY (Codex compat)
 if (process.env["LETTA_PASSWORD"] && !process.env["LETTA_API_KEY"]) {
@@ -51,24 +54,11 @@ async function withTimeout<T>(label: string, timeoutMs: number, fn: () => Promis
   }
 }
 
-function extractAssistantText(resp: { messages: unknown[] }): string {
-  for (const msg of resp.messages) {
-    if (typeof msg === "object" && msg !== null && "message_type" in msg && msg.message_type === "assistant_message") {
-      const text = (msg as AssistantMessage).content;
-      return typeof text === "string" ? text : "";
-    }
-  }
-  return "";
-}
-
-export function registerTools(server: McpServer, client: Letta): void {
+export function registerTools(server: McpServer, provider: AgentProvider, admin: AdminPort): void {
   server.tool("letta_list_agents", "List all Letta agents", {}, () =>
     handleTool(async () => {
-      const summary: Array<{ id: string; name: string; description?: string | null; model?: string | null }> = [];
-      for await (const a of client.agents.list()) {
-        summary.push({ id: a.id, name: a.name, description: a.description, model: a.model ?? null });
-      }
-      return JSON.stringify(summary, null, 2);
+      const agents = await admin.listAgents();
+      return JSON.stringify(agents, null, 2);
     }),
   );
 
@@ -78,7 +68,7 @@ export function registerTools(server: McpServer, client: Letta): void {
     { agent_id: z.string().describe("The agent ID") },
     ({ agent_id }) =>
       handleTool(async () => {
-        const agent = await client.agents.retrieve(agent_id);
+        const agent = await admin.getAgent(agent_id);
         return JSON.stringify(agent, null, 2);
       }),
   );
@@ -97,22 +87,15 @@ export function registerTools(server: McpServer, client: Letta): void {
       handleTool(async () => {
         const askTimeoutMs = timeout_ms ?? parsePositiveInt(process.env["LETTA_ASK_TIMEOUT_MS"], ASK_DEFAULT_TIMEOUT_MS);
 
-        const payload: {
-          messages: Array<{ role: "user"; content: string }>;
-          override_model?: string;
-          max_steps?: number;
-        } = {
-          messages: [{ role: "user", content }],
-        };
-        if (override_model) payload.override_model = override_model;
-        if (max_steps !== undefined) payload.max_steps = max_steps;
+        const options: SendMessageOptions = {};
+        if (override_model) options.overrideModel = override_model;
+        if (max_steps !== undefined) options.maxSteps = max_steps;
 
-        const response = await withTimeout(
+        return await withTimeout(
           `letta_send_message (${override_model ?? "agent-default"})`,
           askTimeoutMs,
-          () => client.agents.messages.create(agent_id, payload),
+          () => provider.sendMessage(agent_id, content, options),
         );
-        return extractAssistantText(response as { messages: unknown[] });
       }),
   );
 
@@ -122,13 +105,8 @@ export function registerTools(server: McpServer, client: Letta): void {
     { agent_id: z.string().describe("The agent ID") },
     ({ agent_id }) =>
       handleTool(async () => {
-        const agent = await client.agents.retrieve(agent_id);
-        const summary = (agent.blocks ?? []).map((b) => ({
-          label: b.label,
-          value: b.value,
-          limit: b.limit,
-        }));
-        return JSON.stringify(summary, null, 2);
+        const blocks = await admin.getCoreMemory(agent_id);
+        return JSON.stringify(blocks, null, 2);
       }),
   );
 
@@ -142,7 +120,7 @@ export function registerTools(server: McpServer, client: Letta): void {
     },
     ({ agent_id, query, top_k }) =>
       handleTool(async () => {
-        const results = await client.agents.passages.search(agent_id, { query, top_k });
+        const results = await admin.searchPassages(agent_id, query, top_k);
         return JSON.stringify(results, null, 2);
       }),
   );
@@ -156,8 +134,8 @@ export function registerTools(server: McpServer, client: Letta): void {
     },
     ({ agent_id, text }) =>
       handleTool(async () => {
-        const result = await client.agents.passages.create(agent_id, { text });
-        return JSON.stringify(result, null, 2);
+        const id = await provider.storePassage(agent_id, text);
+        return JSON.stringify({ id }, null, 2);
       }),
   );
 
@@ -170,7 +148,7 @@ export function registerTools(server: McpServer, client: Letta): void {
     },
     ({ agent_id, passage_id }) =>
       handleTool(async () => {
-        await client.agents.passages.delete(passage_id, { agent_id });
+        await provider.deletePassage(agent_id, passage_id);
         return "Deleted";
       }),
   );
@@ -185,7 +163,7 @@ export function registerTools(server: McpServer, client: Letta): void {
     },
     ({ agent_id, label, value }) =>
       handleTool(async () => {
-        const block = await client.agents.blocks.update(label, { agent_id, value });
+        const block = await provider.updateBlock(agent_id, label, value);
         return JSON.stringify(block, null, 2);
       }),
   );
@@ -198,7 +176,9 @@ function errorMessage(err: unknown): string {
 async function main(): Promise<void> {
   const server = new McpServer({ name: "letta-tools", version: "1.0.0" });
   const client = createClient();
-  registerTools(server, client);
+  const provider = new LettaProvider(client);
+  const admin = new LettaAdminAdapter(client);
+  registerTools(server, provider, admin);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

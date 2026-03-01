@@ -37,5 +37,6 @@ export interface AgentProvider {
   deletePassage(agentId: string, passageId: string): Promise<void>;
   listPassages(agentId: string): Promise<Passage[]>;
   getBlock(agentId: string, label: string): Promise<MemoryBlock>;
+  updateBlock(agentId: string, label: string, value: string): Promise<MemoryBlock>;
   sendMessage(agentId: string, content: string, options?: SendMessageOptions): Promise<string>;
 }
