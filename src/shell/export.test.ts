@@ -63,4 +63,55 @@ describe("exportAgent", () => {
     const matches = md.match(/src\/index\.ts/g);
     expect(matches).toHaveLength(1);
   });
+
+  it("ignores passages that do not start with FILE: prefix", async () => {
+    const provider = makeMockProvider({
+      listPassages: vi.fn().mockResolvedValue([
+        { id: "p-1", text: "FILE: src/real.ts\nconst x = 1;" },
+        { id: "p-2", text: "This is a general note, not a file chunk." },
+        { id: "p-3", text: "Some other text without prefix" },
+      ]),
+      getBlock: vi.fn().mockResolvedValue({ value: "block", limit: 5000 }),
+    });
+
+    const md = await exportAgent(provider, "my-app", "agent-abc");
+
+    // Only src/real.ts should be listed (others don't start with FILE:)
+    expect(md).toContain("src/real.ts");
+    expect(md).toContain("Files (1)");
+  });
+
+  it("strips only trailing (continued) at end of line, not mid-line occurrences", async () => {
+    const provider = makeMockProvider({
+      listPassages: vi.fn().mockResolvedValue([
+        { id: "p-1", text: "FILE: src/file (continued) extra.ts\nchunk" },
+      ]),
+      getBlock: vi.fn().mockResolvedValue({ value: "block", limit: 5000 }),
+    });
+
+    const md = await exportAgent(provider, "my-app", "agent-abc");
+
+    // "(continued)" is not at end of line here, so it should NOT be stripped
+    expect(md).toContain("(continued) extra.ts");
+  });
+
+  it("sorts file list alphabetically", async () => {
+    const provider = makeMockProvider({
+      listPassages: vi.fn().mockResolvedValue([
+        { id: "p-1", text: "FILE: src/z-last.ts\nz" },
+        { id: "p-2", text: "FILE: src/a-first.ts\na" },
+        { id: "p-3", text: "FILE: src/m-middle.ts\nm" },
+      ]),
+      getBlock: vi.fn().mockResolvedValue({ value: "block", limit: 5000 }),
+    });
+
+    const md = await exportAgent(provider, "my-app", "agent-abc");
+
+    // Files should appear in sorted order
+    const firstIdx = md.indexOf("src/a-first.ts");
+    const middleIdx = md.indexOf("src/m-middle.ts");
+    const lastIdx = md.indexOf("src/z-last.ts");
+    expect(firstIdx).toBeLessThan(middleIdx);
+    expect(middleIdx).toBeLessThan(lastIdx);
+  });
 });

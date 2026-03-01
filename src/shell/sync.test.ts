@@ -172,6 +172,153 @@ describe("syncRepo", () => {
     expect(result.filesReIndexed).toBe(0);
   });
 
+  it("does not delete old passages for files that are not in the old passage map", async () => {
+    const provider = makeMockProvider();
+    // "src/new.ts" has no old passages in agent — oldIds is undefined (falsy)
+    const agentNoPassages: AgentState = {
+      ...testAgent,
+      passages: {}, // no old passages at all
+    };
+    const result = await syncRepo({
+      provider,
+      agent: agentNoPassages,
+      changedFiles: ["src/new.ts"],
+      collectFile: async () => null, // file deleted
+      headCommit: "def456",
+    });
+
+    // No old passages to delete, file never existed in agent
+    expect(provider.deletePassage).not.toHaveBeenCalled();
+    expect(result.passages["src/new.ts"]).toBeUndefined();
+  });
+
+  it("does not delete passages for oversized file that had no old passages", async () => {
+    const provider = makeMockProvider();
+    // Agent has no passages for this file
+    const agentNoPassages: AgentState = {
+      ...testAgent,
+      passages: {}, // no old passages for src/big.ts
+    };
+    const result = await syncRepo({
+      provider,
+      agent: agentNoPassages,
+      changedFiles: ["src/big.ts"],
+      collectFile: async (p) => ({ path: p, content: "x".repeat(200_000), sizeKb: 200 }),
+      headCommit: "def456",
+      maxFileSizeKb: 50,
+    });
+
+    // No old passages for this file → no deletePassage calls
+    expect(provider.deletePassage).not.toHaveBeenCalled();
+    expect(result.filesRemoved).toBe(1);
+  });
+
+  it("includes files exactly at maxFileSizeKb boundary (not oversized)", async () => {
+    const provider = makeMockProvider();
+    // A file exactly at maxFileSizeKb should NOT be treated as oversized
+    const result = await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: ["src/a.ts"],
+      collectFile: async (p) => ({ path: p, content: "x", sizeKb: 50 }), // exactly 50 KB
+      headCommit: "def456",
+      maxFileSizeKb: 50,
+    });
+
+    // sizeKb (50) > maxFileSizeKb (50) is false → file IS indexed
+    expect(result.filesReIndexed).toBe(1);
+    expect(result.filesRemoved).toBe(0);
+  });
+
+  it("increments filesRemoved for each deleted file (not decrements)", async () => {
+    const provider = makeMockProvider();
+    const result = await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: ["src/a.ts", "src/b.ts"],
+      collectFile: async () => null, // both deleted
+      headCommit: "def456",
+    });
+
+    // Both files deleted → filesRemoved should be 2, not 0
+    expect(result.filesRemoved).toBe(2);
+  });
+
+  it("increments filesRemoved for oversized files (not decrements)", async () => {
+    const provider = makeMockProvider();
+    const result = await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: ["src/a.ts"],
+      collectFile: async (p) => ({ path: p, content: "x".repeat(100_000), sizeKb: 200 }),
+      headCommit: "def456",
+      maxFileSizeKb: 50,
+    });
+
+    // Oversized → filesRemoved 1, not 0
+    expect(result.filesRemoved).toBe(1);
+    expect(result.filesReIndexed).toBe(0);
+  });
+
+  it("does not skip oversized check when maxFileSizeKb is undefined", async () => {
+    const provider = makeMockProvider();
+    const result = await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: ["src/a.ts"],
+      // Very large file, but no maxFileSizeKb — should be indexed
+      collectFile: async (p) => ({ path: p, content: "x".repeat(200_000), sizeKb: 999 }),
+      headCommit: "def456",
+      // maxFileSizeKb intentionally omitted
+    });
+
+    // No size limit → file is re-indexed, not removed
+    expect(result.filesReIndexed).toBe(1);
+    expect(result.filesRemoved).toBe(0);
+  });
+
+  it("old passages for oversized file are deleted (not kept)", async () => {
+    const provider = makeMockProvider();
+    // src/a.ts has old passages p-1, p-2
+    const result = await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: ["src/a.ts"],
+      collectFile: async (p) => ({ path: p, content: "x".repeat(200_000), sizeKb: 200 }),
+      headCommit: "def456",
+      maxFileSizeKb: 50,
+    });
+
+    // Old passages should be queued for deletion
+    expect(provider.deletePassage).toHaveBeenCalledWith("agent-abc", "p-1");
+    expect(provider.deletePassage).toHaveBeenCalledWith("agent-abc", "p-2");
+    expect(result.passages["src/a.ts"]).toBeUndefined();
+  });
+
+  it("passageIds array has correct length for multi-chunk files", async () => {
+    const provider = makeMockProvider();
+    let storeCount = 0;
+    provider.storePassage = vi.fn().mockImplementation(async () => `pid-${++storeCount}`);
+
+    const twoChunkStrategy = vi.fn().mockReturnValue([
+      { text: "chunk-1", sourcePath: "src/a.ts" },
+      { text: "chunk-2", sourcePath: "src/a.ts" },
+    ]);
+
+    const result = await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: ["src/a.ts"],
+      collectFile: async (p) => ({ path: p, content: "content", sizeKb: 1 }),
+      headCommit: "def456",
+      chunkingStrategy: twoChunkStrategy,
+    });
+
+    // Should have exactly 2 passage IDs stored (not undefined slots)
+    expect(result.passages["src/a.ts"]).toHaveLength(2);
+    expect(result.passages["src/a.ts"]).not.toContain(undefined);
+  });
+
   describe("per-file error isolation", () => {
     it("continues syncing other files when one file upload fails", async () => {
       const provider = makeMockProvider();

@@ -93,6 +93,46 @@ repos:
     expect(config.repos["my-app"]).toBeDefined();
   });
 
+  it("does not expand non-tilde paths through homedir", async () => {
+    const yamlAbsolute = `
+letta:
+  model: openai/gpt-4.1
+  embedding: openai/text-embedding-3-small
+
+repos:
+  my-app:
+    path: /absolute/path/to/repo
+    description: My application
+    extensions: [.ts]
+    ignore_dirs: [node_modules]
+`;
+    await withTempConfig(yamlAbsolute, async (filePath) => {
+      const config = await loadConfig(filePath);
+      // /absolute/path should NOT be treated as tilde — stays as is (resolved)
+      expect(config.repos["my-app"].path).toBe("/absolute/path/to/repo");
+    });
+  });
+
+  it("reads config file using utf8 encoding", async () => {
+    // Inject a mock fs that asserts the encoding passed to readFile
+    let capturedEncoding: string | undefined;
+    const mockFs = {
+      readFile: async (_path: string, encoding: string) => {
+        capturedEncoding = encoding;
+        return validYaml;
+      },
+      writeFile: async () => {},
+      stat: async () => ({ size: 0, isDirectory: () => false }),
+      access: async () => {},
+      rename: async () => {},
+      copyFile: async () => {},
+      glob: async () => [],
+    };
+
+    await loadConfig("/fake/config.yaml", mockFs);
+    expect(capturedEncoding).toBe("utf8");
+  });
+
   it("resolves relative paths to absolute paths", async () => {
     const yamlWithRelative = `
 letta:

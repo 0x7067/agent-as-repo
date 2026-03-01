@@ -93,6 +93,18 @@ describe("nodeFileSystem adapter", () => {
     });
   });
 
+  it("writeFile stores multibyte utf8 content correctly", async () => {
+    await withTmpDir(async (dir) => {
+      const filePath = path.join(dir, "utf8.txt");
+      const content = "こんにちは世界 \u2603"; // Japanese + snowman (multibyte chars)
+      await nodeFileSystem.writeFile(filePath, content);
+
+      // Read back as utf8 to verify encoding was applied correctly
+      const read = await fs.readFile(filePath, "utf8");
+      expect(read).toBe(content);
+    });
+  });
+
   it("glob finds files matching patterns", async () => {
     await withTmpDir(async (dir) => {
       await fs.mkdir(path.join(dir, "src"), { recursive: true });

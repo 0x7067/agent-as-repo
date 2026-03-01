@@ -159,6 +159,60 @@ describe("collectFiles", () => {
     expect(files[0].content).toBe("mock content");
   });
 
+  it("excludes dotfiles (dot:false) from collection", async () => {
+    await withTempRepo(
+      {
+        "src/index.ts": "export const x = 1;",
+        ".hidden/secret.ts": "hidden content",
+      },
+      async (repoPath) => {
+        const files = await collectFiles(makeConfig(repoPath));
+        const paths = files.map((f) => f.path);
+        expect(paths).toContain("src/index.ts");
+        // dotfiles/hidden dirs should be excluded (dot: false)
+        expect(paths.some((p) => p.startsWith(".hidden"))).toBe(false);
+      },
+    );
+  });
+
+  it("includes files exactly at maxFileSizeKb limit", async () => {
+    // 1 byte = ~0.001 KB; we want a file exactly at boundary
+    const mockFs: FileSystemPort = {
+      readFile: async () => "content",
+      writeFile: async () => {},
+      // File size exactly at maxFileSizeKb (50 KB)
+      stat: async () => ({ size: 50 * 1024, isDirectory: () => false }),
+      access: async () => {},
+      rename: async () => {},
+      copyFile: async () => {},
+      glob: async () => ["src/boundary.ts"],
+    };
+
+    const config = makeConfig("/fake/path", { maxFileSizeKb: 50 });
+    const files = await collectFiles(config, mockFs);
+    // sizeKb === maxFileSizeKb (50 <= 50) → should be included
+    expect(files).toHaveLength(1);
+    expect(files[0].path).toBe("src/boundary.ts");
+  });
+
+  it("excludes files just above maxFileSizeKb limit", async () => {
+    const mockFs: FileSystemPort = {
+      readFile: async () => "content",
+      writeFile: async () => {},
+      // File size just over 50 KB
+      stat: async () => ({ size: 50 * 1024 + 1, isDirectory: () => false }),
+      access: async () => {},
+      rename: async () => {},
+      copyFile: async () => {},
+      glob: async () => ["src/too-big.ts"],
+    };
+
+    const config = makeConfig("/fake/path", { maxFileSizeKb: 50 });
+    const files = await collectFiles(config, mockFs);
+    // sizeKb > maxFileSizeKb → should be excluded
+    expect(files).toHaveLength(0);
+  });
+
   it("meets collection performance budget on medium fixture repo", async () => {
     const fixtureFiles: Record<string, string> = {};
     for (let i = 0; i < 300; i++) {
