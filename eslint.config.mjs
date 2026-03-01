@@ -182,6 +182,12 @@ export default tseslint.config(
 		files: ["src/core/**/*.ts"],
 		rules: {
 			"no-console": "error",
+			"no-restricted-imports": ["error", {
+				patterns: [{
+					group: ["../shell/*", "node:fs*", "node:child_process"],
+					message: "Core must not import shell or Node I/O modules"
+				}]
+			}]
 		},
 	},
 
