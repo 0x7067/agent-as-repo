@@ -11,7 +11,7 @@ export interface GlobOptions {
 }
 
 export interface FileSystemPort {
-  readFile(path: string, encoding: BufferEncoding): Promise<string>;
+  readFile(path: string, encoding: string): Promise<string>;
   writeFile(path: string, data: string): Promise<void>;
   stat(path: string): Promise<StatResult>;
   access(path: string): Promise<void>;
