@@ -10,6 +10,7 @@ interface MockPassages {
 
 interface MockBlocks {
   retrieve: Mock;
+  update: Mock;
 }
 
 interface MockMessages {
@@ -61,6 +62,7 @@ function makeMockClient(): MockLettaClient {
       },
       blocks: {
         retrieve: vi.fn().mockResolvedValue({ id: "block-1", value: "Architecture summary.", label: "architecture", limit: 5000 }),
+        update: vi.fn().mockResolvedValue({ id: "block-1", value: "Updated.", label: "persona", limit: 5000 }),
       },
       messages: {
         create: vi.fn().mockResolvedValue({
@@ -294,6 +296,18 @@ describe("LettaProvider", () => {
 
       expect(block).toEqual({ value: "Architecture summary.", limit: 5000 });
       expect(client.agents.blocks.retrieve).toHaveBeenCalledWith("architecture", { agent_id: "agent-abc" });
+    });
+  });
+
+  describe("updateBlock", () => {
+    it("delegates to client.agents.blocks.update and returns value and limit", async () => {
+      const client = makeMockClient();
+      const provider = new LettaProvider(mockClientAs(client));
+
+      const block = await provider.updateBlock("agent-abc", "persona", "Updated.");
+
+      expect(block).toEqual({ value: "Updated.", limit: 5000 });
+      expect(client.agents.blocks.update).toHaveBeenCalledWith("persona", { agent_id: "agent-abc", value: "Updated." });
     });
   });
 

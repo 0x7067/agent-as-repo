@@ -132,6 +132,13 @@ export class LettaProvider implements AgentProvider {
     return { value: block.value, limit: block.limit ?? 0 };
   }
 
+  async updateBlock(agentId: string, label: string, value: string): Promise<MemoryBlock> {
+    const block: BlockResponse = await this.withRetry(() =>
+      this.client.agents.blocks.update(label, { agent_id: agentId, value }),
+    );
+    return { value: block.value, limit: block.limit ?? 0 };
+  }
+
   async storePassage(agentId: string, text: string): Promise<string> {
     const result: LettaPassage[] = await this.withRetry(() =>
       this.client.agents.passages.create(agentId, { text }),

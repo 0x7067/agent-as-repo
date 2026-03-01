@@ -1,77 +1,45 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Mock } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerTools } from "./mcp-server.js";
+import type { AgentProvider } from "./shell/provider.js";
+import type { AdminPort } from "./ports/admin.js";
 
-interface MockPassages {
-  search: Mock;
-  create: Mock;
-  delete: Mock;
-}
-
-interface MockBlocks {
-  update: Mock;
-}
-
-interface MockMessages {
-  create: Mock;
-}
-
-interface MockAgents {
-  list: Mock;
-  retrieve: Mock;
-  passages: MockPassages;
-  blocks: MockBlocks;
-  messages: MockMessages;
-}
-
-interface MockLettaClient {
-  agents: MockAgents;
-}
-
-function makeAsyncIterable<T>(items: T[]) {
+function makeMockProvider(): AgentProvider {
   return {
-    [Symbol.asyncIterator]: async function* () {
-      for (const item of items) yield item;
-    },
+    createAgent: vi.fn(),
+    deleteAgent: vi.fn(),
+    enableSleeptime: vi.fn(),
+    storePassage: vi.fn<[], Promise<string>>().mockResolvedValue("p-new"),
+    deletePassage: vi.fn<[], Promise<void>>().mockResolvedValue(),
+    listPassages: vi.fn().mockResolvedValue([]),
+    getBlock: vi.fn().mockResolvedValue({ value: "block value", limit: 5000 }),
+    updateBlock: vi.fn().mockResolvedValue({ value: "Updated.", limit: 5000 }),
+    sendMessage: vi.fn<[], Promise<string>>().mockResolvedValue("Hello from agent"),
   };
 }
 
-function makeMockClient(): MockLettaClient {
+function makeMockAdmin(): AdminPort {
   return {
-    agents: {
-      list: vi.fn().mockReturnValue(
-        makeAsyncIterable([
-          { id: "agent-1", name: "Alice", description: "Test agent", model: "openai/gpt-4.1" },
-          { id: "agent-2", name: "Bob", description: null, model: "openai/gpt-4.1-mini" },
-        ]),
-      ),
-      retrieve: vi.fn().mockResolvedValue({
-        id: "agent-1",
-        name: "Alice",
-        model: "openai/gpt-4.1",
-        blocks: [
-          { label: "persona", value: "I am Alice.", limit: 5000 },
-          { label: "human", value: "Unknown user.", limit: 5000 },
-        ],
-      }),
-      passages: {
-        search: vi.fn().mockResolvedValue({ count: 1, results: [{ id: "p-1", content: "found it", timestamp: "2026-01-01" }] }),
-        create: vi.fn().mockResolvedValue([{ id: "p-new", text: "new passage" }]),
-        delete: vi.fn().mockResolvedValue(),
-      },
-      blocks: {
-        update: vi.fn().mockResolvedValue({ id: "block-1", label: "persona", value: "Updated.", limit: 5000 }),
-      },
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          messages: [
-            { message_type: "tool_call_message", id: "m1", tool_call: { name: "memory_search", arguments: "" } },
-            { message_type: "assistant_message", id: "m2", content: "Hello from agent" },
-          ],
-        }),
-      },
-    },
+    listAgents: vi.fn().mockResolvedValue([
+      { id: "agent-1", name: "Alice", description: "Test agent", model: "openai/gpt-4.1" },
+      { id: "agent-2", name: "Bob", description: null, model: "openai/gpt-4.1-mini" },
+    ]),
+    getAgent: vi.fn().mockResolvedValue({
+      id: "agent-1",
+      name: "Alice",
+      model: "openai/gpt-4.1",
+      blocks: [
+        { label: "persona", value: "I am Alice.", limit: 5000 },
+        { label: "human", value: "Unknown user.", limit: 5000 },
+      ],
+    }),
+    getCoreMemory: vi.fn().mockResolvedValue([
+      { label: "persona", value: "I am Alice.", limit: 5000 },
+      { label: "human", value: "Unknown user.", limit: 5000 },
+    ]),
+    searchPassages: vi.fn().mockResolvedValue([
+      { id: "p-1", text: "found it" },
+    ]),
   };
 }
 
@@ -91,12 +59,14 @@ function extractToolHandler(server: McpServer, toolName: string): ToolHandler {
 
 describe("MCP Server tools", () => {
   let server: McpServer;
-  let client: MockLettaClient;
+  let provider: AgentProvider;
+  let admin: AdminPort;
 
   beforeEach(() => {
     server = new McpServer({ name: "test", version: "0.0.1" });
-    client = makeMockClient();
-    registerTools(server, client as unknown as Parameters<typeof registerTools>[1]);
+    provider = makeMockProvider();
+    admin = makeMockAdmin();
+    registerTools(server, provider, admin);
   });
 
   it("registers all 8 tools", () => {
@@ -124,13 +94,7 @@ describe("MCP Server tools", () => {
     });
 
     it("returns isError on failure", async () => {
-      const failing = {
-        [Symbol.asyncIterator]: async function* () {
-          throw new Error("API down");
-        },
-        then: (_: unknown, reject: (e: unknown) => void) => { reject(new Error("API down")); },
-      };
-      client.agents.list.mockReturnValue(failing);
+      (admin.listAgents as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("API down"));
       const handler = extractToolHandler(server, "letta_list_agents");
       const result = await handler({});
       expect(result.isError).toBe(true);
@@ -145,11 +109,11 @@ describe("MCP Server tools", () => {
       const data = JSON.parse(result.content[0].text);
       expect(data.id).toBe("agent-1");
       expect(data.name).toBe("Alice");
-      expect(client.agents.retrieve).toHaveBeenCalledWith("agent-1");
+      expect(admin.getAgent).toHaveBeenCalledWith("agent-1");
     });
 
     it("returns isError on failure", async () => {
-      client.agents.retrieve.mockRejectedValue(new Error("not found"));
+      (admin.getAgent as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("not found"));
       const handler = extractToolHandler(server, "letta_get_agent");
       const result = await handler({ agent_id: "bad-id" });
       expect(result.isError).toBe(true);
@@ -162,29 +126,25 @@ describe("MCP Server tools", () => {
       const handler = extractToolHandler(server, "letta_send_message");
       const result = await handler({ agent_id: "agent-1", content: "Hi" });
       expect(result.content[0].text).toBe("Hello from agent");
-      expect(client.agents.messages.create).toHaveBeenCalledWith("agent-1", {
-        messages: [{ role: "user", content: "Hi" }],
-      });
+      expect(provider.sendMessage).toHaveBeenCalledWith("agent-1", "Hi", {});
     });
 
-    it("returns empty string when no assistant message", async () => {
-      client.agents.messages.create.mockResolvedValue({
-        messages: [{ message_type: "tool_call_message", id: "m1", tool_call: { name: "t", arguments: "" } }],
-      });
+    it("returns empty string when provider returns empty", async () => {
+      (provider.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue("");
       const handler = extractToolHandler(server, "letta_send_message");
       const result = await handler({ agent_id: "agent-1", content: "Hi" });
       expect(result.content[0].text).toBe("");
     });
 
     it("returns isError on failure", async () => {
-      client.agents.messages.create.mockRejectedValue(new Error("timeout"));
+      (provider.sendMessage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("timeout"));
       const handler = extractToolHandler(server, "letta_send_message");
       const result = await handler({ agent_id: "agent-1", content: "Hi" });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toBe("timeout");
     });
 
-    it("passes override_model and max_steps through to API", async () => {
+    it("passes overrideModel and maxSteps through to provider", async () => {
       const handler = extractToolHandler(server, "letta_send_message");
       await handler({
         agent_id: "agent-1",
@@ -192,10 +152,9 @@ describe("MCP Server tools", () => {
         override_model: "openai/gpt-4.1-mini",
         max_steps: 3,
       });
-      expect(client.agents.messages.create).toHaveBeenCalledWith("agent-1", {
-        messages: [{ role: "user", content: "Hi" }],
-        override_model: "openai/gpt-4.1-mini",
-        max_steps: 3,
+      expect(provider.sendMessage).toHaveBeenCalledWith("agent-1", "Hi", {
+        overrideModel: "openai/gpt-4.1-mini",
+        maxSteps: 3,
       });
     });
   });
@@ -212,14 +171,14 @@ describe("MCP Server tools", () => {
     });
 
     it("returns empty array when no memory blocks", async () => {
-      client.agents.retrieve.mockResolvedValue({ id: "agent-1", name: "Alice", blocks: null });
+      (admin.getCoreMemory as ReturnType<typeof vi.fn>).mockResolvedValue([]);
       const handler = extractToolHandler(server, "letta_get_core_memory");
       const result = await handler({ agent_id: "agent-1" });
       expect(JSON.parse(result.content[0].text)).toEqual([]);
     });
 
     it("returns isError on failure", async () => {
-      client.agents.retrieve.mockRejectedValue(new Error("agent gone"));
+      (admin.getCoreMemory as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("agent gone"));
       const handler = extractToolHandler(server, "letta_get_core_memory");
       const result = await handler({ agent_id: "bad-id" });
       expect(result.isError).toBe(true);
@@ -232,18 +191,18 @@ describe("MCP Server tools", () => {
       const handler = extractToolHandler(server, "letta_search_archival");
       const result = await handler({ agent_id: "agent-1", query: "auth" });
       const data = JSON.parse(result.content[0].text);
-      expect(data.count).toBe(1);
-      expect(client.agents.passages.search).toHaveBeenCalledWith("agent-1", { query: "auth", top_k: undefined });
+      expect(data).toEqual([{ id: "p-1", text: "found it" }]);
+      expect(admin.searchPassages).toHaveBeenCalledWith("agent-1", "auth", undefined);
     });
 
     it("passes top_k when provided", async () => {
       const handler = extractToolHandler(server, "letta_search_archival");
       await handler({ agent_id: "agent-1", query: "auth", top_k: 5 });
-      expect(client.agents.passages.search).toHaveBeenCalledWith("agent-1", { query: "auth", top_k: 5 });
+      expect(admin.searchPassages).toHaveBeenCalledWith("agent-1", "auth", 5);
     });
 
     it("returns isError on failure", async () => {
-      client.agents.passages.search.mockRejectedValue(new Error("search failed"));
+      (admin.searchPassages as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("search failed"));
       const handler = extractToolHandler(server, "letta_search_archival");
       const result = await handler({ agent_id: "agent-1", query: "auth" });
       expect(result.isError).toBe(true);
@@ -252,16 +211,16 @@ describe("MCP Server tools", () => {
   });
 
   describe("letta_insert_passage", () => {
-    it("inserts and returns the passage", async () => {
+    it("inserts and returns the passage id", async () => {
       const handler = extractToolHandler(server, "letta_insert_passage");
       const result = await handler({ agent_id: "agent-1", text: "new passage" });
       const data = JSON.parse(result.content[0].text);
-      expect(data[0].id).toBe("p-new");
-      expect(client.agents.passages.create).toHaveBeenCalledWith("agent-1", { text: "new passage" });
+      expect(data.id).toBe("p-new");
+      expect(provider.storePassage).toHaveBeenCalledWith("agent-1", "new passage");
     });
 
     it("returns isError on failure", async () => {
-      client.agents.passages.create.mockRejectedValue(new Error("quota exceeded"));
+      (provider.storePassage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("quota exceeded"));
       const handler = extractToolHandler(server, "letta_insert_passage");
       const result = await handler({ agent_id: "agent-1", text: "x" });
       expect(result.isError).toBe(true);
@@ -274,11 +233,11 @@ describe("MCP Server tools", () => {
       const handler = extractToolHandler(server, "letta_delete_passage");
       const result = await handler({ agent_id: "agent-1", passage_id: "p-1" });
       expect(result.content[0].text).toBe("Deleted");
-      expect(client.agents.passages.delete).toHaveBeenCalledWith("p-1", { agent_id: "agent-1" });
+      expect(provider.deletePassage).toHaveBeenCalledWith("agent-1", "p-1");
     });
 
     it("returns isError on failure", async () => {
-      client.agents.passages.delete.mockRejectedValue(new Error("not found"));
+      (provider.deletePassage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("not found"));
       const handler = extractToolHandler(server, "letta_delete_passage");
       const result = await handler({ agent_id: "agent-1", passage_id: "p-x" });
       expect(result.isError).toBe(true);
@@ -291,13 +250,13 @@ describe("MCP Server tools", () => {
       const handler = extractToolHandler(server, "letta_update_block");
       const result = await handler({ agent_id: "agent-1", label: "persona", value: "Updated." });
       const data = JSON.parse(result.content[0].text);
-      expect(data.label).toBe("persona");
       expect(data.value).toBe("Updated.");
-      expect(client.agents.blocks.update).toHaveBeenCalledWith("persona", { agent_id: "agent-1", value: "Updated." });
+      expect(data.limit).toBe(5000);
+      expect(provider.updateBlock).toHaveBeenCalledWith("agent-1", "persona", "Updated.");
     });
 
     it("returns isError on failure", async () => {
-      client.agents.blocks.update.mockRejectedValue(new Error("not found"));
+      (provider.updateBlock as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("not found"));
       const handler = extractToolHandler(server, "letta_update_block");
       const result = await handler({ agent_id: "agent-1", label: "persona", value: "x" });
       expect(result.isError).toBe(true);
