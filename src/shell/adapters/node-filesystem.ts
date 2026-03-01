@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
+import { watch as fsWatch } from "node:fs";
 import fg from "fast-glob";
-import type { FileSystemPort, GlobOptions, StatResult } from "../../ports/filesystem.js";
+import type { FileSystemPort, GlobOptions, StatResult, WatcherHandle } from "../../ports/filesystem.js";
 
 export const nodeFileSystem: FileSystemPort = {
   readFile: (path, encoding) => fs.readFile(path, { encoding: encoding as BufferEncoding }),
@@ -13,4 +14,7 @@ export const nodeFileSystem: FileSystemPort = {
   rename: (from, to) => fs.rename(from, to),
   copyFile: (src, dest) => fs.copyFile(src, dest),
   glob: (patterns, options: GlobOptions) => fg(patterns, options),
+  watch: (path, options, listener): WatcherHandle => {
+    return fsWatch(path, options, listener);
+  },
 };

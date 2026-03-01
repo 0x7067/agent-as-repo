@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { nodeFileSystem } from "./node-filesystem.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -122,5 +122,28 @@ describe("nodeFileSystem adapter", () => {
       expect(results).not.toContain("src/b.js");
       expect(results).not.toContain("readme.md");
     });
+  });
+
+  it("glob respects onlyFiles option via fast-glob", async () => {
+    await withTmpDir(async (dir) => {
+      await fs.mkdir(path.join(dir, "sub"), { recursive: true });
+      await fs.writeFile(path.join(dir, "sub/file.ts"), "x", "utf8");
+
+      const results = await nodeFileSystem.glob(["**/*"], {
+        cwd: dir,
+        onlyFiles: true,
+        followSymbolicLinks: false,
+      });
+
+      expect(results).toContain("sub/file.ts");
+      expect(results.every((r) => !r.endsWith("sub"))).toBe(true);
+    });
+  });
+
+  it("watch calls fs.watch and returns a handle with close and on", () => {
+    const handle = nodeFileSystem.watch(os.tmpdir(), { recursive: true }, vi.fn());
+    expect(typeof handle.close).toBe("function");
+    expect(typeof handle.on).toBe("function");
+    handle.close();
   });
 });

@@ -8,6 +8,14 @@ export interface GlobOptions {
   ignore?: string[];
   absolute?: boolean;
   dot?: boolean;
+  deep?: number;
+  onlyFiles?: boolean;
+  followSymbolicLinks?: boolean;
+}
+
+export interface WatcherHandle {
+  close(): void;
+  on(event: "error", listener: (err: Error) => void): this;
 }
 
 export interface FileSystemPort {
@@ -18,4 +26,9 @@ export interface FileSystemPort {
   rename(from: string, to: string): Promise<void>;
   copyFile(src: string, dest: string): Promise<void>;
   glob(patterns: string[], options: GlobOptions): Promise<string[]>;
+  watch(
+    path: string,
+    options: { recursive?: boolean },
+    listener: (event: string, filename: string | null) => void,
+  ): WatcherHandle;
 }
