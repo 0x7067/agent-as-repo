@@ -8,6 +8,9 @@ import type { AgentProvider, SendMessageOptions } from "./shell/provider.js";
 import type { AdminPort } from "./ports/admin.js";
 import { LettaProvider } from "./shell/letta-provider.js";
 import { LettaAdminAdapter } from "./shell/adapters/letta-admin-adapter.js";
+import { VikingProvider } from "./shell/viking-provider.js";
+import { VikingHttpClient } from "./shell/viking-http.js";
+import { VikingAdminAdapter } from "./shell/adapters/viking-admin-adapter.js";
 
 // Accept LETTA_PASSWORD as alias for LETTA_API_KEY (Codex compat)
 // Stryker disable next-line ConditionalExpression,LogicalOperator,StringLiteral -- module-level env setup, untestable in unit tests
@@ -181,9 +184,26 @@ function errorMessage(err: unknown): string {
 
 export async function main(): Promise<void> {
   const server = new McpServer({ name: "letta-tools", version: "1.0.0" });
-  const client = createClient();
-  const provider = new LettaProvider(client);
-  const admin = new LettaAdminAdapter(client);
+
+  const providerType = process.env["PROVIDER_TYPE"] ?? "letta";
+  let provider: AgentProvider;
+  let admin: AdminPort;
+
+  if (providerType === "viking") {
+    const openrouterApiKey = process.env["OPENROUTER_API_KEY"] ?? "";
+    const vikingUrl = process.env["VIKING_URL"] ?? "http://localhost:1933";
+    const vikingApiKey = process.env["VIKING_API_KEY"];
+    const model = process.env["OPENROUTER_MODEL"] ?? "openai/gpt-4o-mini";
+    const viking = new VikingHttpClient(vikingUrl, vikingApiKey);
+    const vikingProvider = new VikingProvider(viking, openrouterApiKey, model);
+    provider = vikingProvider;
+    admin = new VikingAdminAdapter(vikingProvider, viking);
+  } else {
+    const client = createClient();
+    provider = new LettaProvider(client);
+    admin = new LettaAdminAdapter(client);
+  }
+
   registerTools(server, provider, admin);
   const transport = new StdioServerTransport();
   await server.connect(transport);

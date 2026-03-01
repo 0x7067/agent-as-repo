@@ -19,6 +19,8 @@ import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
 import { bootstrapAgent } from "./shell/bootstrap.js";
 import type { AgentProvider, CreateAgentParams, SendMessageOptions } from "./shell/provider.js";
 import { LettaProvider } from "./shell/letta-provider.js";
+import { VikingProvider } from "./shell/viking-provider.js";
+import { VikingHttpClient } from "./shell/viking-http.js";
 import { rawTextStrategy } from "./core/chunker.js";
 import { shouldIncludeFile } from "./core/filter.js";
 import { partitionDiffPaths } from "./core/submodule.js";
@@ -151,15 +153,22 @@ class CliUserError extends Error {
   }
 }
 
-function requireApiKey(): void {
-  if (!process.env.LETTA_API_KEY) {
-    throw new CliUserError('Missing LETTA_API_KEY.\nRun "repo-expert init" to configure, or add it to .env manually.');
+function createProvider(config: Config): AgentProvider {
+  if (config.provider.type === "letta") {
+    if (!process.env["LETTA_API_KEY"]) {
+      throw new CliUserError('Missing LETTA_API_KEY.\nRun "repo-expert init" to configure, or add it to .env manually.');
+    }
+    return new LettaProvider(new Letta({ timeout: 5 * 60 * 1000 }));
+  } else {
+    if (!process.env["OPENROUTER_API_KEY"]) {
+      throw new CliUserError('Missing OPENROUTER_API_KEY. Add it to .env.');
+    }
+    const vikingUrl = process.env["VIKING_URL"] ?? "http://localhost:1933";
+    const vikingApiKey = process.env["VIKING_API_KEY"];
+    const openrouterApiKey = process.env["OPENROUTER_API_KEY"]!;
+    const viking = new VikingHttpClient(vikingUrl, vikingApiKey);
+    return new VikingProvider(viking, openrouterApiKey, config.provider.openrouterModel);
   }
-}
-
-function createProvider(): LettaProvider {
-  requireApiKey();
-  return new LettaProvider(new Letta({ timeout: 5 * 60 * 1000 }));
 }
 
 class FakeProvider implements AgentProvider {
@@ -234,11 +243,19 @@ class FakeProvider implements AgentProvider {
   }
 }
 
-function createProviderForCommands(): AgentProvider {
+function createProviderForCommands(config: Config | null): AgentProvider {
   if (process.env.REPO_EXPERT_TEST_FAKE_PROVIDER === "1") {
     return new FakeProvider();
   }
-  return createProvider();
+  if (!config) {
+    throw new CliUserError('Config required. Run "repo-expert init" or ensure config.yaml exists.');
+  }
+  return createProvider(config);
+}
+
+async function loadConfigForProvider(configPath: string): Promise<Config | null> {
+  if (process.env.REPO_EXPERT_TEST_FAKE_PROVIDER === "1") return null;
+  return loadConfigSafe(configPath);
 }
 
 async function loadConfigSafe(configPath: string): Promise<Config> {
@@ -513,8 +530,11 @@ program
     }
 
     let provider: AgentProvider | null = null;
-    if (process.env.LETTA_API_KEY) {
-      provider = createProviderForCommands();
+    try {
+      const doctorConfig = await loadConfigSafe(configPath);
+      provider = createProviderForCommands(doctorConfig);
+    } catch {
+      // provider stays null if config is missing or API key is absent
     }
     const results = await runAllChecks(provider, configPath);
     if (opts.json) {
@@ -568,7 +588,7 @@ program
 
     const configPath = path.resolve(opts.config);
     const config = await loadConfigSafe(configPath);
-    const provider = createProviderForCommands();
+    const provider = createProviderForCommands(config);
     let state = await loadState(STATE_FILE);
 
     const repoNames = opts.repo ? [opts.repo] : Object.keys(config.repos);
@@ -795,7 +815,8 @@ program
         return;
       }
 
-      const provider = createProvider();
+      const askAllConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
+      const provider = createProvider(askAllConfig);
       const agents = entries.map(([repoName, agent]) => ({ repoName, agentId: agent.agentId }));
 
       console.log(`Broadcasting to ${agents.length} agents...`);
@@ -826,7 +847,8 @@ program
     const agentInfo = requireAgent(state, repo);
     if (!agentInfo) return;
 
-    const provider = createProvider();
+    const askConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
+    const provider = createProvider(askConfig);
     const askSettings = await buildAskSettings();
     const stop = startSpinner(`Asking ${repo}...`);
     try {
@@ -852,7 +874,7 @@ program
     const log = opts.json ? (_: string) => {} : (line: string) => { console.log(line); };
     const configPath = path.resolve(opts.config);
     const config = await loadConfigSafe(configPath);
-    const provider = opts.dryRun ? null : createProviderForCommands();
+    const provider = opts.dryRun ? null : createProviderForCommands(config);
     let state = await loadState(STATE_FILE);
     const syncResults: Array<Record<string, unknown>> = [];
 
@@ -1044,7 +1066,8 @@ program
     }));
 
     if (opts.live) {
-      const provider = createProviderForCommands();
+      const listConfig = await loadConfigForProvider(path.resolve("config.yaml"));
+      const provider = createProviderForCommands(listConfig);
       for (const row of rows) {
         const serverPassages = await provider.listPassages(row.agentId);
         row.serverPassages = serverPassages.length;
@@ -1075,7 +1098,8 @@ program
   .option("--json", "Output status as JSON")
   .action(async (opts: RepoOpts) => {
     const state = await loadState(STATE_FILE);
-    const provider = createProviderForCommands();
+    const statusConfig = await loadConfigForProvider(path.resolve("config.yaml"));
+    const provider = createProviderForCommands(statusConfig);
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
     const rows: unknown[] = [];
 
@@ -1102,7 +1126,8 @@ program
   .option("--repo <name>", "Export a single repo agent")
   .action(async (opts: RepoOpts) => {
     const state = await loadState(STATE_FILE);
-    const provider = createProvider();
+    const exportConfig = await loadConfigSafe(path.resolve("config.yaml"));
+    const provider = createProvider(exportConfig);
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
 
     for (const repoName of repoNames) {
@@ -1122,7 +1147,8 @@ program
     const agentInfo = requireAgent(state, repo);
     if (!agentInfo) return;
 
-    const provider = createProvider();
+    const onboardConfig = await loadConfigSafe(path.resolve("config.yaml"));
+    const provider = createProvider(onboardConfig);
     const walkthrough = await onboardAgent(provider, repo, agentInfo.agentId);
     console.log(walkthrough);
   });
@@ -1168,7 +1194,8 @@ program
       }
     }
 
-    const provider = createProviderForCommands();
+    const destroyConfig = await loadConfigForProvider(path.resolve("config.yaml"));
+    const provider = createProviderForCommands(destroyConfig);
 
     for (const repoName of existing) {
       const agentInfo = state.agents[repoName];
@@ -1205,7 +1232,8 @@ program
       return;
     }
 
-    const provider = createProviderForCommands();
+    const reconcileConfig = await loadConfigForProvider(path.resolve("config.yaml"));
+    const provider = createProviderForCommands(reconcileConfig);
     const results: ReconcileResult[] = [];
     let anyDrift = false;
 
@@ -1274,7 +1302,8 @@ program
       return;
     }
 
-    const provider = createProviderForCommands();
+    const sleeptimeConfig = await loadConfigForProvider(path.resolve("config.yaml"));
+    const provider = createProviderForCommands(sleeptimeConfig);
     for (const repoName of existing) {
       const agentInfo = state.agents[repoName];
       process.stdout.write(`Enabling sleep-time for "${repoName}" (${agentInfo.agentId})... `);
@@ -1319,7 +1348,7 @@ program
 
     const intervalMs = Math.max(1, parseIntOrDefault(opts.interval, DEFAULT_WATCH_CONFIG.intervalMs / 1000)) * 1000;
     const debounceMs = Math.max(50, parseIntOrDefault(opts.debounce, DEFAULT_WATCH_CONFIG.debounceMs));
-    const provider = createProvider();
+    const provider = createProvider(config);
     const ac = new AbortController();
 
     const shutdown = () => { ac.abort(); };
@@ -1460,7 +1489,9 @@ program
   .option("--local", "Write to local ./.claude.json")
   .option("--base-url <url>", "Letta base URL", "https://api.letta.com")
   .action(async (opts: McpInstallOpts) => {
-    requireApiKey();
+    if (!process.env["LETTA_API_KEY"]) {
+      throw new CliUserError('Missing LETTA_API_KEY.\nRun "repo-expert init" to configure, or add it to .env manually.');
+    }
     if (opts.global && opts.local) {
       console.error("Choose either --global or --local, not both.");
       process.exitCode = 1;
