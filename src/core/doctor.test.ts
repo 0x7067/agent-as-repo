@@ -12,6 +12,9 @@ describe("formatDoctorReport", () => {
     expect(report).toContain("API key");
     expect(report).toContain("Config file");
     expect(report).toContain("All checks passed");
+    // First line should be a check result, not "Stryker was here" (catches ArrayDeclaration mutation)
+    const firstLine = report.split("\n")[0];
+    expect(firstLine).toContain("PASS");
   });
 
   it("formats failures", () => {
@@ -43,6 +46,28 @@ describe("formatDoctorReport", () => {
     ];
     const report = formatDoctorReport(results);
     expect(report).toContain("2 issues");
+  });
+
+  it("uses singular 'issue' for exactly one problem", () => {
+    const results: CheckResult[] = [
+      { name: "A", status: "fail", message: "bad" },
+    ];
+    const report = formatDoctorReport(results);
+    expect(report).toContain("1 issue found.");
+    expect(report).not.toContain("1 issues");
+  });
+
+  it("joins lines with newline separator (not empty string)", () => {
+    // Catches: join("\n") → join("") mutation
+    const results: CheckResult[] = [
+      { name: "A", status: "pass", message: "ok" },
+      { name: "B", status: "pass", message: "ok" },
+    ];
+    const report = formatDoctorReport(results);
+    // With join("\n"): "  PASS  A: ok\n  PASS  B: ok\n\nAll checks passed."
+    // With join(""): "  PASS  A: ok  PASS  B: ok\nAll checks passed."
+    // The first two check lines should be separated by \n
+    expect(report).toContain("A: ok\n  PASS  B:");
   });
 
   it("handles empty results", () => {

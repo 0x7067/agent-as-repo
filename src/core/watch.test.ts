@@ -1,9 +1,17 @@
 import { describe, it, expect } from "vitest";
 import {
+  DEFAULT_WATCH_CONFIG,
   shouldSync,
   formatSyncLog,
   computeBackoffDelay,
 } from "./watch.js";
+
+describe("DEFAULT_WATCH_CONFIG", () => {
+  it("has expected default values", () => {
+    expect(DEFAULT_WATCH_CONFIG.intervalMs).toBe(5000);
+    expect(DEFAULT_WATCH_CONFIG.debounceMs).toBe(250);
+  });
+});
 
 describe("shouldSync", () => {
   it("returns true when lastSyncCommit is null", () => {

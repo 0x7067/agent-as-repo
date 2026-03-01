@@ -6,3 +6,5 @@ dist/
 .mcp.json
 config.yaml
 .claude.local.md
+reports/
+.stryker-tmp/
