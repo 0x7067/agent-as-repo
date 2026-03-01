@@ -1,10 +1,12 @@
-import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
 import type { CheckResult } from "../core/doctor.js";
 import { createEmptyState } from "../core/state.js";
 import { saveState } from "./state-store.js";
 import type { AgentProvider } from "./provider.js";
+import type { FileSystemPort } from "../ports/filesystem.js";
+import type { GitPort } from "../ports/git.js";
+import { nodeFileSystem } from "./adapters/node-filesystem.js";
+import { nodeGit } from "./adapters/node-git.js";
 
 export async function checkApiKey(): Promise<CheckResult> {
   if (!process.env.LETTA_API_KEY) {
@@ -23,7 +25,7 @@ export async function checkApiConnection(provider: AgentProvider, agentId: strin
   }
 }
 
-export async function checkConfigFile(configPath: string): Promise<CheckResult> {
+export async function checkConfigFile(configPath: string, fs: FileSystemPort = nodeFileSystem): Promise<CheckResult> {
   try {
     await fs.access(configPath);
     return { name: "Config file", status: "pass", message: `${configPath} found` };
@@ -32,7 +34,7 @@ export async function checkConfigFile(configPath: string): Promise<CheckResult> 
   }
 }
 
-export async function checkRepoPaths(configPath: string): Promise<CheckResult[]> {
+export async function checkRepoPaths(configPath: string, fs: FileSystemPort = nodeFileSystem): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
   let config: Record<string, unknown>;
@@ -60,9 +62,9 @@ export async function checkRepoPaths(configPath: string): Promise<CheckResult[]>
   return results;
 }
 
-export function checkGit(): CheckResult {
+export function checkGit(git: GitPort = nodeGit): CheckResult {
   try {
-    const version = execFileSync("git", ["--version"], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+    const version = git.version();
     return { name: "Git", status: "pass", message: version };
   } catch {
     return { name: "Git", status: "fail", message: "git not found on PATH" };
@@ -122,7 +124,6 @@ export async function runAllChecks(provider: AgentProvider | null, configPath: s
 
   results.push(await checkApiKey());
 
-  // Connection check: use first agent in state as a ping target
   if (provider) {
     try {
       const { loadState } = await import("./state-store.js");
@@ -156,22 +157,26 @@ export interface DoctorFixResult {
   suggestions: string[];
 }
 
-export async function runDoctorFixes(configPath: string): Promise<DoctorFixResult> {
+export async function runDoctorFixes(
+  configPath: string,
+  cwd = process.cwd(),
+  fs: FileSystemPort = nodeFileSystem,
+): Promise<DoctorFixResult> {
   const applied: string[] = [];
   const suggestions: string[] = [];
 
-  const envPath = path.resolve(".env");
+  const envPath = path.resolve(cwd, ".env");
   try {
     await fs.access(envPath);
   } catch {
-    await fs.writeFile(envPath, "LETTA_API_KEY=your-key-here\n", "utf-8");
+    await fs.writeFile(envPath, "LETTA_API_KEY=your-key-here\n");
     applied.push(`Created ${envPath} with LETTA_API_KEY template.`);
   }
 
   try {
     await fs.access(configPath);
   } catch {
-    const examplePath = path.resolve("config.example.yaml");
+    const examplePath = path.resolve(cwd, "config.example.yaml");
     try {
       await fs.copyFile(examplePath, configPath);
       applied.push(`Copied ${examplePath} to ${configPath}.`);
@@ -180,11 +185,11 @@ export async function runDoctorFixes(configPath: string): Promise<DoctorFixResul
     }
   }
 
-  const statePath = path.resolve(".repo-expert-state.json");
+  const statePath = path.resolve(cwd, ".repo-expert-state.json");
   try {
     await fs.access(statePath);
   } catch {
-    await saveState(statePath, createEmptyState());
+    await saveState(statePath, createEmptyState(), fs);
     applied.push(`Created empty state file at ${statePath}.`);
   }
 
