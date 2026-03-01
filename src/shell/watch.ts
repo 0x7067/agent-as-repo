@@ -65,8 +65,7 @@ function toAgentPath(repoConfig: RepoConfig, repoRelativePath: string): string |
 async function filterChangedFiles(repoConfig: RepoConfig, changedFiles: string[]): Promise<string[]> {
   const regularFiles = changedFiles
     .map((filePath) => toAgentPath(repoConfig, filePath))
-    .filter(Boolean)
-    .filter((filePath) => shouldIncludeFile(filePath, 0, repoConfig)) as string[];
+    .filter((filePath): filePath is string => filePath !== null && shouldIncludeFile(filePath, 0, repoConfig));
 
   if (!repoConfig.includeSubmodules) return regularFiles;
 
@@ -282,7 +281,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
         (_eventType, fileName) => {
           if (signal.aborted) return;
           if (!fileName) return;
-          const rawName = typeof fileName === "string" ? fileName : fileName.toString("utf-8");
+          const rawName = fileName;
           const absoluteChangedPath = path.isAbsolute(rawName)
             ? path.normalize(rawName)
             : path.normalize(path.resolve(repoConfig.path, rawName));

@@ -119,6 +119,7 @@ describe("watchRepos", () => {
       filesRemoved: 0,
       filesReIndexed: 1,
       isFullReIndex: false,
+      failedFiles: [],
     });
 
     const log = vi.fn();
@@ -191,6 +192,7 @@ describe("watchRepos", () => {
       filesRemoved: 0,
       filesReIndexed: 1,
       isFullReIndex: false,
+      failedFiles: [],
     });
 
     const log = vi.fn();
@@ -341,6 +343,7 @@ describe("watchRepos", () => {
       filesRemoved: 0,
       filesReIndexed: 1,
       isFullReIndex: false,
+      failedFiles: [],
     });
 
     const log = vi.fn();
@@ -415,6 +418,7 @@ describe("watchRepos", () => {
       filesRemoved: 0,
       filesReIndexed: 1,
       isFullReIndex: false,
+      failedFiles: [],
     });
 
     const log = vi.fn();
@@ -539,6 +543,7 @@ describe("watchRepos", () => {
       filesRemoved: 0,
       filesReIndexed: 1,
       isFullReIndex: false,
+      failedFiles: [],
     });
 
     const log = vi.fn();
@@ -579,6 +584,7 @@ describe("watchRepos", () => {
       filesRemoved: 0,
       filesReIndexed: 1,
       isFullReIndex: false,
+      failedFiles: [],
     });
 
     const ac = new AbortController();
@@ -671,6 +677,7 @@ describe("watchRepos", () => {
       filesRemoved: 0,
       filesReIndexed: 1,
       isFullReIndex: false,
+      failedFiles: [],
     });
 
     const ac = new AbortController();
@@ -708,6 +715,7 @@ describe("watchRepos", () => {
       filesRemoved: 0,
       filesReIndexed: 0,
       isFullReIndex: true,
+      failedFiles: [],
     });
 
     const ac = new AbortController();
@@ -743,6 +751,7 @@ describe("watchRepos", () => {
       filesRemoved: 0,
       filesReIndexed: 1,
       isFullReIndex: false,
+      failedFiles: [],
     });
 
     const ac = new AbortController();
@@ -788,6 +797,7 @@ describe("watchRepos", () => {
       filesRemoved: 0,
       filesReIndexed: 1,
       isFullReIndex: false,
+      failedFiles: [],
     });
 
     const ac = new AbortController();
@@ -955,6 +965,7 @@ describe("watchRepos", () => {
         filesRemoved: 0,
         filesReIndexed: 1,
         isFullReIndex: false,
+        failedFiles: [],
       };
     });
 
@@ -1102,6 +1113,7 @@ describe("watchRepos", () => {
         filesRemoved: 0,
         filesReIndexed: 1,
         isFullReIndex: false,
+        failedFiles: [],
       };
     });
 
@@ -1285,6 +1297,7 @@ describe("watchRepos", () => {
       filesRemoved: 0,
       filesReIndexed: 2,
       isFullReIndex: false,
+      failedFiles: [],
     });
 
     const ac = new AbortController();
