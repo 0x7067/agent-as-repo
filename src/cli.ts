@@ -1573,7 +1573,7 @@ program
     console.log(`Completion script written to ${targetPath}`);
   });
 
-async function main(argv = process.argv): Promise<void> {
+export async function main(argv = process.argv): Promise<void> {
   await program.parseAsync(argv);
 }
 

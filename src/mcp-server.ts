@@ -179,7 +179,7 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const server = new McpServer({ name: "letta-tools", version: "1.0.0" });
   const client = createClient();
   const provider = new LettaProvider(client);

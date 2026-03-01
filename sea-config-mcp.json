@@ -1,0 +1,1 @@
+{ "main": "dist/sea-mcp-server.cjs", "output": "dist/sea-mcp.blob" }
