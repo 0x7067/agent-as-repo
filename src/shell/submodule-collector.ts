@@ -1,7 +1,8 @@
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
 import { parseSubmoduleStatus } from "../core/submodule.js";
 import { collectFiles } from "./file-collector.js";
+import { nodeGit } from "./adapters/node-git.js";
+import type { GitPort } from "../ports/git.js";
 import type { RepoConfig, SubmoduleInfo } from "../core/types.js";
 
 /**
@@ -28,15 +29,10 @@ export async function expandSubmoduleFiles(
  * Returns all submodules for the repo at `repoPath` by running `git submodule status`.
  * Returns an empty array if the repo has no submodules or if git is unavailable.
  */
-export function listSubmodules(repoPath: string): SubmoduleInfo[] {
-  try {
-    const output = execFileSync("git", ["submodule", "status"], {
-      cwd: repoPath,
-      encoding: "utf-8",
-      timeout: 10_000,
-    });
-    return parseSubmoduleStatus(output);
-  } catch {
-    return [];
-  }
+export function listSubmodules(
+  repoPath: string,
+  git: GitPort = nodeGit,
+): SubmoduleInfo[] {
+  const output = git.submoduleStatus(repoPath);
+  return parseSubmoduleStatus(output);
 }
