@@ -1,8 +1,8 @@
-import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type * as readline from "node:readline/promises";
-import fg from "fast-glob";
+import type { FileSystemPort } from "../ports/filesystem.js";
+import { nodeFileSystem } from "./adapters/node-filesystem.js";
 import {
   detectExtensions,
   suggestIgnoreDirs,
@@ -21,13 +21,15 @@ export interface RunInitOptions {
   repoPath?: string;
   assumeYes?: boolean;
   allowPrompts?: boolean;
+  cwd?: string;
+  fs?: FileSystemPort;
 }
 
 /**
  * Scan a directory for file paths (no content). Used for extension/ignore detection.
  */
-async function scanFilePaths(repoPath: string): Promise<string[]> {
-  return fg("**/*", {
+async function scanFilePaths(repoPath: string, fs: FileSystemPort): Promise<string[]> {
+  return fs.glob(["**/*"], {
     cwd: repoPath,
     absolute: false,
     dot: true,
@@ -54,11 +56,13 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
     repoPath: repoPathFromFlag,
     assumeYes = false,
     allowPrompts = true,
+    cwd = process.cwd(),
+    fs = nodeFileSystem,
   } = options;
   console.log("repo-expert init — set up your first agent\n");
 
   // 1. API key
-  const envPath = path.resolve(".env");
+  const envPath = path.resolve(cwd, ".env");
   let envWritten: string | null = null;
   const existingKey = process.env.LETTA_API_KEY;
 
@@ -135,7 +139,7 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
 
   // 3. Scan and detect
   console.log("\nScanning files...");
-  const files = await scanFilePaths(resolvedPath);
+  const files = await scanFilePaths(resolvedPath, fs);
   const extensions = detectExtensions(files);
   const ignoreDirs = suggestIgnoreDirs(files);
   const repoName = detectRepoName(resolvedPath);
@@ -184,7 +188,7 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
   }
 
   // 6. Write config.yaml
-  const configPath = path.resolve("config.yaml");
+  const configPath = path.resolve(cwd, "config.yaml");
   const yamlContent = generateConfigYaml({
     repoName,
     repoPath: displayPath,
