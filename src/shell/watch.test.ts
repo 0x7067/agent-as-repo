@@ -358,6 +358,7 @@ describe("watchRepos", () => {
     expect(syncCall.changedFiles).toEqual(["src/a.ts"]);
   });
 
+  // eslint-disable-next-line vitest/expect-expect
   it("respects AbortSignal for graceful shutdown", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
@@ -555,7 +556,8 @@ describe("watchRepos", () => {
     // Poll-based sync should NOT have [event] suffix
     const syncLog = log.mock.calls.find(([msg]) => (msg as string).includes("synced"));
     expect(syncLog).toBeDefined();
-    expect(syncLog![0]).not.toContain("[event]");
+    if (!syncLog) return;
+    expect(syncLog[0]).not.toContain("[event]");
   });
 
   it("filters event-based changed files through shouldIncludeFile", async () => {
@@ -681,7 +683,7 @@ describe("watchRepos", () => {
 
     // saveState should be called with state containing lastSyncAt
     expect(mockedSaveState).toHaveBeenCalled();
-    const savedState = mockedSaveState.mock.calls[0][1] as AppState;
+    const savedState = mockedSaveState.mock.calls[0][1];
     expect(savedState.agents["my-app"].lastSyncAt).not.toBeNull();
     expect(savedState.agents["my-app"].lastSyncCommit).toBe("def456");
   });
@@ -719,10 +721,11 @@ describe("watchRepos", () => {
 
     // Git rev-parse called with "HEAD" as arg
     const revParseCall = mockedExecFileSync.mock.calls.find(
-      ([, args]) => (args as string[])?.includes("rev-parse"),
+      ([, args]) => (args as string[]).includes("rev-parse"),
     );
     expect(revParseCall).toBeDefined();
-    expect(revParseCall![1]).toContain("HEAD");
+    if (!revParseCall) return;
+    expect(revParseCall[1]).toContain("HEAD");
   });
 
   it("normalizes backslashes in file paths to forward slashes", async () => {
@@ -756,15 +759,14 @@ describe("watchRepos", () => {
 
     const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
     // Fire event with Windows-style backslash path
-    (watchCallback as (eventType: string, fileName: string) => void)("change", "src\\a.ts");
+    (watchCallback as (eventType: string, fileName: string) => void)("change", String.raw`src\a.ts`);
 
     await vi.advanceTimersByTimeAsync(100);
 
     // Should normalize to "src/a.ts" (not "src\\a.ts")
-    if (mockedSyncRepo.mock.calls.length > 0) {
-      const syncCall = mockedSyncRepo.mock.calls[0][0];
-      expect(syncCall.changedFiles).not.toContain("src\\a.ts");
-    }
+    expect(mockedSyncRepo).toHaveBeenCalledTimes(1);
+    const syncCallBackslash = mockedSyncRepo.mock.calls[0][0];
+    expect(syncCallBackslash.changedFiles).not.toContain(String.raw`src\a.ts`);
 
     ac.abort();
     await vi.advanceTimersByTimeAsync(200);
@@ -806,11 +808,10 @@ describe("watchRepos", () => {
 
     await vi.advanceTimersByTimeAsync(100);
 
-    if (mockedSyncRepo.mock.calls.length > 0) {
-      const syncCall = mockedSyncRepo.mock.calls[0][0];
-      // Should strip "./" prefix, resulting in "src/a.ts" not "./src/a.ts"
-      expect(syncCall.changedFiles).not.toContain("./src/a.ts");
-    }
+    // Should strip "./" prefix, resulting in "src/a.ts" not "./src/a.ts"
+    expect(mockedSyncRepo).toHaveBeenCalledTimes(1);
+    const syncCallDot = mockedSyncRepo.mock.calls[0][0];
+    expect(syncCallDot.changedFiles).not.toContain("./src/a.ts");
 
     ac.abort();
     await vi.advanceTimersByTimeAsync(200);
@@ -852,7 +853,7 @@ describe("watchRepos", () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining("synced"));
     // Should save state with updated lastSyncCommit
     expect(mockedSaveState).toHaveBeenCalled();
-    const savedState = mockedSaveState.mock.calls[0][1] as AppState;
+    const savedState = mockedSaveState.mock.calls[0][1];
     expect(savedState.agents["my-app"].lastSyncCommit).toBe("def456");
   });
 
@@ -925,17 +926,18 @@ describe("watchRepos", () => {
     // Log should include "backoff Xs" (delay / 1000, not * 1000)
     const errorLog = log.mock.calls.find(([msg]) => (msg as string).includes("sync error"));
     expect(errorLog).toBeDefined();
-    const msg = errorLog![0] as string;
+    if (!errorLog) return;
+    const msg = errorLog[0] as string;
     // Backoff should be a reasonable number of seconds (not thousands of seconds)
     const match = /backoff (\d+)s/.exec(msg);
     expect(match).toBeDefined();
-    const backoffSeconds = parseInt(match![1], 10);
+    if (!match) return;
+    const backoffSeconds = Number.parseInt(match[1], 10);
     expect(backoffSeconds).toBeLessThan(100); // not delay * 1000
   });
 
   it("pending files trigger debounced re-sync after sync completes", async () => {
     // After syncRepoNow completes, if there are pending files they should trigger a new sync
-    let syncCount = 0;
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
     mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
@@ -943,7 +945,6 @@ describe("watchRepos", () => {
       return "";
     });
     mockedSyncRepo.mockImplementation(async () => {
-      syncCount++;
       return {
         passages: {},
         lastSyncCommit: "abc123",
@@ -1117,7 +1118,7 @@ describe("watchRepos", () => {
     // First tick: fails
     await vi.advanceTimersByTimeAsync(0);
     // Advance far enough to clear backoff
-    await vi.advanceTimersByTimeAsync(60000);
+    await vi.advanceTimersByTimeAsync(60_000);
 
     ac.abort();
     await vi.advanceTimersByTimeAsync(200);
@@ -1153,13 +1154,13 @@ describe("watchRepos", () => {
 
     // Simulate watcher emitting an error
     const watcherMock = mockedFsWatch.mock.results[0]?.value as { on: ReturnType<typeof vi.fn> };
-    const errorCallback = watcherMock?.on.mock.calls.find(([event]: [string]) => event === "error");
-    if (errorCallback) {
-      (errorCallback[1] as (err: Error) => void)(new Error("Watch permission denied"));
-      // Error should be logged
-      expect(log).toHaveBeenCalledWith(expect.stringContaining("file watch error"));
-      expect(log).toHaveBeenCalledWith(expect.stringContaining("Watch permission denied"));
-    }
+    const errorCallback = watcherMock.on.mock.calls.find(([event]: [string]) => event === "error");
+    expect(errorCallback).toBeDefined();
+    if (!errorCallback) return;
+    (errorCallback[1] as (err: Error) => void)(new Error("Watch permission denied"));
+    // Error should be logged
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("file watch error"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("Watch permission denied"));
 
     ac.abort();
     await vi.advanceTimersByTimeAsync(200);

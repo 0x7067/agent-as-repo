@@ -1,5 +1,4 @@
-import type { vi } from "vitest";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { roundRobin, supervisorFanOut, broadcastAsk } from "./group-provider.js";
 import type { RoundRobinConfig, SupervisorConfig } from "./group-provider.js";
 import { makeMockProvider } from "./__test__/mock-provider.js";
@@ -88,9 +87,9 @@ describe("broadcastAsk", () => {
 
   it("handles agent timeout gracefully", async () => {
     const provider = makeMockProvider();
-    (provider.sendMessage as ReturnType<typeof vi.fn>)
+    vi.mocked(provider.sendMessage)
       .mockResolvedValueOnce("fast answer")
-      .mockImplementationOnce(() => new Promise((resolve) => setTimeout(resolve, 5000)));
+      .mockImplementationOnce(() => new Promise<string>((resolve) => setTimeout(() => { resolve(""); }, 5000)));
 
     const agents = [
       { repoName: "fast-repo", agentId: "a1" },

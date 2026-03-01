@@ -13,6 +13,7 @@ import unicorn from "eslint-plugin-unicorn";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
+// eslint-disable-next-line @typescript-eslint/no-deprecated
 export default tseslint.config(
 	// ============================================================
 	// 🚫 GLOBAL IGNORES
@@ -205,6 +206,7 @@ export default tseslint.config(
 			"sonarjs/no-duplicate-string": "off",
 			 
 			// Test fixtures use fake credentials intentionally
+			// eslint-disable-next-line sonarjs/no-hardcoded-passwords
 			"sonarjs/no-hardcoded-passwords": "off",
 			// Tests often need `any` for mocking
 			"@typescript-eslint/no-explicit-any": "off",
@@ -219,6 +221,14 @@ export default tseslint.config(
 			"unicorn/prefer-module": "off",
 			// Tests often have long setup/assertion blocks
 			"max-lines": "off",
+			// Tests use dynamic paths for temp dirs and fixtures
+			"security/detect-non-literal-fs-filename": "off",
+			// Tests use os.tmpdir() / /tmp intentionally
+			"sonarjs/publicly-writable-directories": "off",
+			// Mock method references (vi.fn()) trigger false positives
+			"@typescript-eslint/unbound-method": "off",
+			// Mock implementations satisfy async interfaces without awaiting
+			"@typescript-eslint/require-await": "off",
 		},
 		languageOptions: {
 			globals: {

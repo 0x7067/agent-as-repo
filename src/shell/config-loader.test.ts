@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { loadConfig } from "./config-loader.js";
 import * as fs from "node:fs/promises";
-import * as path from "node:path";
+import path from "node:path";
 import * as os from "node:os";
 import type { FileSystemPort } from "../ports/filesystem.js";
 
 async function withTempConfig(yamlContent: string, fn: (filePath: string) => Promise<void>) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "config-test-"));
   const filePath = path.join(dir, "config.yaml");
-  await fs.writeFile(filePath, yamlContent, "utf-8");
+  await fs.writeFile(filePath, yamlContent, "utf8");
   try {
     await fn(filePath);
   } finally {

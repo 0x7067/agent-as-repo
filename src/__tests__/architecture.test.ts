@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import * as path from "node:path";
+import path from "node:path";
 import { describe, it, expect } from "vitest";
 
 const ROOT = path.resolve(__dirname, "../..");
@@ -24,7 +24,7 @@ describe("Architecture: core layer boundaries", () => {
   it("no core file imports from shell", () => {
     const violations: string[] = [];
     for (const file of coreFiles()) {
-      // eslint-disable-next-line security/detect-non-literal-fs-filename
+       
       const content = fs.readFileSync(file, "utf8");
       if (/from\s+['"]\.\.\/shell\//.test(content)) {
         violations.push(file);
@@ -36,7 +36,7 @@ describe("Architecture: core layer boundaries", () => {
   it("no core file imports from ports", () => {
     const violations: string[] = [];
     for (const file of coreFiles()) {
-      // eslint-disable-next-line security/detect-non-literal-fs-filename
+       
       const content = fs.readFileSync(file, "utf8");
       if (/from\s+['"]\.\.\/ports\//.test(content)) {
         violations.push(file);
@@ -48,7 +48,7 @@ describe("Architecture: core layer boundaries", () => {
   it("no core file imports node:fs", () => {
     const violations: string[] = [];
     for (const file of coreFiles()) {
-      // eslint-disable-next-line security/detect-non-literal-fs-filename
+       
       const content = fs.readFileSync(file, "utf8");
       if (/from\s+['"]node:fs/.test(content)) {
         violations.push(file);
@@ -60,7 +60,7 @@ describe("Architecture: core layer boundaries", () => {
   it("no core file imports node:child_process", () => {
     const violations: string[] = [];
     for (const file of coreFiles()) {
-      // eslint-disable-next-line security/detect-non-literal-fs-filename
+       
       const content = fs.readFileSync(file, "utf8");
       if (/from\s+['"]node:child_process/.test(content)) {
         violations.push(file);
@@ -72,7 +72,7 @@ describe("Architecture: core layer boundaries", () => {
   it("no core file imports fast-glob", () => {
     const violations: string[] = [];
     for (const file of coreFiles()) {
-      // eslint-disable-next-line security/detect-non-literal-fs-filename
+       
       const content = fs.readFileSync(file, "utf8");
       if (/from\s+['"]fast-glob['"]/.test(content)) {
         violations.push(file);
@@ -86,8 +86,9 @@ describe("Architecture: ports layer — interfaces only", () => {
   it("port files contain no class declarations", () => {
     const violations: string[] = [];
     for (const file of portFiles()) {
-      // eslint-disable-next-line security/detect-non-literal-fs-filename
+       
       const content = fs.readFileSync(file, "utf8");
+      // eslint-disable-next-line sonarjs/slow-regex
       if (/^\s*class\s+\w+/m.test(content)) {
         violations.push(file);
       }
@@ -98,10 +99,11 @@ describe("Architecture: ports layer — interfaces only", () => {
   it("port files contain no function implementations", () => {
     const violations: string[] = [];
     for (const file of portFiles()) {
-      // eslint-disable-next-line security/detect-non-literal-fs-filename
+       
       const content = fs.readFileSync(file, "utf8");
       // Match standalone function declarations with a body (not method signatures in interfaces)
-      if (/^\s*(?:export\s+)?function\s+\w+[^;]*\{/m.test(content)) {
+      // eslint-disable-next-line security/detect-unsafe-regex, sonarjs/slow-regex
+      if (/^\s*(?:export\s+)?function\s+\w[^;]*\{/m.test(content)) {
         violations.push(file);
       }
     }

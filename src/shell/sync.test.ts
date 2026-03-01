@@ -6,7 +6,7 @@ import { makeMockProvider as makeBase } from "./__test__/mock-provider.js";
 function makeMockProvider() {
   let passageCounter = 0;
   return makeBase({
-    storePassage: vi.fn().mockImplementation(async () => `passage-${++passageCounter}`),
+    storePassage: vi.fn().mockImplementation(async () => `passage-${String(++passageCounter)}`),
   });
 }
 
@@ -298,7 +298,7 @@ describe("syncRepo", () => {
   it("passageIds array has correct length for multi-chunk files", async () => {
     const provider = makeMockProvider();
     let storeCount = 0;
-    provider.storePassage = vi.fn().mockImplementation(async () => `pid-${++storeCount}`);
+    provider.storePassage = vi.fn().mockImplementation(async () => `pid-${String(++storeCount)}`);
 
     const twoChunkStrategy = vi.fn().mockReturnValue([
       { text: "chunk-1", sourcePath: "src/a.ts" },
@@ -326,7 +326,7 @@ describe("syncRepo", () => {
       provider.storePassage = vi.fn().mockImplementation(async (_agentId: string, text: string) => {
         callCount++;
         if (text.includes("src/a.ts")) throw new Error("upload failed");
-        return `passage-${callCount}`;
+        return `passage-${String(callCount)}`;
       });
 
       const errors: Array<{ file: string; error: Error }> = [];

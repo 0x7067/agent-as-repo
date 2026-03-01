@@ -249,8 +249,8 @@ describe("LettaProvider", () => {
     it("paginates when server returns a full page", async () => {
       const PAGE_SIZE = 1000;
       const firstPage = Array.from({ length: PAGE_SIZE }, (_, i) => ({
-        id: `p-${i}`,
-        text: `chunk ${i}`,
+        id: `p-${String(i)}`,
+        text: `chunk ${String(i)}`,
         embedding: null,
         embedding_config: null,
       }));
@@ -270,13 +270,13 @@ describe("LettaProvider", () => {
       expect(passages).toHaveLength(PAGE_SIZE + 2);
       expect(client.agents.passages.list).toHaveBeenCalledTimes(2);
       expect(client.agents.passages.list).toHaveBeenNthCalledWith(1, "agent-abc", { limit: 1000, ascending: true });
-      expect(client.agents.passages.list).toHaveBeenNthCalledWith(2, "agent-abc", { limit: 1000, ascending: true, after: `p-${PAGE_SIZE - 1}` });
+      expect(client.agents.passages.list).toHaveBeenNthCalledWith(2, "agent-abc", { limit: 1000, ascending: true, after: `p-${String(PAGE_SIZE - 1)}` });
     });
 
     it("returns single page when count < PAGE_SIZE", async () => {
       const client = makeMockClient();
       client.agents.passages.list.mockResolvedValue(
-        Array.from({ length: 50 }, (_, i) => ({ id: `p-${i}`, text: `chunk ${i}`, embedding: null, embedding_config: null })),
+        Array.from({ length: 50 }, (_, i) => ({ id: `p-${String(i)}`, text: `chunk ${String(i)}`, embedding: null, embedding_config: null })),
       );
       const provider = new LettaProvider(mockClientAs(client));
 
@@ -537,7 +537,7 @@ describe("LettaProvider", () => {
       client.agents.passages.create
         .mockRejectedValueOnce(rateLimitError)
         .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
-      const provider = new LettaProvider(mockClientAs(client), 99999); // huge base delay
+      const provider = new LettaProvider(mockClientAs(client), 99_999); // huge base delay
       const id = await provider.storePassage("agent-abc", "text");
       expect(id).toBe("passage-1"); // succeeded using retry-after delay, not base delay
     });
@@ -551,7 +551,7 @@ describe("LettaProvider", () => {
       client.agents.passages.create
         .mockRejectedValueOnce(rateLimitError)
         .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
-      const provider = new LettaProvider(mockClientAs(client), 99999);
+      const provider = new LettaProvider(mockClientAs(client), 99_999);
       const id = await provider.storePassage("agent-abc", "text");
       expect(id).toBe("passage-1");
     });
@@ -565,7 +565,7 @@ describe("LettaProvider", () => {
       client.agents.passages.create
         .mockRejectedValueOnce(rateLimitError)
         .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
-      const provider = new LettaProvider(mockClientAs(client), 99999); // huge base delay
+      const provider = new LettaProvider(mockClientAs(client), 99_999); // huge base delay
       const id = await provider.storePassage("agent-abc", "text");
       expect(id).toBe("passage-1"); // used numeric Retry-After (1s), not base delay
     });
@@ -621,7 +621,7 @@ describe("LettaProvider", () => {
       client.agents.passages.create
         .mockRejectedValueOnce(rateLimitError)
         .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
-      const provider = new LettaProvider(mockClientAs(client), 99999);
+      const provider = new LettaProvider(mockClientAs(client), 99_999);
       // If lowercase wins: 1ms delay → completes; if uppercase wins: 300s → hangs
       const id = await provider.storePassage("agent-abc", "text");
       expect(id).toBe("passage-1");
@@ -710,8 +710,8 @@ describe("LettaProvider", () => {
     it("stops pagination when last page item has no id", async () => {
       const PAGE_SIZE = 1000;
       const firstPage = Array.from({ length: PAGE_SIZE }, (_, i) => ({
-        id: i < PAGE_SIZE - 1 ? `p-${i}` : undefined, // last item has no id
-        text: `chunk ${i}`,
+        id: i < PAGE_SIZE - 1 ? `p-${String(i)}` : undefined, // last item has no id
+        text: `chunk ${String(i)}`,
         embedding: null,
         embedding_config: null,
       }));

@@ -51,7 +51,7 @@ interface RegisteredToolEntry {
 }
 
 function extractToolHandler(server: McpServer, toolName: string): ToolHandler {
-  const registeredTools = (server as unknown as { _registeredTools: Record<string, RegisteredToolEntry> })._registeredTools;
+  const registeredTools = (server as unknown as { _registeredTools: Record<string, RegisteredToolEntry | undefined> })._registeredTools;
   const tool = registeredTools[toolName];
   if (!tool) throw new Error(`Tool ${toolName} not registered`);
   return (args) => tool.handler(args, {});
@@ -107,7 +107,7 @@ describe("withTimeout", () => {
   });
 
   it("calls clearTimeout with the actual timer ID when function resolves", async () => {
-    const spy = vi.spyOn(global, "clearTimeout");
+    const spy = vi.spyOn(globalThis, "clearTimeout");
     await withTimeout("test", 5000, async () => "done");
     expect(spy).toHaveBeenCalledOnce();
     expect(spy.mock.calls[0][0]).toBeDefined();
@@ -144,7 +144,8 @@ describe("MCP Server tools", () => {
   it("registers all 8 tools", () => {
     const tools = (server as unknown as { _registeredTools: Record<string, unknown> })._registeredTools;
     expect(Object.keys(tools).length).toBe(8);
-    expect(Object.keys(tools).sort()).toEqual([
+    // eslint-disable-next-line unicorn/no-array-sort
+    expect(Object.keys(tools).sort((a, b) => a.localeCompare(b))).toEqual([
       "letta_delete_passage",
       "letta_get_agent",
       "letta_get_core_memory",
@@ -250,15 +251,15 @@ describe("MCP Server tools", () => {
       try {
         process.env["LETTA_ASK_TIMEOUT_MS"] = "5000";
         // Make sendMessage hang to verify timeout is used
-        let resolveHang: () => void;
-        (provider.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
-          () => new Promise<string>((resolve) => { resolveHang = () => resolve(""); }),
+        let resolveHang!: () => void;
+        vi.mocked(provider.sendMessage).mockImplementation(
+          () => new Promise<string>((resolve) => { resolveHang = () => { resolve(""); }; }),
         );
         const handler = extractToolHandler(server, "letta_send_message");
         const resultPromise = handler({ agent_id: "agent-1", content: "Hi" });
         // The tool should complete (env var parsed correctly as 5000ms; we won't wait that long)
         // Just verify sending works with the env var set (no crash on parsing)
-        resolveHang!();
+        resolveHang();
         const result = await resultPromise;
         expect(result.isError).toBeFalsy();
       } finally {
@@ -304,8 +305,8 @@ describe("MCP Server tools", () => {
       const origEnv = process.env["LETTA_ASK_TIMEOUT_MS"];
       process.env["LETTA_ASK_TIMEOUT_MS"] = "1"; // 1ms — would cause timeout if used
       try {
-        (provider.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
-          () => new Promise<string>((resolve) => setTimeout(() => resolve("ok"), 20)),
+        vi.mocked(provider.sendMessage).mockImplementation(
+          () => new Promise<string>((resolve) => setTimeout(() => { resolve("ok"); }, 20)),
         );
         const handler = extractToolHandler(server, "letta_send_message");
         // Explicit 10s timeout: should NOT time out even though env=1ms
@@ -321,8 +322,8 @@ describe("MCP Server tools", () => {
       const origEnv = process.env["LETTA_ASK_TIMEOUT_MS"];
       process.env["LETTA_ASK_TIMEOUT_MS"] = "1"; // 1ms
       try {
-        (provider.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
-          () => new Promise<string>((resolve) => setTimeout(() => resolve("ok"), 50)),
+        vi.mocked(provider.sendMessage).mockImplementation(
+          () => new Promise<string>((resolve) => setTimeout(() => { resolve("ok"); }, 50)),
         );
         const handler = extractToolHandler(server, "letta_send_message");
         const result = await handler({ agent_id: "agent-1", content: "Hi" });
@@ -336,7 +337,7 @@ describe("MCP Server tools", () => {
     });
 
     it("timeout error label includes override_model when provided (not 'agent-default')", async () => {
-      (provider.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      vi.mocked(provider.sendMessage).mockImplementation(
         () => new Promise<string>((resolve) => setTimeout(resolve, 5000)),
       );
       const handler = extractToolHandler(server, "letta_send_message");
@@ -352,7 +353,7 @@ describe("MCP Server tools", () => {
     });
 
     it("timeout error label uses 'agent-default' when override_model is absent", async () => {
-      (provider.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      vi.mocked(provider.sendMessage).mockImplementation(
         () => new Promise<string>((resolve) => setTimeout(resolve, 5000)),
       );
       const handler = extractToolHandler(server, "letta_send_message");

@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
-import * as path from "node:path";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { formatSelfChecks, runSelfChecks } from "./self-check.js";
 
@@ -39,7 +39,7 @@ describe("self-check", () => {
           packageManager: "npm@10.0.0",
           dependencies: { commander: "^14.0.0" },
         }),
-        "utf-8",
+        "utf8",
       );
 
       const results = await runSelfChecks(dir);
@@ -107,7 +107,7 @@ describe("self-check", () => {
       await fs.writeFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", version: "1.0.0" }),
-        "utf-8",
+        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const pmResult = results.find((r) => r.name === "packageManager");
@@ -122,7 +122,7 @@ describe("self-check", () => {
       await fs.writeFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", version: "1.0.0", packageManager: "pnpm@9.0.0" }),
-        "utf-8",
+        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const pmResult = results.find((r) => r.name === "packageManager");
@@ -136,7 +136,7 @@ describe("self-check", () => {
       await fs.writeFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", version: "1.0.0", packageManager: "npm@10.0.0" }),
-        "utf-8",
+        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const pmResult = results.find((r) => r.name === "packageManager");
@@ -151,7 +151,7 @@ describe("self-check", () => {
       await fs.writeFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", packageManager: "pnpm" }),
-        "utf-8",
+        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const pmResult = results.find((r) => r.name === "packageManager");
@@ -165,7 +165,7 @@ describe("self-check", () => {
       await fs.writeFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", version: "1.0.0", packageManager: "pnpm@9.0.0" }),
-        "utf-8",
+        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const depsResult = results.find((r) => r.name === "dependencies");
@@ -180,7 +180,7 @@ describe("self-check", () => {
       await fs.writeFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", dependencies: { vitest: "^1.0.0" } }),
-        "utf-8",
+        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const depsResult = results.find((r) => r.name === "dependencies");
@@ -197,6 +197,7 @@ describe("self-check", () => {
     const depsResult = results.find((r) => r.name === "dependencies");
     expect(depsResult?.status).toBe("pass");
     expect(depsResult?.name).toBe("dependencies");
+    // eslint-disable-next-line sonarjs/slow-regex
     expect(depsResult?.message).toMatch(/\d+ dependencies installed/);
   });
 
@@ -207,7 +208,7 @@ describe("self-check", () => {
       await fs.writeFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", dependencies: { "nonexistent-pkg": "^1.0.0" } }),
-        "utf-8",
+        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const depsResult = results.find((r) => r.name === "dependencies");
@@ -221,11 +222,11 @@ describe("self-check", () => {
     await withTempDir("repo-expert-self-check-many-missing-", async (dir) => {
       await fs.mkdir(path.join(dir, "node_modules"), { recursive: true });
       const deps: Record<string, string> = {};
-      for (let i = 0; i < 7; i++) deps[`pkg-${i}`] = "^1.0.0";
+      for (let i = 0; i < 7; i++) deps[`pkg-${String(i)}`] = "^1.0.0";
       await fs.writeFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", dependencies: deps }),
-        "utf-8",
+        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const depsResult = results.find((r) => r.name === "dependencies");
@@ -272,7 +273,7 @@ describe("self-check", () => {
       await fs.writeFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", dependencies: { "pkg-a": "^1.0.0", "pkg-b": "^1.0.0" } }),
-        "utf-8",
+        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const depsResult = results.find((r) => r.name === "dependencies");
@@ -286,11 +287,11 @@ describe("self-check", () => {
     await withTempDir("repo-expert-self-check-exactly5-", async (dir) => {
       await fs.mkdir(path.join(dir, "node_modules"), { recursive: true });
       const deps: Record<string, string> = {};
-      for (let i = 0; i < 5; i++) deps[`pkg-${i}`] = "^1.0.0";
+      for (let i = 0; i < 5; i++) deps[`pkg-${String(i)}`] = "^1.0.0";
       await fs.writeFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", dependencies: deps }),
-        "utf-8",
+        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const depsResult = results.find((r) => r.name === "dependencies");
@@ -315,13 +316,14 @@ describe("self-check", () => {
     await withTempDir("repo-expert-self-check-eacces-", async (dir) => {
       // Write a package.json then make it unreadable
       const pkgPath = path.join(dir, "package.json");
-      await fs.writeFile(pkgPath, JSON.stringify({ name: "x" }), "utf-8");
+      await fs.writeFile(pkgPath, JSON.stringify({ name: "x" }), "utf8");
       await fs.chmod(pkgPath, 0o000);
       try {
         // runSelfChecks calls readPackageJson internally; non-ENOENT errors should propagate
         await expect(runSelfChecks(dir, 1)).rejects.toThrow();
       } finally {
         // Restore permissions so cleanup works
+        // eslint-disable-next-line sonarjs/file-permissions
         await fs.chmod(pkgPath, 0o644);
       }
     });

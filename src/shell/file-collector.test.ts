@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { collectFiles } from "./file-collector.js";
 import * as fs from "node:fs/promises";
-import * as path from "node:path";
+import path from "node:path";
 import * as os from "node:os";
 import type { RepoConfig } from "../core/types.js";
 import type { FileSystemPort } from "../ports/filesystem.js";
@@ -14,7 +14,7 @@ async function withTempRepo(
   for (const [filePath, content] of Object.entries(files)) {
     const full = path.join(dir, filePath);
     await fs.mkdir(path.dirname(full), { recursive: true });
-    await fs.writeFile(full, content, "utf-8");
+    await fs.writeFile(full, content, "utf8");
   }
   try {
     await fn(dir);
@@ -216,7 +216,7 @@ describe("collectFiles", () => {
   it("meets collection performance budget on medium fixture repo", async () => {
     const fixtureFiles: Record<string, string> = {};
     for (let i = 0; i < 300; i++) {
-      fixtureFiles[`src/module-${i}.ts`] = `export const value${i} = ${i};\n`;
+      fixtureFiles[`src/module-${String(i)}.ts`] = `export const value${String(i)} = ${String(i)};\n`;
     }
 
     await withTempRepo(fixtureFiles, async (repoPath) => {
