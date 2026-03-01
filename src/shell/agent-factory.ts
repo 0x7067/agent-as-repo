@@ -1,12 +1,17 @@
 import pLimit from "p-limit";
-import type { RepoConfig, Config, Chunk, PassageMap, AgentState } from "../core/types.js";
+import type { RepoConfig, Chunk, PassageMap, AgentState } from "../core/types.js";
 import type { AgentProvider } from "./provider.js";
+
+interface CreateRepoAgentLettaOptions {
+  model: string;
+  embedding: string;
+}
 
 export async function createRepoAgent(
   provider: AgentProvider,
   repoName: string,
   repoConfig: RepoConfig,
-  letta: Config["letta"],
+  letta: CreateRepoAgentLettaOptions,
 ): Promise<AgentState> {
   const { agentId } = await provider.createAgent({
     name: `repo-expert-${repoName}`,

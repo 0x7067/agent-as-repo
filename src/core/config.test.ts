@@ -20,7 +20,10 @@ const validRaw = {
 describe("parseConfig", () => {
   it("parses a valid config with defaults applied", () => {
     const config = parseConfig(validRaw);
-    expect(config.letta.model).toBe("openai/gpt-4.1");
+    expect(config.provider.type).toBe("letta");
+    if (config.provider.type === "letta") {
+      expect(config.provider.model).toBe("openai/gpt-4.1");
+    }
     expect(config.repos["my-app"].maxFileSizeKb).toBe(50);
     expect(config.repos["my-app"].memoryBlockLimit).toBe(5000);
     expect(config.repos["my-app"].bootstrapOnCreate).toBe(true);
@@ -72,7 +75,11 @@ describe("parseConfig", () => {
       },
     };
     const config = parseConfig(raw);
-    expect(config.letta.fastModel).toBe("openai/gpt-4.1-mini");
+    if (config.provider.type === "letta") {
+      expect(config.provider.fastModel).toBe("openai/gpt-4.1-mini");
+    } else {
+      expect.unreachable("expected letta provider");
+    }
   });
 
   it("allows per-repo overrides of defaults", () => {
@@ -278,6 +285,64 @@ describe("parseConfig", () => {
       expect(error).toBeInstanceOf(ConfigError);
       const configErr = error as ConfigError;
       expect(configErr.issues.some((i) => i.includes("src/dist"))).toBe(true);
+    }
+  });
+
+  it("migrates old letta: format to provider: { type: 'letta', ... }", () => {
+    const config = parseConfig(validRaw);
+    expect(config.provider.type).toBe("letta");
+    if (config.provider.type === "letta") {
+      expect(config.provider.model).toBe("openai/gpt-4.1");
+      expect(config.provider.embedding).toBe("openai/text-embedding-3-small");
+    }
+  });
+
+  it("parses new provider: { type: 'letta' } format", () => {
+    const raw = {
+      provider: { type: "letta", model: "openai/gpt-4.1", embedding: "openai/text-embedding-3-small" },
+      repos: validRaw.repos,
+    };
+    const config = parseConfig(raw);
+    expect(config.provider.type).toBe("letta");
+    if (config.provider.type === "letta") {
+      expect(config.provider.model).toBe("openai/gpt-4.1");
+    }
+  });
+
+  it("parses viking provider config", () => {
+    const raw = {
+      provider: { type: "viking", openrouter_model: "openai/gpt-4o-mini" },
+      repos: validRaw.repos,
+    };
+    const config = parseConfig(raw);
+    expect(config.provider.type).toBe("viking");
+    if (config.provider.type === "viking") {
+      expect(config.provider.openrouterModel).toBe("openai/gpt-4o-mini");
+      expect(config.provider.vikingUrl).toBeUndefined();
+    }
+  });
+
+  it("parses viking provider config with optional viking_url", () => {
+    const raw = {
+      provider: { type: "viking", openrouter_model: "openai/gpt-4o-mini", viking_url: "http://localhost:1933" },
+      repos: validRaw.repos,
+    };
+    const config = parseConfig(raw);
+    if (config.provider.type === "viking") {
+      expect(config.provider.vikingUrl).toBe("http://localhost:1933");
+    } else {
+      expect.unreachable("expected viking provider");
+    }
+  });
+
+  it("throws ConfigError when neither provider nor letta is specified", () => {
+    try {
+      parseConfig({ repos: validRaw.repos });
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError);
+      const configErr = error as ConfigError;
+      expect(configErr.issues.some((i) => i.includes("provider") || i.includes("letta"))).toBe(true);
     }
   });
 });

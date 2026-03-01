@@ -425,7 +425,7 @@ async function loadAskConfigDefaults(configPath: string | undefined): Promise<{
 
   const config = await loadConfigSafe(resolvedPath);
   return {
-    fastModel: config.letta.fastModel,
+    fastModel: config.provider.type === "letta" ? config.provider.fastModel : undefined,
     askTimeoutMs: config.defaults.askTimeoutMs ?? defaults.askTimeoutMs,
   };
 }
@@ -614,7 +614,10 @@ program
       try {
         if (mode === "create") {
           const createStart = Date.now();
-          const agentState = await createRepoAgent(provider, repoName, repoConfig, config.letta);
+          if (config.provider.type !== "letta") {
+            throw new Error(`Provider type "${config.provider.type}" is not yet supported by the setup command`);
+          }
+          const agentState = await createRepoAgent(provider, repoName, repoConfig, config.provider);
           agentId = agentState.agentId;
           createMs = Date.now() - createStart;
           log(`  Agent created: ${agentId} (${formatDurationMs(createMs)})`);

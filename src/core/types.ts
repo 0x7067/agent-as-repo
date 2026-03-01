@@ -25,13 +25,13 @@ export interface RepoConfig {
   includeSubmodules?: boolean;
 }
 
+export type ProviderConfig =
+  | { type: "letta"; model: string; embedding: string; fastModel?: string }
+  | { type: "viking"; openrouterModel: string; vikingUrl?: string };
+
 /** Top-level validated config. */
 export interface Config {
-  letta: {
-    model: string;
-    embedding: string;
-    fastModel?: string;
-  };
+  provider: ProviderConfig;
   defaults: {
     maxFileSizeKb: number;
     memoryBlockLimit: number;

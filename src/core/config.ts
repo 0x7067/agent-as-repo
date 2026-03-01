@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import type { Config, RepoConfig } from "./types.js";
+import type { Config, RepoConfig, ProviderConfig } from "./types.js";
 
 const BUILT_IN_DEFAULTS = {
   maxFileSizeKb: 50,
@@ -34,11 +34,13 @@ const repoRawSchema = z.object({
 });
 
 const rawConfigSchema = z.object({
-  letta: z.object({
-    model: z.string(),
-    embedding: z.string(),
-    fast_model: z.string().optional(),
-  }),
+  // New form
+  provider: z.discriminatedUnion("type", [
+    z.object({ type: z.literal("letta"), model: z.string(), embedding: z.string(), fast_model: z.string().optional() }),
+    z.object({ type: z.literal("viking"), openrouter_model: z.string(), viking_url: z.string().optional() }),
+  ]).optional(),
+  // Old form (backwards compat)
+  letta: z.object({ model: z.string(), embedding: z.string(), fast_model: z.string().optional() }).optional(),
   defaults: defaultsSchema.optional(),
   repos: z.record(z.string(), repoRawSchema),
 });
@@ -97,9 +99,25 @@ export function parseConfig(raw: unknown): Config {
     throw error;
   }
 
+  if (!parsed.provider && !parsed.letta) {
+    throw new ConfigError(["Must specify either 'provider' or 'letta' configuration"]);
+  }
+
   const semanticIssues = validateSemantics(parsed);
   if (semanticIssues.length > 0) {
     throw new ConfigError(semanticIssues);
+  }
+
+  let providerConfig: ProviderConfig;
+  if (parsed.provider) {
+    if (parsed.provider.type === "letta") {
+      providerConfig = { type: "letta", model: parsed.provider.model, embedding: parsed.provider.embedding, fastModel: parsed.provider.fast_model };
+    } else {
+      providerConfig = { type: "viking", openrouterModel: parsed.provider.openrouter_model, vikingUrl: parsed.provider.viking_url };
+    }
+  } else {
+    // migrate old letta: format
+    providerConfig = { type: "letta", model: parsed.letta!.model, embedding: parsed.letta!.embedding, fastModel: parsed.letta!.fast_model };
   }
 
   const userDefaults = parsed.defaults ?? {};
@@ -130,11 +148,7 @@ export function parseConfig(raw: unknown): Config {
   }
 
   return {
-    letta: {
-      model: parsed.letta.model,
-      embedding: parsed.letta.embedding,
-      fastModel: parsed.letta.fast_model,
-    },
+    provider: providerConfig,
     defaults,
     repos,
   };

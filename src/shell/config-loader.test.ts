@@ -34,7 +34,10 @@ describe("loadConfig", () => {
   it("loads and parses a valid YAML config file", async () => {
     await withTempConfig(validYaml, async (filePath) => {
       const config = await loadConfig(filePath);
-      expect(config.letta.model).toBe("openai/gpt-4.1");
+      expect(config.provider.type).toBe("letta");
+      if (config.provider.type === "letta") {
+        expect(config.provider.model).toBe("openai/gpt-4.1");
+      }
       expect(config.repos["my-app"].extensions).toEqual([".ts", ".tsx"]);
     });
   });
@@ -89,7 +92,10 @@ repos:
     };
 
     const config = await loadConfig("/fake/config.yaml", mockFs);
-    expect(config.letta.model).toBe("openai/gpt-4.1");
+    expect(config.provider.type).toBe("letta");
+    if (config.provider.type === "letta") {
+      expect(config.provider.model).toBe("openai/gpt-4.1");
+    }
     expect(config.repos["my-app"]).toBeDefined();
   });
 
