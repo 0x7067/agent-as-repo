@@ -1,15 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Config, AppState } from "../core/types.js";
-import type { FSWatcher } from "node:fs";
-
-// Mock child_process and fs before importing watch module
-vi.mock("child_process", () => ({
-  execFileSync: vi.fn(),
-}));
-
-vi.mock("fs", () => ({
-  watch: vi.fn(),
-}));
+import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
+import type { GitPort } from "../ports/git.js";
 
 vi.mock("./state-store.js", () => ({
   loadState: vi.fn(),
@@ -29,15 +21,11 @@ vi.mock("./submodule-collector.js", () => ({
   expandSubmoduleFiles: vi.fn().mockResolvedValue([]),
 }));
 
-import { execFileSync } from "node:child_process";
-import { watch as fsWatch } from "node:fs";
 import { loadState, saveState } from "./state-store.js";
 import { syncRepo } from "./sync.js";
 import { listSubmodules, expandSubmoduleFiles } from "./submodule-collector.js";
 import { watchRepos } from "./watch.js";
 
-const mockedExecFileSync = vi.mocked(execFileSync);
-const mockedFsWatch = vi.mocked(fsWatch);
 const mockedLoadState = vi.mocked(loadState);
 const mockedSaveState = vi.mocked(saveState);
 const mockedSyncRepo = vi.mocked(syncRepo);
@@ -46,6 +34,33 @@ const mockedExpandSubmoduleFiles = vi.mocked(expandSubmoduleFiles);
 
 // Import shared mock after vi.mock calls
 import { makeMockProvider } from "./__test__/mock-provider.js";
+
+function makeFakeGit(overrides: Partial<GitPort> = {}): GitPort {
+  return {
+    submoduleStatus: vi.fn().mockReturnValue(""),
+    version: vi.fn().mockReturnValue("git version 2.39.0"),
+    headCommit: vi.fn().mockReturnValue("abc1234"),
+    diffFiles: vi.fn().mockReturnValue([]),
+    ...overrides,
+  };
+}
+
+function makeFakeFs(overrides: Partial<FileSystemPort> = {}): FileSystemPort {
+  return {
+    readFile: vi.fn().mockResolvedValue(""),
+    writeFile: vi.fn().mockResolvedValue(undefined),
+    stat: vi.fn().mockResolvedValue({ size: 0, isDirectory: () => false }),
+    access: vi.fn().mockResolvedValue(undefined),
+    rename: vi.fn().mockResolvedValue(undefined),
+    copyFile: vi.fn().mockResolvedValue(undefined),
+    glob: vi.fn().mockResolvedValue([]),
+    watch: vi.fn().mockReturnValue({
+      on: vi.fn().mockReturnThis(),
+      close: vi.fn(),
+    } as unknown as WatcherHandle),
+    ...overrides,
+  };
+}
 
 const testConfig: Config = {
   letta: { model: "letta-free", embedding: "letta-free" },
@@ -84,13 +99,6 @@ function makeState(lastSyncCommit: string | null = "abc123"): AppState {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
-  mockedFsWatch.mockImplementation(
-    () =>
-      ({
-        close: vi.fn(),
-        on: vi.fn().mockReturnThis(),
-      }) as unknown as FSWatcher,
-  );
 });
 
 afterEach(() => {
@@ -101,10 +109,9 @@ describe("watchRepos", () => {
   it("triggers sync when HEAD changes", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "def456\n";
-      if (args?.includes("--name-only")) return "src/a.ts\n";
-      return "";
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
     });
     mockedSyncRepo.mockResolvedValue({
       passages: { "src/a.ts": ["p-2"] },
@@ -126,6 +133,8 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     // Let the first tick complete
@@ -145,10 +154,7 @@ describe("watchRepos", () => {
   it("skips when HEAD is unchanged", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "abc123\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123") });
 
     const log = vi.fn();
     const ac = new AbortController();
@@ -161,6 +167,8 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -175,10 +183,8 @@ describe("watchRepos", () => {
   it("triggers sync from file events even when HEAD is unchanged", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "abc123\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123") });
+    const fakeFs = makeFakeFs();
     mockedSyncRepo.mockResolvedValue({
       passages: { "src/a.ts": ["p-2"] },
       lastSyncCommit: "abc123",
@@ -199,10 +205,12 @@ describe("watchRepos", () => {
       debounceMs: 100,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: fakeFs,
     });
 
     await vi.advanceTimersByTimeAsync(0);
-    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    const watchCallback = vi.mocked(fakeFs.watch).mock.calls[0]?.[2];
     expect(typeof watchCallback).toBe("function");
     (watchCallback as (eventType: string, fileName: string) => void)("change", "src/a.ts");
 
@@ -221,10 +229,8 @@ describe("watchRepos", () => {
   it("ignores state file events to avoid self-trigger loops", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "abc123\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123") });
+    const fakeFs = makeFakeFs();
 
     const log = vi.fn();
     const ac = new AbortController();
@@ -238,10 +244,12 @@ describe("watchRepos", () => {
       debounceMs: 100,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: fakeFs,
     });
 
     await vi.advanceTimersByTimeAsync(0);
-    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    const watchCallback = vi.mocked(fakeFs.watch).mock.calls[0]?.[2];
     expect(typeof watchCallback).toBe("function");
     (watchCallback as (eventType: string, fileName: string) => void)("change", "state.json");
     (watchCallback as (eventType: string, fileName: string) => void)("change", "/tmp/my-app/state.json");
@@ -257,10 +265,9 @@ describe("watchRepos", () => {
   it("logs error without crashing on sync failure", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "def456\n";
-      if (args?.includes("--name-only")) return "src/a.ts\n";
-      return "";
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
     });
     mockedSyncRepo.mockRejectedValue(new Error("Letta API down"));
 
@@ -275,6 +282,8 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -289,10 +298,9 @@ describe("watchRepos", () => {
   it("skips sync when git diff fails", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "def456\n";
-      if (args?.includes("--name-only")) throw new Error("git diff failed");
-      return "";
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue(null),
     });
 
     const log = vi.fn();
@@ -306,6 +314,8 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -321,10 +331,9 @@ describe("watchRepos", () => {
   it("filters changed files by extension and ignoreDirs", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "def456\n";
-      if (args?.includes("--name-only")) return "src/a.ts\nREADME.md\nnode_modules/pkg/index.js\n";
-      return "";
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue(["src/a.ts", "README.md", "node_modules/pkg/index.js"]),
     });
     mockedSyncRepo.mockResolvedValue({
       passages: { "src/a.ts": ["p-2"] },
@@ -345,6 +354,8 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -362,10 +373,7 @@ describe("watchRepos", () => {
   it("respects AbortSignal for graceful shutdown", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "abc123\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123") });
 
     const ac = new AbortController();
 
@@ -377,6 +385,8 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log: vi.fn(),
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -392,14 +402,12 @@ describe("watchRepos", () => {
   it("runs subsequent ticks on interval", async () => {
     let callCount = 0;
     mockedLoadState.mockResolvedValue(makeState("abc123"));
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) {
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockImplementation(() => {
         callCount++;
-        // HEAD changes on second tick
-        return callCount <= 1 ? "abc123\n" : "def456\n";
-      }
-      if (args?.includes("--name-only")) return "src/a.ts\n";
-      return "";
+        return callCount <= 1 ? "abc123" : "def456";
+      }),
+      diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
     });
     mockedSyncRepo.mockResolvedValue({
       passages: { "src/a.ts": ["p-2"] },
@@ -420,6 +428,8 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     // First tick — no change
@@ -438,10 +448,7 @@ describe("watchRepos", () => {
   it("does not sync when repo is not in state (no agentInfo)", async () => {
     const state = { stateVersion: 2, agents: {} }; // no my-app agent
     mockedLoadState.mockResolvedValue(state as AppState);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "def456\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("def456") });
 
     const ac = new AbortController();
     const watchPromise = watchRepos({
@@ -452,6 +459,8 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log: vi.fn(),
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -465,10 +474,7 @@ describe("watchRepos", () => {
   it("does not sync when git returns null HEAD", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) throw new Error("not a git repo");
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue(null) });
 
     const ac = new AbortController();
     const watchPromise = watchRepos({
@@ -479,6 +485,8 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log: vi.fn(),
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -492,10 +500,7 @@ describe("watchRepos", () => {
   it("no changes HEAD log includes truncated hash", async () => {
     const state = makeState("abc123def456");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "abc123def456\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123def456") });
 
     const log = vi.fn();
     const ac = new AbortController();
@@ -508,6 +513,8 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -522,10 +529,9 @@ describe("watchRepos", () => {
   it("sync log does NOT include [event] suffix for poll-based syncs", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "def456\n";
-      if (args?.includes("--name-only")) return "src/a.ts\n";
-      return "";
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
     });
     mockedSyncRepo.mockResolvedValue({
       passages: { "src/a.ts": ["p-2"] },
@@ -546,6 +552,8 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -563,10 +571,8 @@ describe("watchRepos", () => {
   it("filters event-based changed files through shouldIncludeFile", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "abc123\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123") });
+    const fakeFs = makeFakeFs();
     mockedSyncRepo.mockResolvedValue({
       passages: {},
       lastSyncCommit: "abc123",
@@ -585,11 +591,13 @@ describe("watchRepos", () => {
       debounceMs: 50,
       signal: ac.signal,
       log: vi.fn(),
+      git: fakeGit,
+      fs: fakeFs,
     });
 
     await vi.advanceTimersByTimeAsync(0);
 
-    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    const watchCallback = vi.mocked(fakeFs.watch).mock.calls[0]?.[2];
     // Fire event with .ts file (should pass filter) and .md file (should NOT pass)
     (watchCallback as (eventType: string, fileName: string) => void)("change", "src/a.ts");
     (watchCallback as (eventType: string, fileName: string) => void)("change", "README.md");
@@ -613,10 +621,9 @@ describe("watchRepos", () => {
       loadCount++;
       return makeState(loadCount === 1 ? null : "abc123");
     });
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "def456\n";
-      if (args?.includes("--name-only")) return "src/a.ts\n";
-      return "";
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
     });
     mockedSyncRepo.mockRejectedValue(new Error("API error"));
 
@@ -631,6 +638,8 @@ describe("watchRepos", () => {
       intervalMs: 1000,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     // First tick: full-reindex triggers, fails
@@ -652,10 +661,9 @@ describe("watchRepos", () => {
   it("saves state with updated lastSyncAt after successful sync", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "def456\n";
-      if (args?.includes("--name-only")) return "src/a.ts\n";
-      return "";
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
     });
     mockedSyncRepo.mockResolvedValue({
       passages: { "src/a.ts": ["p-2"] },
@@ -674,6 +682,8 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log: vi.fn(),
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -691,10 +701,7 @@ describe("watchRepos", () => {
   it("git commands use correct args for HEAD", async () => {
     const state = makeState(null); // no lastSyncCommit = full reindex
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "def456\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("def456") });
     mockedSyncRepo.mockResolvedValue({
       passages: {},
       lastSyncCommit: "def456",
@@ -712,6 +719,8 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log: vi.fn(),
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -719,22 +728,15 @@ describe("watchRepos", () => {
     await vi.advanceTimersByTimeAsync(200);
     await watchPromise;
 
-    // Git rev-parse called with "HEAD" as arg
-    const revParseCall = mockedExecFileSync.mock.calls.find(
-      ([, args]) => (args as string[]).includes("rev-parse"),
-    );
-    expect(revParseCall).toBeDefined();
-    if (!revParseCall) return;
-    expect(revParseCall[1]).toContain("HEAD");
+    // headCommit called with the repo path
+    expect(fakeGit.headCommit).toHaveBeenCalledWith("/tmp/my-app");
   });
 
   it("normalizes backslashes in file paths to forward slashes", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "abc123\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123") });
+    const fakeFs = makeFakeFs();
     mockedSyncRepo.mockResolvedValue({
       passages: {},
       lastSyncCommit: "abc123",
@@ -753,11 +755,13 @@ describe("watchRepos", () => {
       debounceMs: 50,
       signal: ac.signal,
       log: vi.fn(),
+      git: fakeGit,
+      fs: fakeFs,
     });
 
     await vi.advanceTimersByTimeAsync(0);
 
-    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    const watchCallback = vi.mocked(fakeFs.watch).mock.calls[0]?.[2];
     // Fire event with Windows-style backslash path
     (watchCallback as (eventType: string, fileName: string) => void)("change", String.raw`src\a.ts`);
 
@@ -776,10 +780,8 @@ describe("watchRepos", () => {
   it("strips leading ./ from file paths", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "abc123\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123") });
+    const fakeFs = makeFakeFs();
     mockedSyncRepo.mockResolvedValue({
       passages: {},
       lastSyncCommit: "abc123",
@@ -798,11 +800,13 @@ describe("watchRepos", () => {
       debounceMs: 50,
       signal: ac.signal,
       log: vi.fn(),
+      git: fakeGit,
+      fs: fakeFs,
     });
 
     await vi.advanceTimersByTimeAsync(0);
 
-    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    const watchCallback = vi.mocked(fakeFs.watch).mock.calls[0]?.[2];
     // Fire event with ./ prefix
     (watchCallback as (eventType: string, fileName: string) => void)("change", "./src/a.ts");
 
@@ -822,11 +826,9 @@ describe("watchRepos", () => {
     // HEAD changed but git diff shows no files → should still update state
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "def456\n";
-      // diff returns empty (no changed files)
-      if (args?.includes("--name-only")) return "\n";
-      return "";
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue([]),
     });
 
     const log = vi.fn();
@@ -840,6 +842,8 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -863,10 +867,9 @@ describe("watchRepos", () => {
       loadCount++;
       return makeState(loadCount === 1 ? null : "abc123");
     });
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "def456\n";
-      if (args?.includes("--name-only")) return "src/a.ts\n";
-      return "";
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
     });
     mockedSyncRepo.mockRejectedValue(new Error("API error"));
 
@@ -881,6 +884,8 @@ describe("watchRepos", () => {
       intervalMs: 1000,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     // First tick: fails
@@ -898,10 +903,9 @@ describe("watchRepos", () => {
 
   it("sync error log includes backoff duration in seconds", async () => {
     mockedLoadState.mockResolvedValue(makeState("abc123"));
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "def456\n";
-      if (args?.includes("--name-only")) return "src/a.ts\n";
-      return "";
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
     });
     mockedSyncRepo.mockRejectedValue(new Error("API error"));
 
@@ -916,6 +920,8 @@ describe("watchRepos", () => {
       intervalMs: 1000,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -940,10 +946,8 @@ describe("watchRepos", () => {
     // After syncRepoNow completes, if there are pending files they should trigger a new sync
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "abc123\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123") });
+    const fakeFs = makeFakeFs();
     mockedSyncRepo.mockImplementation(async () => {
       return {
         passages: {},
@@ -964,11 +968,13 @@ describe("watchRepos", () => {
       debounceMs: 50,
       signal: ac.signal,
       log: vi.fn(),
+      git: fakeGit,
+      fs: fakeFs,
     });
 
     await vi.advanceTimersByTimeAsync(0);
 
-    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    const watchCallback = vi.mocked(fakeFs.watch).mock.calls[0]?.[2];
     // Queue two file events
     (watchCallback as (eventType: string, fileName: string) => void)("change", "src/a.ts");
     (watchCallback as (eventType: string, fileName: string) => void)("change", "src/b.ts");
@@ -986,10 +992,7 @@ describe("watchRepos", () => {
   it("does not queue file events when no repoConfig is found", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "abc123\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123") });
 
     const ac = new AbortController();
     const watchPromise = watchRepos({
@@ -1001,6 +1004,8 @@ describe("watchRepos", () => {
       debounceMs: 50,
       signal: ac.signal,
       log: vi.fn(),
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -1018,10 +1023,8 @@ describe("watchRepos", () => {
   it("does not process file event when fileName is null/undefined", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "abc123\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123") });
+    const fakeFs = makeFakeFs();
 
     const ac = new AbortController();
     const watchPromise = watchRepos({
@@ -1033,11 +1036,13 @@ describe("watchRepos", () => {
       debounceMs: 50,
       signal: ac.signal,
       log: vi.fn(),
+      git: fakeGit,
+      fs: fakeFs,
     });
 
     await vi.advanceTimersByTimeAsync(0);
 
-    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    const watchCallback = vi.mocked(fakeFs.watch).mock.calls[0]?.[2];
     // Fire event with null fileName (macOS sometimes emits this)
     (watchCallback as (eventType: string, fileName: string | null) => void)("rename", null);
 
@@ -1054,10 +1059,7 @@ describe("watchRepos", () => {
   it("skips sync when signal is already aborted at start of syncRepoNow", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "def456\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("def456") });
 
     const ac = new AbortController();
     // Abort immediately before first tick
@@ -1071,6 +1073,8 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log: vi.fn(),
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(200);
@@ -1085,10 +1089,9 @@ describe("watchRepos", () => {
     // We do this by checking that after failure+success, subsequent failure shows "attempt 1" again.
     let syncCount = 0;
     mockedLoadState.mockResolvedValue(makeState("abc123"));
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "def456\n";
-      if (args?.includes("--name-only")) return "src/a.ts\n";
-      return "";
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
     });
     mockedSyncRepo.mockImplementation(async () => {
       syncCount++;
@@ -1113,6 +1116,8 @@ describe("watchRepos", () => {
       intervalMs: 1000,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     // First tick: fails
@@ -1132,10 +1137,8 @@ describe("watchRepos", () => {
   it("watcher on error logs the error message", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "abc123\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123") });
+    const fakeFs = makeFakeFs();
 
     const log = vi.fn();
     const ac = new AbortController();
@@ -1148,12 +1151,14 @@ describe("watchRepos", () => {
       intervalMs: 5000,
       signal: ac.signal,
       log,
+      git: fakeGit,
+      fs: fakeFs,
     });
 
     await vi.advanceTimersByTimeAsync(0);
 
     // Simulate watcher emitting an error
-    const watcherMock = mockedFsWatch.mock.results[0]?.value as { on: ReturnType<typeof vi.fn> };
+    const watcherMock = vi.mocked(fakeFs.watch).mock.results[0]?.value as { on: ReturnType<typeof vi.fn> };
     const errorCallback = watcherMock.on.mock.calls.find(([event]: [string]) => event === "error");
     expect(errorCallback).toBeDefined();
     if (!errorCallback) return;
@@ -1170,10 +1175,8 @@ describe("watchRepos", () => {
   it("state file relative path is excluded from event-driven sync", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "abc123\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123") });
+    const fakeFs = makeFakeFs();
 
     const ac = new AbortController();
     const watchPromise = watchRepos({
@@ -1186,11 +1189,13 @@ describe("watchRepos", () => {
       debounceMs: 50,
       signal: ac.signal,
       log: vi.fn(),
+      git: fakeGit,
+      fs: fakeFs,
     });
 
     await vi.advanceTimersByTimeAsync(0);
 
-    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    const watchCallback = vi.mocked(fakeFs.watch).mock.calls[0]?.[2];
     // Trigger event on the state file itself — should be ignored
     (watchCallback as (eventType: string, fileName: string) => void)("change", ".repo-expert-state.json");
 
@@ -1207,10 +1212,8 @@ describe("watchRepos", () => {
   it("ignores file events where file maps to null (toAgentPath returns null)", async () => {
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "abc123\n";
-      return "";
-    });
+    const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123") });
+    const fakeFs = makeFakeFs();
 
     const ac = new AbortController();
     // Config with basePath — files outside basePath will have toAgentPath return null
@@ -1233,11 +1236,13 @@ describe("watchRepos", () => {
       debounceMs: 50,
       signal: ac.signal,
       log: vi.fn(),
+      git: fakeGit,
+      fs: fakeFs,
     });
 
     await vi.advanceTimersByTimeAsync(0);
 
-    const watchCallback = mockedFsWatch.mock.calls[0]?.[2];
+    const watchCallback = vi.mocked(fakeFs.watch).mock.calls[0]?.[2];
     // File is outside basePath — toAgentPath should return null → ignored
     (watchCallback as (eventType: string, fileName: string) => void)("change", "packages/backend/server.ts");
 
@@ -1263,11 +1268,9 @@ describe("watchRepos", () => {
     };
     const state = makeState("abc123");
     mockedLoadState.mockResolvedValue(state);
-    mockedExecFileSync.mockImplementation((_cmd: string, args?: readonly string[]) => {
-      if (args?.includes("rev-parse")) return "def456\n";
-      // git diff returns a submodule path (no extension)
-      if (args?.includes("--name-only")) return "libs/my-lib\n";
-      return "";
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue(["libs/my-lib"]),
     });
     mockedListSubmodules.mockReturnValue([
       { path: "libs/my-lib", commit: "abc123", initialized: true },
@@ -1292,6 +1295,8 @@ describe("watchRepos", () => {
       statePath: "state.json",
       intervalMs: 5000,
       signal: ac.signal,
+      git: fakeGit,
+      fs: makeFakeFs(),
     });
 
     await vi.advanceTimersByTimeAsync(0);

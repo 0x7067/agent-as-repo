@@ -1,7 +1,4 @@
 import * as path from "node:path";
-import * as fs from "node:fs/promises";
-import { watch as fsWatch, type FSWatcher } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { loadState, saveState } from "./state-store.js";
 import { collectFiles } from "./file-collector.js";
 import { syncRepo } from "./sync.js";
@@ -12,6 +9,10 @@ import { partitionDiffPaths } from "../core/submodule.js";
 import { listSubmodules, expandSubmoduleFiles } from "./submodule-collector.js";
 import type { AgentProvider } from "./provider.js";
 import type { AgentState, Config, FileInfo, RepoConfig } from "../core/types.js";
+import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
+import type { GitPort } from "../ports/git.js";
+import { nodeFileSystem } from "./adapters/node-filesystem.js";
+import { nodeGit } from "./adapters/node-git.js";
 
 export interface WatchParams {
   provider: AgentProvider;
@@ -22,31 +23,8 @@ export interface WatchParams {
   debounceMs?: number;
   signal: AbortSignal;
   log?: (msg: string) => void;
-}
-
-function gitHeadCommit(cwd: string): string | null {
-  try {
-    return execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd,
-      encoding: "utf-8",
-      timeout: 10_000,
-    }).trim();
-  } catch {
-    return null;
-  }
-}
-
-function gitDiffFiles(cwd: string, sinceRef: string): string[] | null {
-  try {
-    const diff = execFileSync("git", ["diff", "--name-only", `${sinceRef}..HEAD`], {
-      cwd,
-      encoding: "utf-8",
-      timeout: 10_000,
-    }).trim();
-    return diff ? diff.split("\n") : [];
-  } catch {
-    return null;
-  }
+  fs?: FileSystemPort;
+  git?: GitPort;
 }
 
 async function updateAndSaveState(
@@ -58,7 +36,7 @@ async function updateAndSaveState(
   await saveState(statePath, updateAgentField(freshState, repoName, { ...updates, lastSyncAt: new Date().toISOString() }));
 }
 
-async function collectFile(repoPath: string, filePath: string): Promise<FileInfo | null> {
+async function collectFile(repoPath: string, filePath: string, fs: FileSystemPort): Promise<FileInfo | null> {
   const absPath = path.join(repoPath, filePath);
   try {
     const content = await fs.readFile(absPath, "utf8");
@@ -114,11 +92,13 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     debounceMs = 250,
     signal,
     log = console.log,
+    fs = nodeFileSystem,
+    git = nodeGit,
   } = params;
   const syncing = new Set<string>();
   const pendingFilesByRepo = new Map<string, Set<string>>();
   const debounceTimers = new Map<string, NodeJS.Timeout>();
-  const watchers: FSWatcher[] = [];
+  const watchers: WatcherHandle[] = [];
   const runningTasks = new Set<Promise<void>>();
   const ignoredEventFilesByRepo = new Map<string, Set<string>>();
   const ignoredAbsoluteEventFilesByRepo = new Map<string, Set<string>>();
@@ -174,7 +154,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     const repoConfig = config.repos[repoName];
     if (!repoConfig) return;
 
-    const currentHead = gitHeadCommit(repoConfig.path);
+    const currentHead = git.headCommit(repoConfig.path);
     if (!currentHead) return;
 
     const isEventSync = Boolean(eventChangedFiles && eventChangedFiles.length > 0);
@@ -191,7 +171,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
       if (isEventSync) {
         changedFiles = (eventChangedFiles ?? []).filter((filePath) => shouldIncludeFile(filePath, 0, repoConfig));
       } else if (agentInfo.lastSyncCommit) {
-        const diffResult = gitDiffFiles(repoConfig.path, agentInfo.lastSyncCommit);
+        const diffResult = git.diffFiles(repoConfig.path, agentInfo.lastSyncCommit);
         if (diffResult === null) {
           log(`[${repoName}] git diff failed, skipping`);
           return;
@@ -223,6 +203,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
           collectFile(
             repoConfig.basePath ? path.join(repoConfig.path, repoConfig.basePath) : repoConfig.path,
             filePath,
+            fs,
           ),
         headCommit: currentHead,
         maxFileSizeKb: repoConfig.maxFileSizeKb,
@@ -295,7 +276,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     ignoredAbsoluteEventFilesByRepo.set(repoName, ignoredAbsoluteFiles);
 
     try {
-      const watcher = fsWatch(
+      const watcher = fs.watch(
         repoConfig.path,
         { recursive: true },
         (_eventType, fileName) => {
