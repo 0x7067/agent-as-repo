@@ -1,15 +1,18 @@
-import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import fg from "fast-glob";
 import type { RepoConfig, FileInfo } from "../core/types.js";
+import type { FileSystemPort } from "../ports/filesystem.js";
+import { nodeFileSystem } from "./adapters/node-filesystem.js";
 
-export async function collectFiles(config: RepoConfig): Promise<FileInfo[]> {
+export async function collectFiles(
+  config: RepoConfig,
+  fs: FileSystemPort = nodeFileSystem,
+): Promise<FileInfo[]> {
   const cwd = config.basePath ? path.join(config.path, config.basePath) : config.path;
   const patterns = config.extensions.map((ext) => `**/*${ext}`);
   const ignore = config.ignoreDirs.map((dir) => `**/${dir}/**`);
 
   // fast-glob handles extension and ignoreDirs filtering; we only need the size check
-  const entries = await fg(patterns, {
+  const entries = await fs.glob(patterns, {
     cwd,
     ignore,
     absolute: false,

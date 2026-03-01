@@ -1,9 +1,10 @@
-import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod/v4";
 import { STATE_SCHEMA_VERSION, createEmptyState } from "../core/state.js";
 import type { AppState } from "../core/types.js";
+import type { FileSystemPort } from "../ports/filesystem.js";
+import { nodeFileSystem } from "./adapters/node-filesystem.js";
 
 const passageMapSchema = z.record(z.string(), z.array(z.string()));
 
@@ -52,7 +53,7 @@ function migrateLegacyState(raw: unknown): unknown {
   return raw;
 }
 
-async function backupInvalidState(filePath: string): Promise<string | null> {
+async function backupInvalidState(filePath: string, fs: FileSystemPort): Promise<string | null> {
   const backupPath = `${filePath}.bak.${Date.now()}`;
   try {
     await fs.copyFile(filePath, backupPath);
@@ -69,18 +70,11 @@ function isTransientRenameError(err: unknown): boolean {
   return code === "EBUSY" || code === "EPERM" || code === "EACCES";
 }
 
-type RenameFn = (fromPath: string, toPath: string) => Promise<void>;
-let renameFn: RenameFn = (fromPath, toPath) => fs.rename(fromPath, toPath);
-
-export function setRenameFnForTests(next: RenameFn | null): void {
-  renameFn = next ?? ((fromPath, toPath) => fs.rename(fromPath, toPath));
-}
-
-async function renameWithRetry(tempPath: string, filePath: string, retries = 3): Promise<void> {
+async function renameWithRetry(tempPath: string, filePath: string, fs: FileSystemPort, retries = 3): Promise<void> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      await renameFn(tempPath, filePath);
+      await fs.rename(tempPath, filePath);
       return;
     } catch (error) {
       lastError = error;
@@ -91,14 +85,14 @@ async function renameWithRetry(tempPath: string, filePath: string, retries = 3):
   throw lastError;
 }
 
-export async function loadState(filePath: string): Promise<AppState> {
+export async function loadState(filePath: string, fs: FileSystemPort = nodeFileSystem): Promise<AppState> {
   try {
     const content = await fs.readFile(filePath, "utf8");
     const raw: unknown = JSON.parse(content);
     const migrated = migrateLegacyState(raw);
     const parsed = appStateSchema.parse(migrated);
     if (parsed.stateVersion !== STATE_SCHEMA_VERSION) {
-      const backupPath = await backupInvalidState(filePath);
+      const backupPath = await backupInvalidState(filePath, fs);
       throw new StateFileError(filePath, `unsupported state version "${parsed.stateVersion}"`, backupPath);
     }
     return parsed;
@@ -110,20 +104,20 @@ export async function loadState(filePath: string): Promise<AppState> {
       throw error;
     }
     if (error instanceof SyntaxError) {
-      const backupPath = await backupInvalidState(filePath);
+      const backupPath = await backupInvalidState(filePath, fs);
       throw new StateFileError(filePath, error.message, backupPath);
     }
     if (error instanceof z.ZodError) {
       const issue = error.issues[0];
       const location = issue?.path?.join(".") || "root";
-      const backupPath = await backupInvalidState(filePath);
+      const backupPath = await backupInvalidState(filePath, fs);
       throw new StateFileError(filePath, `schema error at "${location}": ${issue?.message ?? "invalid value"}`, backupPath);
     }
     throw error;
   }
 }
 
-export async function saveState(filePath: string, state: AppState): Promise<void> {
+export async function saveState(filePath: string, state: AppState, fs: FileSystemPort = nodeFileSystem): Promise<void> {
   const dir = path.dirname(filePath);
   const base = path.basename(filePath);
   const tempPath = path.join(dir, `.${base}.tmp.${process.pid}.${Date.now()}.${randomUUID()}`);
@@ -132,6 +126,6 @@ export async function saveState(filePath: string, state: AppState): Promise<void
     stateVersion: STATE_SCHEMA_VERSION,
   };
 
-  await fs.writeFile(tempPath, JSON.stringify(toPersist, null, 2), "utf-8");
-  await renameWithRetry(tempPath, filePath);
+  await fs.writeFile(tempPath, JSON.stringify(toPersist, null, 2));
+  await renameWithRetry(tempPath, filePath, fs);
 }

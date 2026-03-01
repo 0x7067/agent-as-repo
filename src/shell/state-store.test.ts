@@ -1,14 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadState, saveState, setRenameFnForTests } from "./state-store.js";
+import { describe, expect, it } from "vitest";
+import { loadState, saveState } from "./state-store.js";
 import { STATE_SCHEMA_VERSION, addAgentToState, createEmptyState } from "../core/state.js";
+import { nodeFileSystem } from "./adapters/node-filesystem.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
-
-afterEach(() => {
-  vi.restoreAllMocks();
-  setRenameFnForTests(null);
-});
+import type { FileSystemPort } from "../ports/filesystem.js";
 
 async function withTempDir(fn: (dir: string) => Promise<void>) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "state-test-"));
@@ -174,17 +171,21 @@ describe("state store", () => {
       const filePath = path.join(dir, "state.json");
       const state = addAgentToState(createEmptyState(), "my-app", "agent-1", "2026-01-01T00:00:00.000Z");
       const busyErr = Object.assign(new Error("busy"), { code: "EBUSY" });
-      let calls = 0;
-      setRenameFnForTests(async (fromPath, toPath) => {
-        calls++;
-        if (calls === 1) throw busyErr;
-        await fs.rename(fromPath, toPath);
-      });
+      let renameCalls = 0;
 
-      await saveState(filePath, state);
+      const mockFs: FileSystemPort = {
+        ...nodeFileSystem,
+        rename: async (from, to) => {
+          renameCalls++;
+          if (renameCalls === 1) throw busyErr;
+          await nodeFileSystem.rename(from, to);
+        },
+      };
+
+      await saveState(filePath, state, mockFs);
       const loaded = await loadState(filePath);
       expect(loaded.agents["my-app"].agentId).toBe("agent-1");
-      expect(calls).toBe(2);
+      expect(renameCalls).toBe(2);
     });
   });
 
