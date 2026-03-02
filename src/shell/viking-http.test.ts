@@ -88,6 +88,8 @@ describe("VikingHttpClient", () => {
       const tempPath = "/tmp/openviking/upload_abc.txt";
       mockFetch
         .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: { temp_path: tempPath } }))
+        .mockResolvedValueOnce(makeResponse(500))
+        .mockResolvedValueOnce(makeResponse(500))
         .mockResolvedValueOnce(makeResponse(500));
       await expect(
         client.writeFile("viking://resources/myrepo/src/a.ts", "content")
@@ -107,6 +109,17 @@ describe("VikingHttpClient", () => {
       expect(result).toBe("file content");
     });
 
+    it("retries on transient 5xx response and eventually succeeds", async () => {
+      mockFetch
+        .mockResolvedValueOnce(makeResponse(500))
+        .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: "file content" }));
+
+      const result = await client.readFile("viking://resources/myrepo/src/a.ts");
+
+      expect(result).toBe("file content");
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
     it("throws on non-2xx", async () => {
       mockFetch.mockResolvedValue(makeResponse(404));
       await expect(
@@ -124,6 +137,18 @@ describe("VikingHttpClient", () => {
         `${BASE_URL}/api/v1/fs?uri=${encodedUri}`,
         expect.objectContaining({ method: "DELETE" })
       );
+    });
+
+    it("retries transient errors before returning 404 as idempotent success", async () => {
+      mockFetch
+        .mockResolvedValueOnce(makeResponse(500))
+        .mockResolvedValueOnce(makeResponse(404));
+
+      await expect(
+        client.deleteFile("viking://resources/myrepo/src/gone.ts")
+      ).resolves.toBeUndefined();
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
     it("swallows 404", async () => {
@@ -156,6 +181,17 @@ describe("VikingHttpClient", () => {
         "viking://resources/myrepo/src/a.ts",
         "viking://resources/myrepo/src/b.ts",
       ]);
+    });
+
+    it("retries on transient 429 response and succeeds", async () => {
+      mockFetch
+        .mockResolvedValueOnce(makeResponse(429))
+        .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: ["viking://resources/myrepo/src/a.ts"] }));
+
+      const result = await client.listDirectory("viking://resources/myrepo/src");
+
+      expect(result).toEqual(["viking://resources/myrepo/src/a.ts"]);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
     it("throws on non-2xx", async () => {
@@ -263,6 +299,8 @@ describe("VikingHttpClient", () => {
       };
       mockFetch
         .mockResolvedValueOnce(makeResponse(200, apiResponse))
+        .mockResolvedValueOnce(makeResponse(500))
+        .mockResolvedValueOnce(makeResponse(500))
         .mockResolvedValueOnce(makeResponse(500));
       await expect(
         client.semanticSearch("query", "viking://resources/myrepo")
@@ -290,6 +328,16 @@ describe("VikingHttpClient", () => {
       await client.mkdir("viking://resources/myrepo/src");
       const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>;
       expect(headers).not.toHaveProperty("Authorization");
+    });
+
+    it("retries on network errors before succeeding", async () => {
+      mockFetch
+        .mockRejectedValueOnce(new TypeError("fetch failed"))
+        .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: {} }));
+
+      await client.mkdir("viking://resources/myrepo/src");
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
     });
   });
 });
