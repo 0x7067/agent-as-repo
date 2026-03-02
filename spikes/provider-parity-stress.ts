@@ -793,6 +793,24 @@ function renderVerdict(report: ScriptReport): string {
   } else {
     riskLines.push("- No critical non-equivalence found by current gate.");
   }
+
+  const operationalRows = report.parityRows.filter((row) =>
+    row.deltas.some((delta) => delta.toLowerCase().includes("operational mismatch")),
+  );
+  for (const row of operationalRows.slice(0, 3)) {
+    riskLines.push(`- ${row.method}: operational mismatch observed in live contract checks.`);
+  }
+
+  const highErrorScenarios = report.stressStage.scenarios
+    .filter((row) => row.errorRate >= 0.2)
+    .sort((a, b) => b.errorRate - a.errorRate)
+    .slice(0, 4);
+  for (const scenario of highErrorScenarios) {
+    riskLines.push(
+      `- ${scenario.provider}/${scenario.scenario}: high error rate ${(scenario.errorRate * 100).toFixed(2)}%`,
+    );
+  }
+
   if (report.stressStage.status !== "completed") {
     riskLines.push("- Stress stage did not complete; performance comparison is incomplete.");
   }
