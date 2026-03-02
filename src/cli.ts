@@ -634,10 +634,10 @@ program
       try {
         if (mode === "create") {
           const createStart = Date.now();
-          if (config.provider.type !== "letta") {
-            throw new Error(`Provider type "${config.provider.type}" is not yet supported by the setup command`);
-          }
-          const agentState = await createRepoAgent(provider, repoName, repoConfig, config.provider);
+          const modelOptions = config.provider.type === "letta"
+            ? { model: config.provider.model, embedding: config.provider.embedding }
+            : { model: config.provider.openrouterModel, embedding: "" };
+          const agentState = await createRepoAgent(provider, repoName, repoConfig, modelOptions);
           agentId = agentState.agentId;
           createMs = Date.now() - createStart;
           log(`  Agent created: ${agentId} (${formatDurationMs(createMs)})`);

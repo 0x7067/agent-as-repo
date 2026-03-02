@@ -1,0 +1,17 @@
+provider:
+  type: viking
+  openrouter_model: moonshotai/kimi-k2.5
+
+defaults:
+  max_file_size_kb: 50
+  memory_block_limit: 5000
+  bootstrap_on_create: true
+
+repos:
+  zc-blitz-2:
+    path: /Users/pedro/Development/ravn/zencentiv/zc-blitz-2
+    description: "Blitz.js/Next.js full-stack SaaS platform — commission management, multi-tenant, 80+ domain models, Prisma/PostgreSQL"
+    extensions: [.ts, .tsx, .js, .json, .prisma]
+    ignore_dirs: [node_modules, .next, .git, playwright-report, .blitz, .vscode, .husky, public, e2e, .storybook, .github]
+    tags: [backend, api, saas]
+    include_submodules: true
