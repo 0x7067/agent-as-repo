@@ -132,33 +132,67 @@ export class VikingProvider implements AgentProvider {
     } catch (error) {
       if (!isDeletePassageAmbiguousFsError(error)) throw error;
 
-      const siblingUris = await this.viking.listDirectory(`viking://resources/${agentId}/passages/`);
-      const stillExists = siblingUris.some((uri) => uri.endsWith(`/${passageId}.txt`));
-      if (!stillExists) return;
-      throw error;
+      const listUri = `viking://resources/${agentId}/passages/`;
+      const siblingUris = await this.viking.listDirectory(listUri);
+      const hasTarget = siblingUris.some((uri) => uri.endsWith(`/${passageId}.txt`));
+      if (!hasTarget) return;
+
+      await sleep(120);
+      try {
+        await this.viking.deleteFile(targetUri);
+        return;
+      } catch (retryError) {
+        if (!isDeletePassageAmbiguousFsError(retryError)) throw retryError;
+        const afterRetryUris = await this.viking.listDirectory(listUri);
+        const stillExists = afterRetryUris.some((uri) => uri.endsWith(`/${passageId}.txt`));
+        if (!stillExists) return;
+        throw retryError;
+      }
     }
   }
 
   async listPassages(agentId: string): Promise<Passage[]> {
     const uris = await this.viking.listDirectory(`viking://resources/${agentId}/passages/`);
-    const settled = await Promise.allSettled(
-      uris.map(async (uri) => {
-        const text = await this.viking.readFile(uri);
-        const filename = uri.slice(uri.lastIndexOf("/") + 1);
-        const id = filename.endsWith(".txt") ? filename.slice(0, -4) : filename;
-        return { id, text };
-      }),
-    );
+    const readPassage = async (uri: string): Promise<Passage> => {
+      const text = await this.viking.readFile(uri);
+      const filename = uri.slice(uri.lastIndexOf("/") + 1);
+      const id = filename.endsWith(".txt") ? filename.slice(0, -4) : filename;
+      return { id, text };
+    };
+
+    const settled = await Promise.allSettled(uris.map((uri) => readPassage(uri)));
 
     const passages: Passage[] = [];
+    const failedUris: string[] = [];
     let firstError: unknown;
-    for (const entry of settled) {
+
+    for (let i = 0; i < settled.length; i++) {
+      const entry = settled[i];
+      if (!entry) continue;
       if (entry.status === "fulfilled") {
         passages.push(entry.value);
         continue;
       }
+      const uri = uris[i];
+      if (uri) {
+        failedUris.push(uri);
+      }
       if (firstError === undefined) {
         firstError = entry.reason;
+      }
+    }
+
+    if (failedUris.length > 0) {
+      await sleep(120);
+      const retrySettled = await Promise.allSettled(failedUris.map((uri) => readPassage(uri)));
+      for (const retryEntry of retrySettled) {
+        if (retryEntry.status === "fulfilled") {
+          passages.push(retryEntry.value);
+          continue;
+        }
+        if (firstError === undefined) {
+          firstError = retryEntry.reason;
+        }
       }
     }
 
