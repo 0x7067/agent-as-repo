@@ -127,8 +127,13 @@ export async function runAllChecks(provider: AgentProvider | null, configPath: s
   if (provider) {
     try {
       const { loadState } = await import("./state-store.js");
+      const { loadConfig } = await import("./config-loader.js");
       const state = await loadState(".repo-expert-state.json");
-      const firstAgent = Object.values(state.agents)[0];
+      const config = await loadConfig(configPath);
+      const configuredAgent = Object.keys(config.repos)
+        .map((repoName) => state.agents[repoName])
+        .find((agent) => agent !== undefined);
+      const firstAgent = configuredAgent ?? Object.values(state.agents)[0];
       if (firstAgent) {
         results.push(await checkApiConnection(provider, firstAgent.agentId));
       } else {

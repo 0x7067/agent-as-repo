@@ -1,10 +1,11 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkApiKey, checkConfigFile, checkGit, runAllChecks, runDoctorFixes } from "./doctor.js";
 import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
 import type { GitPort } from "../ports/git.js";
+import type { AgentProvider } from "./provider.js";
 
 const tempDirs: string[] = [];
 const originalApiKey = process.env.LETTA_API_KEY;
@@ -85,6 +86,68 @@ describe("doctor shell checks", () => {
     await expect(fs.access(path.join(tempDir, ".env"))).resolves.toBeUndefined();
     await expect(fs.access(path.join(tempDir, "config.yaml"))).resolves.toBeUndefined();
     await expect(fs.access(path.join(tempDir, ".repo-expert-state.json"))).resolves.toBeUndefined();
+  });
+
+  it("runAllChecks prefers agent from configured repos when state has orphan first", async () => {
+    const tempDir = await makeTempDir("doctor-");
+    process.chdir(tempDir);
+    const repoDir = path.join(tempDir, "repo");
+    await fs.mkdir(repoDir, { recursive: true });
+
+    const configPath = path.join(tempDir, "config.yaml");
+    await fs.writeFile(
+      configPath,
+      [
+        "letta:",
+        "  model: openai/gpt-4.1",
+        "  embedding: openai/text-embedding-3-small",
+        "repos:",
+        "  configured-repo:",
+        `    path: ${repoDir}`,
+        "    description: test repo",
+        "    extensions: [.ts]",
+        "    ignore_dirs: [node_modules, .git]",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        orphan: {
+          agentId: "orphan-agent",
+          repoName: "orphan",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+        "configured-repo": {
+          agentId: "configured-agent",
+          repoName: "configured-repo",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await fs.writeFile(path.join(tempDir, ".repo-expert-state.json"), JSON.stringify(state), "utf-8");
+
+    const listPassages = vi.fn(async (agentId: string) => {
+      if (agentId === "configured-agent") return [];
+      throw new Error("should not use orphan agent");
+    });
+    const provider = { listPassages } as unknown as AgentProvider;
+
+    const results = await runAllChecks(provider, configPath);
+    const apiConnection = results.find((r) => r.name === "API connection");
+
+    expect(listPassages).toHaveBeenCalledTimes(1);
+    expect(listPassages).toHaveBeenCalledWith("configured-agent");
+    expect(apiConnection?.status).toBe("pass");
   });
 });
 

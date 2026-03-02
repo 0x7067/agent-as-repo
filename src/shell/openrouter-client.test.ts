@@ -135,6 +135,30 @@ describe("callOpenRouter", () => {
 
     expect(result).toEqual(response);
   });
+
+  it("aborts request when signal is aborted", async () => {
+    const controller = new AbortController();
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal;
+        signal.addEventListener("abort", () => {
+          reject(Object.assign(new Error("AbortError"), { name: "AbortError" }));
+        }, { once: true });
+      })
+    );
+
+    const promise = callOpenRouter(
+      [{ role: "user", content: "Hi" }],
+      [],
+      MODEL,
+      API_KEY,
+      DEFAULT_BASE_URL,
+      { signal: controller.signal },
+    );
+
+    controller.abort(new Error("request cancelled"));
+    await expect(promise).rejects.toThrow("request cancelled");
+  });
 });
 
 describe("toolCallingLoop", () => {
@@ -162,6 +186,21 @@ describe("toolCallingLoop", () => {
     });
 
     expect(result).toBe("The sky is blue.");
+  });
+
+  it("throws when response has no tool_calls and empty content", async () => {
+    mockFetch.mockResolvedValue(makeResponse(200, makeChoice(null)));
+
+    await expect(
+      toolCallingLoop({
+        systemPrompt: "You are helpful.",
+        userMessage: "Answer briefly.",
+        tools: [],
+        toolHandlers: {},
+        model: MODEL,
+        apiKey: API_KEY,
+      }),
+    ).rejects.toThrow("empty response");
   });
 
   it("executes one tool call and returns final content", async () => {
@@ -214,10 +253,11 @@ describe("toolCallingLoop", () => {
     expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
-  it("respects maxSteps limit", async () => {
-    // Always returns tool_calls — infinite loop without maxSteps guard
-    mockFetch.mockResolvedValue(
+  it("attempts final completion without tools when maxSteps is reached", async () => {
+    mockFetch.mockResolvedValueOnce(
       makeResponse(200, makeChoice(null, [{ id: "tc1", name: "get_weather", args: JSON.stringify({ city: "Paris" }) }]))
+    ).mockResolvedValueOnce(
+      makeResponse(200, makeChoice("Final answer after tool execution."))
     );
 
     const result = await toolCallingLoop({
@@ -227,12 +267,33 @@ describe("toolCallingLoop", () => {
       toolHandlers,
       model: MODEL,
       apiKey: API_KEY,
-      maxSteps: 3,
+      maxSteps: 1,
     });
 
-    expect(mockFetch).toHaveBeenCalledTimes(3);
-    // When maxSteps is exhausted with tool_calls, content is null → returns ""
-    expect(result).toBe("");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const finalBody = JSON.parse(mockFetch.mock.calls[1][1].body as string);
+    expect(finalBody).not.toHaveProperty("tools");
+    expect(result).toBe("Final answer after tool execution.");
+  });
+
+  it("throws when maxSteps is reached and finalization has no content", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        makeResponse(200, makeChoice(null, [{ id: "tc1", name: "get_weather", args: JSON.stringify({ city: "Paris" }) }]))
+      )
+      .mockResolvedValueOnce(makeResponse(200, makeChoice(null)));
+
+    await expect(
+      toolCallingLoop({
+        systemPrompt: "You are a weather assistant.",
+        userMessage: "What is the weather in Paris?",
+        tools: TOOLS,
+        toolHandlers,
+        model: MODEL,
+        apiKey: API_KEY,
+        maxSteps: 1,
+      }),
+    ).rejects.toThrow("Tool loop exhausted");
   });
 
   it("handles unknown tool gracefully and continues", async () => {
@@ -256,5 +317,27 @@ describe("toolCallingLoop", () => {
     const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body as string);
     const toolMsg = secondBody.messages.find((m: { role: string }) => m.role === "tool");
     expect(toolMsg.content).toBe("Error: unknown tool unknown_tool");
+  });
+
+  it("handles malformed tool-call arguments gracefully and continues", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        makeResponse(200, makeChoice(null, [{ id: "tc1", name: "get_weather", args: "{bad-json" }]))
+      )
+      .mockResolvedValueOnce(makeResponse(200, makeChoice("Done despite malformed args.")));
+
+    const result = await toolCallingLoop({
+      systemPrompt: "You are helpful.",
+      userMessage: "Do something.",
+      tools: TOOLS,
+      toolHandlers,
+      model: MODEL,
+      apiKey: API_KEY,
+    });
+
+    expect(result).toBe("Done despite malformed args.");
+    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body as string);
+    const toolMsg = secondBody.messages.find((m: { role: string }) => m.role === "tool");
+    expect(toolMsg.content).toContain("Error: invalid arguments for tool get_weather");
   });
 });

@@ -21,6 +21,8 @@ import type { AgentProvider, CreateAgentParams, SendMessageOptions } from "./she
 import { LettaProvider } from "./shell/letta-provider.js";
 import { VikingProvider } from "./shell/viking-provider.js";
 import { VikingHttpClient } from "./shell/viking-http.js";
+import { FilesystemBlockStorage } from "./shell/block-storage.js";
+import { resolveOpenVikingBlocksDir } from "./shell/openviking-paths.js";
 import { rawTextStrategy } from "./core/chunker.js";
 import { shouldIncludeFile } from "./core/filter.js";
 import { partitionDiffPaths } from "./core/submodule.js";
@@ -38,6 +40,7 @@ import { generateMcpEntry, checkMcpEntry } from "./core/mcp-config.js";
 import { buildPostSetupNextSteps, getSetupMode } from "./core/setup.js";
 import type { AgentState, AppState, Config } from "./core/types.js";
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
+import type { VikingRuntimeOptions } from "./shell/viking-provider.js";
 
 interface SetupOpts {
   repo?: string;
@@ -167,7 +170,14 @@ function createProvider(config: Config): AgentProvider {
     const vikingApiKey = process.env["VIKING_API_KEY"];
     const openrouterApiKey = process.env["OPENROUTER_API_KEY"]!;
     const viking = new VikingHttpClient(vikingUrl, vikingApiKey);
-    return new VikingProvider(viking, openrouterApiKey, config.provider.openrouterModel);
+    const blockStorage = new FilesystemBlockStorage(resolveOpenVikingBlocksDir());
+    return new VikingProvider(
+      viking,
+      openrouterApiKey,
+      config.provider.openrouterModel,
+      blockStorage,
+      getVikingRuntimeOptionsFromEnv(),
+    );
   }
 }
 
@@ -362,6 +372,22 @@ function parseOptionalMaxSteps(value: string | undefined): number | undefined {
   return parsed;
 }
 
+function parseModelCsv(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function getVikingRuntimeOptionsFromEnv(): VikingRuntimeOptions {
+  const requestTimeoutMs = parseOptionalPositiveInt(process.env["OPENROUTER_REQUEST_TIMEOUT_MS"], 20_000);
+  const maxRetriesPerModel = parseNonNegativeInt(process.env["OPENROUTER_MAX_RETRIES_PER_MODEL"] ?? "0", 0);
+  const retryBaseDelayMs = parseOptionalPositiveInt(process.env["OPENROUTER_RETRY_BASE_DELAY_MS"], 600);
+  const fallbackModels = parseModelCsv(process.env["OPENROUTER_FALLBACK_MODELS"]);
+  return { requestTimeoutMs, maxRetriesPerModel, retryBaseDelayMs, fallbackModels };
+}
+
 function formatDurationMs(durationMs: number): string {
   if (durationMs < 1000) return `${durationMs}ms`;
   return `${(durationMs / 1000).toFixed(2)}s`;
@@ -378,6 +404,29 @@ async function withTimeout<T>(label: string, timeoutMs: number, fn: () => Promis
       fn(),
       new Promise<T>((_, reject) => {
         timeoutId = setTimeout(() => { reject(new Error(`${label} timed out after ${timeoutMs}ms`)); }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
+async function withTimeoutSignal<T>(
+  label: string,
+  timeoutMs: number,
+  fn: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      fn(controller.signal),
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          const error = new Error(`${label} timed out after ${timeoutMs}ms`);
+          controller.abort(error);
+          reject(error);
+        }, timeoutMs);
       }),
     ]);
   } finally {
@@ -454,10 +503,10 @@ async function askAgent(
   settings: AskRuntimeSettings,
 ): Promise<string> {
   const overrideModel = settings.useFast ? settings.fastModel : undefined;
-  return withTimeout(
+  return withTimeoutSignal(
     `Ask "${agent.repoName}"`,
     settings.askTimeoutMs,
-    () => provider.sendMessage(agent.agentId, question, { overrideModel, maxSteps: settings.maxSteps }),
+    (signal) => provider.sendMessage(agent.agentId, question, { overrideModel, maxSteps: settings.maxSteps, signal }),
   );
 }
 

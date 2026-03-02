@@ -11,6 +11,9 @@ import { LettaAdminAdapter } from "./shell/adapters/letta-admin-adapter.js";
 import { VikingProvider } from "./shell/viking-provider.js";
 import { VikingHttpClient } from "./shell/viking-http.js";
 import { VikingAdminAdapter } from "./shell/adapters/viking-admin-adapter.js";
+import { FilesystemBlockStorage } from "./shell/block-storage.js";
+import { resolveOpenVikingBlocksDir } from "./shell/openviking-paths.js";
+import type { VikingRuntimeOptions } from "./shell/viking-provider.js";
 
 // Accept LETTA_PASSWORD as alias for LETTA_API_KEY (Codex compat)
 // Stryker disable next-line ConditionalExpression,LogicalOperator,StringLiteral -- module-level env setup, untestable in unit tests
@@ -43,6 +46,23 @@ export function parsePositiveInt(raw: string | undefined, fallback: number): num
   const parsed = Number.parseInt(raw, 10);
   if (Number.isNaN(parsed) || parsed <= 0) return fallback;
   return parsed;
+}
+
+function parseModelCsv(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function getVikingRuntimeOptionsFromEnv(): VikingRuntimeOptions {
+  return {
+    requestTimeoutMs: parsePositiveInt(process.env["OPENROUTER_REQUEST_TIMEOUT_MS"], 20_000),
+    maxRetriesPerModel: parsePositiveInt(process.env["OPENROUTER_MAX_RETRIES_PER_MODEL"], 0),
+    retryBaseDelayMs: parsePositiveInt(process.env["OPENROUTER_RETRY_BASE_DELAY_MS"], 600),
+    fallbackModels: parseModelCsv(process.env["OPENROUTER_FALLBACK_MODELS"]),
+  };
 }
 
 export async function withTimeout<T>(label: string, timeoutMs: number, fn: () => Promise<T>): Promise<T> {
@@ -196,7 +216,8 @@ export async function main(): Promise<void> {
     const vikingApiKey = process.env["VIKING_API_KEY"];
     const model = process.env["OPENROUTER_MODEL"] ?? "openai/gpt-4o-mini";
     const viking = new VikingHttpClient(vikingUrl, vikingApiKey);
-    const vikingProvider = new VikingProvider(viking, openrouterApiKey, model);
+    const blockStorage = new FilesystemBlockStorage(resolveOpenVikingBlocksDir());
+    const vikingProvider = new VikingProvider(viking, openrouterApiKey, model, blockStorage, getVikingRuntimeOptionsFromEnv());
     provider = vikingProvider;
     admin = new VikingAdminAdapter(vikingProvider, viking);
   } else {

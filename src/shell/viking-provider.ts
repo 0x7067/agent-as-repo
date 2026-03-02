@@ -10,20 +10,77 @@ import type {
 } from "../ports/agent-provider.js";
 import type { VikingHttpClient } from "./viking-http.js";
 import { toolCallingLoop, type ToolDefinition } from "./openrouter-client.js";
+import type { BlockStorage } from "./block-storage.js";
+
+export interface VikingRuntimeOptions {
+  fallbackModels?: string[];
+  requestTimeoutMs?: number;
+  maxRetriesPerModel?: number;
+  retryBaseDelayMs?: number;
+}
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
+const DEFAULT_MAX_RETRIES_PER_MODEL = 0;
+const DEFAULT_RETRY_BASE_DELAY_MS = 600;
+const DEFAULT_FALLBACK_MODELS = [
+  "moonshotai/kimi-k2.5",
+  "deepseek/deepseek-v3.2",
+  "z-ai/glm-5",
+];
+
+function isAbortLikeError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    return message.includes("abort");
+  }
+  return false;
+}
+
+function isRetryableModelError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("timed out") ||
+    message.includes("http 429") ||
+    message.includes("http 500") ||
+    message.includes("http 502") ||
+    message.includes("http 503") ||
+    message.includes("http 504") ||
+    message.includes("ecconn") ||
+    message.includes("fetch failed")
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export class VikingProvider implements AgentProvider {
+  private readonly fallbackModels: string[];
+  private readonly requestTimeoutMs: number;
+  private readonly maxRetriesPerModel: number;
+  private readonly retryBaseDelayMs: number;
+
   constructor(
     private viking: VikingHttpClient,
     private openrouterApiKey: string,
     private model: string,
-  ) {}
+    private blockStorage: BlockStorage,
+    runtimeOptions: VikingRuntimeOptions = {},
+  ) {
+    this.fallbackModels = runtimeOptions.fallbackModels && runtimeOptions.fallbackModels.length > 0
+      ? runtimeOptions.fallbackModels
+      : DEFAULT_FALLBACK_MODELS;
+    this.requestTimeoutMs = runtimeOptions.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    this.maxRetriesPerModel = runtimeOptions.maxRetriesPerModel ?? DEFAULT_MAX_RETRIES_PER_MODEL;
+    this.retryBaseDelayMs = runtimeOptions.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+  }
 
   async createAgent(params: CreateAgentParams): Promise<CreateAgentResult> {
     const { repoName } = params;
     const persona = buildPersona(repoName, params.description, params.persona, params.tools);
 
     await this.viking.mkdir(`viking://resources/${repoName}/`);
-    await this.viking.mkdir(`viking://resources/${repoName}/blocks/`);
     await this.viking.mkdir(`viking://resources/${repoName}/passages/`);
 
     await this.viking.writeFile(
@@ -37,15 +94,18 @@ export class VikingProvider implements AgentProvider {
       }),
     );
 
-    await this.viking.writeFile(`viking://resources/${repoName}/blocks/persona`, persona);
-    await this.viking.writeFile(`viking://resources/${repoName}/blocks/architecture`, "Not yet analyzed.");
-    await this.viking.writeFile(`viking://resources/${repoName}/blocks/conventions`, "Not yet analyzed.");
+    this.blockStorage.init(repoName, {
+      persona,
+      architecture: "Not yet analyzed.",
+      conventions: "Not yet analyzed.",
+    });
 
     return { agentId: repoName };
   }
 
   async deleteAgent(agentId: string): Promise<void> {
     await this.viking.deleteResource(`viking://resources/${agentId}/`);
+    this.blockStorage.delete(agentId);
   }
 
   enableSleeptime(_agentId: string): Promise<void> {
@@ -75,12 +135,12 @@ export class VikingProvider implements AgentProvider {
   }
 
   async getBlock(agentId: string, label: string): Promise<MemoryBlock> {
-    const value = await this.viking.readFile(`viking://resources/${agentId}/blocks/${label}`);
+    const value = this.blockStorage.get(agentId, label);
     return { value, limit: 5000 };
   }
 
   async updateBlock(agentId: string, label: string, value: string): Promise<MemoryBlock> {
-    await this.viking.writeFile(`viking://resources/${agentId}/blocks/${label}`, value);
+    this.blockStorage.set(agentId, label, value);
     return { value, limit: 5000 };
   }
 
@@ -141,15 +201,42 @@ export class VikingProvider implements AgentProvider {
       },
     };
 
-    const model = options?.overrideModel ?? this.model;
-    return toolCallingLoop({
-      systemPrompt,
-      userMessage: content,
-      tools,
-      toolHandlers,
-      model,
-      apiKey: this.openrouterApiKey,
-      maxSteps: options?.maxSteps,
-    });
+    const modelCandidates = options?.overrideModel
+      ? [options.overrideModel]
+      : [this.model, ...this.fallbackModels.filter((candidate) => candidate !== this.model)];
+    const failureMessages: string[] = [];
+
+    for (const modelCandidate of modelCandidates) {
+      for (let attempt = 0; attempt <= this.maxRetriesPerModel; attempt++) {
+        if (options?.signal?.aborted) {
+          const reason = options.signal.reason;
+          throw reason instanceof Error ? reason : new Error(String(reason ?? "Request aborted"));
+        }
+
+        try {
+          return await toolCallingLoop({
+            systemPrompt,
+            userMessage: content,
+            tools,
+            toolHandlers,
+            model: modelCandidate,
+            apiKey: this.openrouterApiKey,
+            maxSteps: options?.maxSteps,
+            signal: options?.signal,
+            requestTimeoutMs: this.requestTimeoutMs,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          failureMessages.push(`${modelCandidate} (attempt ${attempt + 1}): ${message}`);
+          if (options?.signal?.aborted || isAbortLikeError(error)) throw error;
+          if (!isRetryableModelError(error)) throw error;
+          if (attempt >= this.maxRetriesPerModel) break;
+          const backoffMs = this.retryBaseDelayMs * Math.pow(2, attempt);
+          await sleep(backoffMs);
+        }
+      }
+    }
+
+    throw new Error(`All model attempts failed:\n${failureMessages.join("\n")}`);
   }
 }

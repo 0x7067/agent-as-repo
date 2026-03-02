@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { VikingProvider } from "./viking-provider.js";
 import type { VikingHttpClient } from "./viking-http.js";
+import type { BlockStorage } from "./block-storage.js";
 
 vi.mock("./openrouter-client.js", () => ({
   toolCallingLoop: vi.fn().mockResolvedValue("mocked response"),
@@ -20,21 +21,32 @@ function makeMockViking() {
   } as unknown as VikingHttpClient;
 }
 
+function makeMockBlockStorage() {
+  return {
+    get: vi.fn().mockReturnValue(""),
+    set: vi.fn(),
+    init: vi.fn(),
+    delete: vi.fn(),
+  } as unknown as BlockStorage;
+}
+
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const API_KEY = "test-api-key";
 
 describe("VikingProvider", () => {
   let mockViking: VikingHttpClient;
+  let mockBlockStorage: BlockStorage;
   let provider: VikingProvider;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockViking = makeMockViking();
-    provider = new VikingProvider(mockViking, API_KEY, DEFAULT_MODEL);
+    mockBlockStorage = makeMockBlockStorage();
+    provider = new VikingProvider(mockViking, API_KEY, DEFAULT_MODEL, mockBlockStorage);
   });
 
   describe("createAgent", () => {
-    it("calls mkdir for directory tree, writes manifest + 3 blocks, returns { agentId: repoName }", async () => {
+    it("calls mkdir for root and passages, writes manifest, inits blocks, returns { agentId: repoName }", async () => {
       const params = {
         name: "My Repo",
         repoName: "myrepo",
@@ -49,10 +61,10 @@ describe("VikingProvider", () => {
 
       expect(result).toEqual({ agentId: "myrepo" });
 
-      // mkdir calls
+      // mkdir calls (no blocks/ dir — blocks live on filesystem now)
       expect(mockViking.mkdir).toHaveBeenCalledWith("viking://resources/myrepo/");
-      expect(mockViking.mkdir).toHaveBeenCalledWith("viking://resources/myrepo/blocks/");
       expect(mockViking.mkdir).toHaveBeenCalledWith("viking://resources/myrepo/passages/");
+      expect(mockViking.mkdir).not.toHaveBeenCalledWith("viking://resources/myrepo/blocks/");
 
       // manifest write
       expect(mockViking.writeFile).toHaveBeenCalledWith(
@@ -60,14 +72,17 @@ describe("VikingProvider", () => {
         expect.stringContaining('"agentId":"myrepo"'),
       );
 
-      // block writes
-      expect(mockViking.writeFile).toHaveBeenCalledWith(
+      // blocks go to blockStorage, not viking
+      expect(mockViking.writeFile).not.toHaveBeenCalledWith(
         "viking://resources/myrepo/blocks/architecture",
-        "Not yet analyzed.",
+        expect.anything(),
       );
-      expect(mockViking.writeFile).toHaveBeenCalledWith(
-        "viking://resources/myrepo/blocks/conventions",
-        "Not yet analyzed.",
+      expect(mockBlockStorage.init).toHaveBeenCalledWith(
+        "myrepo",
+        expect.objectContaining({
+          architecture: "Not yet analyzed.",
+          conventions: "Not yet analyzed.",
+        }),
       );
     });
 
@@ -84,20 +99,19 @@ describe("VikingProvider", () => {
 
       await provider.createAgent(params);
 
-      const personaCall = (mockViking.writeFile as ReturnType<typeof vi.fn>).mock.calls.find(
-        (call) => call[0] === "viking://resources/myrepo/blocks/persona",
-      );
-      expect(personaCall).toBeDefined();
-      const personaContent = personaCall![1] as string;
-      expect(personaContent).toContain("myrepo");
+      const initCall = (mockBlockStorage.init as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(initCall).toBeDefined();
+      const blocks = initCall[1] as Record<string, string>;
+      expect(blocks["persona"]).toContain("myrepo");
     });
   });
 
   describe("deleteAgent", () => {
-    it("calls deleteResource with correct URI", async () => {
+    it("calls deleteResource with correct URI and deletes blocks", async () => {
       await provider.deleteAgent("myrepo");
 
       expect(mockViking.deleteResource).toHaveBeenCalledWith("viking://resources/myrepo/");
+      expect(mockBlockStorage.delete).toHaveBeenCalledWith("myrepo");
     });
   });
 
@@ -168,41 +182,38 @@ describe("VikingProvider", () => {
   });
 
   describe("getBlock", () => {
-    it("calls readFile with correct block URI and returns { value, limit: 5000 }", async () => {
-      (mockViking.readFile as ReturnType<typeof vi.fn>).mockResolvedValue("block content");
+    it("reads from blockStorage and returns { value, limit: 5000 }", async () => {
+      (mockBlockStorage.get as ReturnType<typeof vi.fn>).mockReturnValue("block content");
 
       const block = await provider.getBlock("myrepo", "persona");
 
-      expect(mockViking.readFile).toHaveBeenCalledWith(
-        "viking://resources/myrepo/blocks/persona",
-      );
+      expect(mockBlockStorage.get).toHaveBeenCalledWith("myrepo", "persona");
+      expect(mockViking.readFile).not.toHaveBeenCalled();
       expect(block).toEqual({ value: "block content", limit: 5000 });
     });
   });
 
   describe("updateBlock", () => {
-    it("calls writeFile with correct block URI and value, returns { value, limit: 5000 }", async () => {
+    it("writes to blockStorage and returns { value, limit: 5000 }", async () => {
       const block = await provider.updateBlock("myrepo", "architecture", "new architecture");
 
-      expect(mockViking.writeFile).toHaveBeenCalledWith(
-        "viking://resources/myrepo/blocks/architecture",
-        "new architecture",
-      );
+      expect(mockBlockStorage.set).toHaveBeenCalledWith("myrepo", "architecture", "new architecture");
+      expect(mockViking.writeFile).not.toHaveBeenCalled();
       expect(block).toEqual({ value: "new architecture", limit: 5000 });
     });
   });
 
   describe("sendMessage", () => {
     beforeEach(() => {
-      (mockViking.readFile as ReturnType<typeof vi.fn>).mockImplementation(async (uri: string) => {
-        if (uri.includes("/blocks/persona")) return "I am the persona";
-        if (uri.includes("/blocks/architecture")) return "Arch content";
-        if (uri.includes("/blocks/conventions")) return "Conv content";
+      (mockBlockStorage.get as ReturnType<typeof vi.fn>).mockImplementation((_agentId: string, label: string) => {
+        if (label === "persona") return "I am the persona";
+        if (label === "architecture") return "Arch content";
+        if (label === "conventions") return "Conv content";
         return "";
       });
     });
 
-    it("reads 3 blocks, calls toolCallingLoop with correct args", async () => {
+    it("reads 3 blocks from blockStorage, calls toolCallingLoop with correct args", async () => {
       const result = await provider.sendMessage("myrepo", "hello");
 
       expect(result).toBe("mocked response");
@@ -232,6 +243,61 @@ describe("VikingProvider", () => {
       );
     });
 
+    it("retries the same model on retryable errors", async () => {
+      provider = new VikingProvider(mockViking, API_KEY, DEFAULT_MODEL, mockBlockStorage, {
+        maxRetriesPerModel: 1,
+        retryBaseDelayMs: 0,
+      });
+
+      vi.mocked(toolCallingLoop)
+        .mockRejectedValueOnce(new Error("HTTP 503 from https://openrouter.ai/api/v1/chat/completions"))
+        .mockResolvedValueOnce("recovered response");
+
+      const result = await provider.sendMessage("myrepo", "hello");
+
+      expect(result).toBe("recovered response");
+      expect(vi.mocked(toolCallingLoop)).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(toolCallingLoop).mock.calls[0][0].model).toBe(DEFAULT_MODEL);
+      expect(vi.mocked(toolCallingLoop).mock.calls[1][0].model).toBe(DEFAULT_MODEL);
+    });
+
+    it("falls back to secondary model after primary retries are exhausted", async () => {
+      provider = new VikingProvider(mockViking, API_KEY, DEFAULT_MODEL, mockBlockStorage, {
+        fallbackModels: ["moonshotai/kimi-k2.5"],
+        maxRetriesPerModel: 0,
+        retryBaseDelayMs: 0,
+      });
+
+      vi.mocked(toolCallingLoop)
+        .mockRejectedValueOnce(new Error("OpenRouter request timed out after 20000ms"))
+        .mockResolvedValueOnce("fallback model response");
+
+      const result = await provider.sendMessage("myrepo", "hello");
+
+      expect(result).toBe("fallback model response");
+      expect(vi.mocked(toolCallingLoop)).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(toolCallingLoop).mock.calls[0][0].model).toBe(DEFAULT_MODEL);
+      expect(vi.mocked(toolCallingLoop).mock.calls[1][0].model).toBe("moonshotai/kimi-k2.5");
+    });
+
+    it("does not fallback when overrideModel is explicitly provided", async () => {
+      provider = new VikingProvider(mockViking, API_KEY, DEFAULT_MODEL, mockBlockStorage, {
+        fallbackModels: ["moonshotai/kimi-k2.5"],
+        maxRetriesPerModel: 0,
+        retryBaseDelayMs: 0,
+      });
+
+      vi.mocked(toolCallingLoop)
+        .mockRejectedValueOnce(new Error("OpenRouter request timed out after 20000ms"));
+
+      await expect(
+        provider.sendMessage("myrepo", "hello", { overrideModel: "z-ai/glm-5" }),
+      ).rejects.toThrow("All model attempts failed");
+
+      expect(vi.mocked(toolCallingLoop)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(toolCallingLoop).mock.calls[0][0].model).toBe("z-ai/glm-5");
+    });
+
     it("archival_memory_search handler calls semanticSearch and returns JSON", async () => {
       await provider.sendMessage("myrepo", "hello");
 
@@ -251,22 +317,18 @@ describe("VikingProvider", () => {
       expect(result).toBe(JSON.stringify([{ uri: "u", text: "t", score: 0.9 }]));
     });
 
-    it("memory_replace handler calls writeFile via updateBlock and returns confirmation", async () => {
+    it("memory_replace handler calls blockStorage.set via updateBlock and returns confirmation", async () => {
       await provider.sendMessage("myrepo", "hello");
 
       const callArgs = vi.mocked(toolCallingLoop).mock.calls[0][0];
       const replaceHandler = callArgs.toolHandlers["memory_replace"];
 
-      // Clear previous calls from sendMessage's getBlock reads
       vi.clearAllMocks();
-      (mockViking.writeFile as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 
       const result = await replaceHandler({ label: "architecture", value: "new arch" });
 
-      expect(mockViking.writeFile).toHaveBeenCalledWith(
-        "viking://resources/myrepo/blocks/architecture",
-        "new arch",
-      );
+      expect(mockBlockStorage.set).toHaveBeenCalledWith("myrepo", "architecture", "new arch");
+      expect(mockViking.writeFile).not.toHaveBeenCalled();
       expect(result).toBe("Updated block 'architecture'");
     });
   });

@@ -27,6 +27,7 @@ export interface MemoryBlock {
 export interface SendMessageOptions {
   overrideModel?: string;
   maxSteps?: number;
+  signal?: AbortSignal;
 }
 
 export interface AgentProvider {
