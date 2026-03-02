@@ -48,6 +48,13 @@ export function parsePositiveInt(raw: string | undefined, fallback: number): num
   return parsed;
 }
 
+function parseNonNegativeInt(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isNaN(parsed) || parsed < 0) return fallback;
+  return parsed;
+}
+
 function parseModelCsv(value: string | undefined): string[] {
   if (!value) return [];
   return value
@@ -59,7 +66,7 @@ function parseModelCsv(value: string | undefined): string[] {
 function getVikingRuntimeOptionsFromEnv(): VikingRuntimeOptions {
   return {
     requestTimeoutMs: parsePositiveInt(process.env["OPENROUTER_REQUEST_TIMEOUT_MS"], 20_000),
-    maxRetriesPerModel: parsePositiveInt(process.env["OPENROUTER_MAX_RETRIES_PER_MODEL"], 0),
+    maxRetriesPerModel: parseNonNegativeInt(process.env["OPENROUTER_MAX_RETRIES_PER_MODEL"], 1),
     retryBaseDelayMs: parsePositiveInt(process.env["OPENROUTER_RETRY_BASE_DELAY_MS"], 600),
     fallbackModels: parseModelCsv(process.env["OPENROUTER_FALLBACK_MODELS"]),
   };

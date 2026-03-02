@@ -418,7 +418,7 @@ function parseModelCsv(value: string | undefined): string[] {
 
 function getVikingRuntimeOptionsFromEnv(): VikingRuntimeOptions {
   const requestTimeoutMs = parseOptionalPositiveInt(process.env["OPENROUTER_REQUEST_TIMEOUT_MS"], 20_000);
-  const maxRetriesPerModel = parseNonNegativeInt(process.env["OPENROUTER_MAX_RETRIES_PER_MODEL"] ?? "0", 0);
+  const maxRetriesPerModel = parseNonNegativeInt(process.env["OPENROUTER_MAX_RETRIES_PER_MODEL"] ?? "1", 1);
   const retryBaseDelayMs = parseOptionalPositiveInt(process.env["OPENROUTER_RETRY_BASE_DELAY_MS"], 600);
   const fallbackModels = parseModelCsv(process.env["OPENROUTER_FALLBACK_MODELS"]);
   return { requestTimeoutMs, maxRetriesPerModel, retryBaseDelayMs, fallbackModels };

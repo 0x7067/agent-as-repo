@@ -20,7 +20,7 @@ export interface VikingRuntimeOptions {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
-const DEFAULT_MAX_RETRIES_PER_MODEL = 0;
+const DEFAULT_MAX_RETRIES_PER_MODEL = 1;
 const DEFAULT_RETRY_BASE_DELAY_MS = 600;
 const DEFAULT_FALLBACK_MODELS = [
   "moonshotai/kimi-k2.5",
