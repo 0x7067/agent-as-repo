@@ -208,7 +208,10 @@ describe("runInit (port-injected, stryker)", () => {
       "/repo/.git": "__DIR__",
     });
 
-    const rl = { question: vi.fn().mockResolvedValue("n") } as unknown as readline.Interface;
+    const answers = ["", "", "n"];
+    const rl = {
+      question: vi.fn(async () => answers.shift() ?? ""),
+    } as unknown as readline.Interface;
 
     await expect(
       runInit(rl, {

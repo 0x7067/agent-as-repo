@@ -37,6 +37,19 @@ describe("doctor shell checks", () => {
     expect(result.status).toBe("pass");
   });
 
+  it("checkApiKey fails when OPENROUTER_API_KEY is missing for viking provider", async () => {
+    delete process.env.OPENROUTER_API_KEY;
+    const result = await checkApiKey("viking");
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("OPENROUTER_API_KEY");
+  });
+
+  it("checkApiKey passes when OPENROUTER_API_KEY is set for viking provider", async () => {
+    process.env.OPENROUTER_API_KEY = "or-test";
+    const result = await checkApiKey("viking");
+    expect(result.status).toBe("pass");
+  });
+
   it("checkConfigFile reports missing config", async () => {
     const missingPath = path.join(await makeTempDir("doctor-"), "missing.yaml");
     const result = await checkConfigFile(missingPath);
@@ -234,6 +247,24 @@ describe("runDoctorFixes (port-injected)", () => {
     await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
     expect(fakeFs.store.get("/project/.env")).toContain("LETTA_API_KEY");
     expect(fakeFs.store.has("/project/.repo-expert-state.json")).toBe(true);
+  });
+
+  it("creates OpenRouter .env template when provider is viking", async () => {
+    const fakeFs = makeFakeFs({
+      "/project/config.yaml": [
+        "provider:",
+        "  type: viking",
+        "  openrouter_model: openai/gpt-4o-mini",
+        "repos:",
+        "  demo:",
+        "    path: /repo",
+        "    description: test",
+        "    extensions: [.ts]",
+        "    ignore_dirs: [node_modules, .git]",
+      ].join("\n"),
+    });
+    await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
+    expect(fakeFs.store.get("/project/.env")).toContain("OPENROUTER_API_KEY");
   });
 
   it("does not overwrite existing .env", async () => {

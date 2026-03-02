@@ -1,11 +1,19 @@
 # Repo Expert Agents — Configuration
 # Copy to config.yaml and customize for your repos.
-# API key: set LETTA_API_KEY in your .env file.
+# Provider setup:
+# Letta mode: set LETTA_API_KEY in .env
+# Viking mode: set OPENROUTER_API_KEY in .env (and optional VIKING_URL / VIKING_API_KEY)
 
-letta:
+provider:
+  type: letta
   model: openai/gpt-4.1
   # fast_model: openai/gpt-4.1-mini   # Optional model for ask --fast flag
   embedding: openai/text-embedding-3-small
+
+# provider:
+#   type: viking
+#   openrouter_model: openai/gpt-4o-mini
+#   viking_url: http://localhost:1933
 
 # Optional global defaults (all can be overridden per-repo)
 defaults:

@@ -70,6 +70,7 @@ export interface InitConfig {
   description: string;
   extensions: string[];
   ignoreDirs: string[];
+  providerType: "letta" | "viking";
 }
 
 /**
@@ -77,10 +78,17 @@ export interface InitConfig {
  */
 export function generateConfigYaml(config: InitConfig): string {
   const doc = {
-    letta: {
-      model: "openai/gpt-4.1",
-      embedding: "openai/text-embedding-3-small",
-    },
+    provider: config.providerType === "viking"
+      ? {
+          type: "viking",
+          openrouter_model: "openai/gpt-4o-mini",
+          viking_url: "http://localhost:1933",
+        }
+      : {
+          type: "letta",
+          model: "openai/gpt-4.1",
+          embedding: "openai/text-embedding-3-small",
+        },
     repos: {
       [config.repoName]: {
         path: config.repoPath,

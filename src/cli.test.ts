@@ -101,7 +101,7 @@ describe("cli contract", () => {
       -h, --help display help for command
 
       Commands:
-      init [options] Interactive setup: configure API key, scan a repo, generate config.yaml
+      init [options] Interactive setup: configure provider/API key, scan a repo, generate config.yaml
       doctor [options] Check setup: API key, config, repo paths, git, state consistency
       self-check [options] Check local runtime/toolchain health (Node, pnpm, dependencies)
       setup [options] Create agents from config.yaml
@@ -118,7 +118,7 @@ describe("cli contract", () => {
       watch [options] Watch repos and auto-sync on repo changes
       install-daemon [options] Install launchd daemon for auto-sync on macOS
       uninstall-daemon Uninstall the launchd watch daemon
-      mcp-install [options] Add Letta MCP server entry to Claude Code config
+      mcp-install [options] Add MCP server entry to Claude Code config (provider-aware)
       mcp-check [options] Validate existing MCP server entry in Claude Code config
       completion [options] <shell> Print shell completion script (bash, zsh, fish)
       help [command] display help for command
@@ -270,6 +270,43 @@ describe("cli contract", () => {
 
     await expect(fs.access(homeConfigPath)).rejects.toThrow();
     expect(localConfig.mcpServers?.letta).toBeDefined();
+  });
+
+  it("writes Viking MCP env when config provider is viking", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-local-viking-");
+    const home = await makeWorkspace("repo-expert-cli-home-viking-");
+    const repoDir = path.join(cwd, "repo");
+    await fs.mkdir(repoDir, { recursive: true });
+    await fs.writeFile(
+      path.join(cwd, "config.yaml"),
+      [
+        "provider:",
+        "  type: viking",
+        "  openrouter_model: openai/gpt-4o-mini",
+        "repos:",
+        "  my-app:",
+        `    path: ${repoDir}`,
+        "    description: test repo",
+        "    extensions: [.ts]",
+        "    ignore_dirs: [node_modules, .git]",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = runCli(["mcp-install", "--local"], cwd, {
+      HOME: home,
+      OPENROUTER_API_KEY: "or-test-key",
+      LETTA_API_KEY: "",
+    });
+
+    expect(result.status).toBe(0);
+    const localRaw = await fs.readFile(path.join(cwd, ".claude.json"), "utf8");
+    const localConfig = JSON.parse(localRaw) as {
+      mcpServers?: { letta?: { env?: Record<string, string> } };
+    };
+    expect(localConfig.mcpServers?.letta?.env?.PROVIDER_TYPE).toBe("viking");
+    expect(localConfig.mcpServers?.letta?.env?.OPENROUTER_API_KEY).toBe("or-test-key");
+    expect(localConfig.mcpServers?.letta?.env?.OPENROUTER_MODEL).toBe("openai/gpt-4o-mini");
   });
 
   it("shows actionable error without stack trace when mcp-check config is malformed", async () => {

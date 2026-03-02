@@ -19,6 +19,7 @@ interface InitResult {
 export interface RunInitOptions {
   apiKey?: string;
   repoPath?: string;
+  provider?: "letta" | "viking";
   assumeYes?: boolean;
   allowPrompts?: boolean;
   cwd?: string;
@@ -54,6 +55,7 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
   const {
     apiKey: apiKeyFromFlag,
     repoPath: repoPathFromFlag,
+    provider: providerFromFlag,
     assumeYes = false,
     allowPrompts = true,
     cwd = process.cwd(),
@@ -61,42 +63,57 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
   } = options;
   console.log("repo-expert init — set up your first agent\n");
 
+  const providerType = providerFromFlag
+    ?? (allowPrompts && !assumeYes
+      ? ((await rl.question("Provider [letta/viking] (default: letta): ")).trim().toLowerCase() || "letta")
+      : "letta");
+  if (providerType !== "letta" && providerType !== "viking") {
+    console.error(`Invalid provider "${providerType}". Expected "letta" or "viking".`);
+    process.exitCode = 1;
+    throw new Error("Invalid provider");
+  }
+
+  const providerApiKeyEnv = providerType === "viking" ? "OPENROUTER_API_KEY" : "LETTA_API_KEY";
+  const providerApiKeyPrompt = providerType === "viking"
+    ? "OpenRouter API key (from https://openrouter.ai/keys): "
+    : "Letta API key (from https://app.letta.com/): ";
+
   // 1. API key
   const envPath = path.resolve(cwd, ".env");
   let envWritten: string | null = null;
-  const existingKey = process.env.LETTA_API_KEY;
+  const existingKey = process.env[providerApiKeyEnv];
 
   if (existingKey) {
-    console.log("API key: found in environment");
+    console.log(`${providerApiKeyEnv}: found in environment`);
   } else {
     let hasEnvFile = false;
     try {
       const envContent = await fs.readFile(envPath, "utf8");
-      hasEnvFile = envContent.includes("LETTA_API_KEY=") &&
-        !envContent.includes("LETTA_API_KEY=your-key-here");
+      hasEnvFile = envContent.includes(`${providerApiKeyEnv}=`) &&
+        !envContent.includes(`${providerApiKeyEnv}=your-key-here`);
     } catch {
       // no .env
     }
 
     if (hasEnvFile) {
-      console.log("API key: found in .env");
+      console.log(`${providerApiKeyEnv}: found in .env`);
     } else if (apiKeyFromFlag && apiKeyFromFlag.trim()) {
-      await fs.writeFile(envPath, `LETTA_API_KEY=${apiKeyFromFlag.trim()}\n`);
+      await fs.writeFile(envPath, `${providerApiKeyEnv}=${apiKeyFromFlag.trim()}\n`);
       envWritten = envPath;
-      console.log(`API key: wrote ${envPath} from --api-key`);
+      console.log(`${providerApiKeyEnv}: wrote ${envPath} from --api-key`);
     } else {
       if (!allowPrompts) {
-        console.error("API key is required in non-interactive mode. Pass --api-key or set LETTA_API_KEY.");
+        console.error(`API key is required in non-interactive mode. Pass --api-key or set ${providerApiKeyEnv}.`);
         process.exitCode = 1;
         throw new Error("Missing API key");
       }
-      const apiKey = await rl.question("Letta API key (from https://app.letta.com/): ");
+      const apiKey = await rl.question(providerApiKeyPrompt);
       if (!apiKey.trim()) {
-        console.error("API key is required. Get one at https://app.letta.com/");
+        console.error(`API key is required. Set ${providerApiKeyEnv} and retry.`);
         process.exitCode = 1;
         throw new Error("Missing API key");
       }
-      await fs.writeFile(envPath, `LETTA_API_KEY=${apiKey.trim()}\n`);
+      await fs.writeFile(envPath, `${providerApiKeyEnv}=${apiKey.trim()}\n`);
       envWritten = envPath;
       console.log(`  Wrote ${envPath}`);
     }
@@ -195,6 +212,7 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
     description,
     extensions,
     ignoreDirs,
+    providerType,
   });
 
   await fs.writeFile(configPath, yamlContent);

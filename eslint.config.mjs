@@ -249,6 +249,32 @@ export default tseslint.config(
 			"no-console": "off",
 		},
 	},
+	{
+		files: ["spikes/provider-parity-stress.ts"],
+		rules: {
+			"n/hashbang": "off",
+			"promise/param-names": "off",
+			"@typescript-eslint/restrict-template-expressions": "off",
+			"security/detect-non-literal-fs-filename": "off",
+			"unicorn/text-encoding-identifier-case": "off",
+			"unicorn/no-for-loop": "off",
+			"@typescript-eslint/no-unnecessary-condition": "off",
+			"sonarjs/no-redundant-jump": "off",
+			"sonarjs/pseudo-random": "off",
+			"@typescript-eslint/no-confusing-void-expression": "off",
+			"unicorn/no-useless-undefined": "off",
+			"unicorn/no-array-sort": "off",
+			"unicorn/prefer-single-call": "off",
+			"unicorn/prefer-string-replace-all": "off",
+			"unicorn/prefer-string-raw": "off",
+			"unicorn/no-immediate-mutation": "off",
+			"unicorn/consistent-existence-index-check": "off",
+			"unicorn/no-negated-condition": "off",
+			"unicorn/prefer-top-level-await": "off",
+			"@typescript-eslint/use-unknown-in-catch-callback-variable": "off",
+			"n/no-process-exit": "off",
+		},
+	},
 
 	// ============================================================
 	// ⚙️ CONFIG FILES: CommonJS / untyped APIs

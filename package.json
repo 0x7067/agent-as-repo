@@ -18,7 +18,8 @@
     "test": "vitest run",
     "repo-expert": "tsx src/cli.ts",
     "mcp-server": "tsx src/mcp-server.ts",
-    "test:mutation": "stryker run"
+    "test:mutation": "stryker run",
+    "provider:parity-stress": "tsx spikes/provider-parity-stress.ts"
   },
   "keywords": [],
   "author": "",

@@ -36,7 +36,7 @@ import { BROADCAST_ASK_DEFAULT_TIMEOUT_MS, broadcastAsk } from "./shell/group-pr
 import { watchRepos } from "./shell/watch.js";
 import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
-import { generateMcpEntry, checkMcpEntry } from "./core/mcp-config.js";
+import { generateMcpEntry, checkMcpEntry, type McpProviderConfig } from "./core/mcp-config.js";
 import { buildPostSetupNextSteps, getSetupMode } from "./core/setup.js";
 import type { AgentState, AppState, Config } from "./core/types.js";
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
@@ -62,6 +62,7 @@ interface ProgramOpts {
 interface InitOpts {
   apiKey?: string;
   repoPath?: string;
+  provider?: "letta" | "viking";
   yes?: boolean;
 }
 
@@ -280,6 +281,41 @@ async function loadConfigSafe(configPath: string): Promise<Config> {
     }
     throw error;
   }
+}
+
+async function loadConfigOptional(configPath: string): Promise<Config | null> {
+  try {
+    return await loadConfig(configPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if (error instanceof ConfigError) return null;
+    throw error;
+  }
+}
+
+function resolveMcpProviderConfig(config: Config | null, baseUrl: string): McpProviderConfig {
+  if (config?.provider.type === "viking") {
+    const openrouterApiKey = process.env["OPENROUTER_API_KEY"];
+    if (!openrouterApiKey) {
+      throw new CliUserError("Missing OPENROUTER_API_KEY.\nAdd it to .env for Viking MCP mode.");
+    }
+    return {
+      type: "viking",
+      openrouterApiKey,
+      openrouterModel: process.env["OPENROUTER_MODEL"] ?? config.provider.openrouterModel,
+      vikingUrl: process.env["VIKING_URL"] ?? config.provider.vikingUrl,
+      vikingApiKey: process.env["VIKING_API_KEY"],
+    };
+  }
+
+  if (!process.env["LETTA_API_KEY"]) {
+    throw new CliUserError('Missing LETTA_API_KEY.\nRun "repo-expert init" to configure, or add it to .env manually.');
+  }
+  return {
+    type: "letta",
+    apiKey: process.env["LETTA_API_KEY"],
+    baseUrl,
+  };
 }
 
 function gitHeadCommit(cwd: string): string | null {
@@ -541,8 +577,9 @@ program.addHelpText(
 
 program
   .command("init")
-  .description("Interactive setup: configure API key, scan a repo, generate config.yaml")
-  .option("--api-key <key>", "API key to write to .env (non-interactive)")
+  .description("Interactive setup: configure provider/API key, scan a repo, generate config.yaml")
+  .option("--provider <type>", "Provider type: letta or viking")
+  .option("--api-key <key>", "Provider API key to write to .env (non-interactive)")
   .option("--repo-path <path>", "Repository path to configure")
   .option("-y, --yes", "Accept defaults and skip confirmation prompts")
   .action(async (opts: InitOpts) => {
@@ -551,6 +588,7 @@ program
       await runInit(rl, {
         apiKey: opts.apiKey,
         repoPath: opts.repoPath,
+        provider: opts.provider,
         assumeYes: Boolean(opts.yes),
         allowPrompts: !noInputEnabled() && interactiveInputAvailable(),
       });
@@ -1533,14 +1571,11 @@ interface CompletionOpts {
 
 program
   .command("mcp-install")
-  .description("Add Letta MCP server entry to Claude Code config")
+  .description("Add MCP server entry to Claude Code config (provider-aware)")
   .option("--global", "Write to global ~/.claude.json (default)")
   .option("--local", "Write to local ./.claude.json")
   .option("--base-url <url>", "Letta base URL", "https://api.letta.com")
   .action(async (opts: McpInstallOpts) => {
-    if (!process.env["LETTA_API_KEY"]) {
-      throw new CliUserError('Missing LETTA_API_KEY.\nRun "repo-expert init" to configure, or add it to .env manually.');
-    }
     if (opts.global && opts.local) {
       console.error("Choose either --global or --local, not both.");
       process.exitCode = 1;
@@ -1574,7 +1609,10 @@ program
     const seaLettaTools = path.resolve(process.cwd(), "dist", "letta-tools");
     const binaryPath = (await pathExists(seaLettaTools)) ? seaLettaTools : undefined;
     if (binaryPath) console.log(`Using SEA binary: ${binaryPath}`);
-    const entry = generateMcpEntry(mcpServerPath, process.env.LETTA_API_KEY!, opts.baseUrl, binaryPath);
+    const configPath = path.resolve("config.yaml");
+    const appConfig = await loadConfigOptional(configPath);
+    const providerConfig = resolveMcpProviderConfig(appConfig, opts.baseUrl);
+    const entry = generateMcpEntry(mcpServerPath, providerConfig, binaryPath);
     mcpServers.letta = entry;
     config.mcpServers = mcpServers;
 
@@ -1617,7 +1655,22 @@ program
     const entry = mcpServers.letta as Parameters<typeof checkMcpEntry>[0];
     const seaLettaTools = path.resolve(process.cwd(), "dist", "letta-tools");
     const binaryPath = (await pathExists(seaLettaTools)) ? seaLettaTools : undefined;
-    const result = checkMcpEntry(entry, mcpServerPath, binaryPath);
+    const configPath = path.resolve("config.yaml");
+    const appConfig = await loadConfigOptional(configPath);
+    const providerConfig = appConfig?.provider.type === "viking"
+      ? {
+          type: "viking",
+          openrouterApiKey: process.env["OPENROUTER_API_KEY"] ?? "",
+          openrouterModel: process.env["OPENROUTER_MODEL"] ?? appConfig.provider.openrouterModel,
+          vikingUrl: process.env["VIKING_URL"] ?? appConfig.provider.vikingUrl,
+          vikingApiKey: process.env["VIKING_API_KEY"],
+        } satisfies McpProviderConfig
+      : {
+          type: "letta",
+          apiKey: process.env["LETTA_API_KEY"] ?? "",
+          baseUrl: process.env["LETTA_BASE_URL"] ?? "https://api.letta.com",
+        } satisfies McpProviderConfig;
+    const result = checkMcpEntry(entry, mcpServerPath, providerConfig, binaryPath);
 
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));

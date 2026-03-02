@@ -60,12 +60,20 @@ pnpm repo-expert mcp-install  # writes entry to ~/.claude.json
 
 ## Configuration
 
-Copy `config.example.yaml` to `config.yaml` and set `LETTA_API_KEY` in `.env`:
+Copy `config.example.yaml` to `config.yaml` and set provider-specific credentials in `.env`:
+- Letta mode: `LETTA_API_KEY`
+- Viking mode: `OPENROUTER_API_KEY` (optional `VIKING_URL`, `VIKING_API_KEY`)
 
 ```yaml
-letta:
+provider:
+  type: letta
   model: openai/gpt-4.1
   embedding: openai/text-embedding-3-small
+
+# provider:
+#   type: viking
+#   openrouter_model: openai/gpt-4o-mini
+#   viking_url: http://localhost:1933
 
 repos:
   my-app:
@@ -92,6 +100,7 @@ pnpm install              # install dependencies
 pnpm test                 # run all tests (vitest)
 pnpm repo-expert --help   # CLI entry point
 pnpm mcp-server           # start MCP server (stdio)
+pnpm provider:parity-stress  # parity gate + live stress report (requires provider credentials)
 ```
 
 Conventions:

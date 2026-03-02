@@ -5,25 +5,51 @@ export interface McpServerEntry {
   env: Record<string, string>;
 }
 
+export type McpProviderConfig =
+  | {
+      type: "letta";
+      apiKey: string;
+      baseUrl?: string;
+    }
+  | {
+      type: "viking";
+      openrouterApiKey: string;
+      openrouterModel: string;
+      vikingUrl?: string;
+      vikingApiKey?: string;
+    };
+
 export function generateMcpEntry(
   mcpServerPath: string,
-  apiKey: string,
-  baseUrl = "https://api.letta.com",
+  provider: McpProviderConfig,
   binaryPath?: string,
 ): McpServerEntry {
+  const env = provider.type === "letta"
+    ? {
+        LETTA_BASE_URL: provider.baseUrl ?? "https://api.letta.com",
+        LETTA_API_KEY: provider.apiKey,
+      }
+    : {
+        PROVIDER_TYPE: "viking",
+        OPENROUTER_API_KEY: provider.openrouterApiKey,
+        OPENROUTER_MODEL: provider.openrouterModel,
+        ...(provider.vikingUrl ? { VIKING_URL: provider.vikingUrl } : {}),
+        ...(provider.vikingApiKey ? { VIKING_API_KEY: provider.vikingApiKey } : {}),
+      };
+
   if (binaryPath) {
     return {
       command: binaryPath,
       args: [],
       timeout: 300,
-      env: { LETTA_BASE_URL: baseUrl, LETTA_API_KEY: apiKey },
+      env,
     };
   }
   return {
     command: "npx",
     args: ["tsx", mcpServerPath],
     timeout: 300,
-    env: { LETTA_BASE_URL: baseUrl, LETTA_API_KEY: apiKey },
+    env,
   };
 }
 
@@ -35,6 +61,7 @@ export interface McpCheckResult {
 export function checkMcpEntry(
   entry: McpServerEntry | undefined,
   mcpServerPath: string,
+  provider: McpProviderConfig,
   binaryPath?: string,
 ): McpCheckResult {
   const issues: string[] = [];
@@ -65,17 +92,39 @@ export function checkMcpEntry(
     }
   }
 
-  const baseUrl = entry.env?.LETTA_BASE_URL ?? "";
-  if (baseUrl.endsWith("/v1")) {
-    issues.push(`LETTA_BASE_URL ends with "/v1" — the SDK adds this automatically. Use "https://api.letta.com".`);
-  }
-  if (!baseUrl) {
-    issues.push("LETTA_BASE_URL is missing.");
-  }
+  if (provider.type === "letta") {
+    const baseUrl = entry.env?.LETTA_BASE_URL ?? "";
+    if (baseUrl.endsWith("/v1")) {
+      issues.push(`LETTA_BASE_URL ends with "/v1" — the SDK adds this automatically. Use "https://api.letta.com".`);
+    }
+    if (!baseUrl) {
+      issues.push("LETTA_BASE_URL is missing.");
+    }
 
-  const apiKey = entry.env?.LETTA_API_KEY ?? entry.env?.LETTA_PASSWORD ?? "";
-  if (!apiKey) {
-    issues.push("LETTA_API_KEY (or LETTA_PASSWORD) is missing from env.");
+    const apiKey = entry.env?.LETTA_API_KEY ?? entry.env?.LETTA_PASSWORD ?? "";
+    if (!apiKey) {
+      issues.push("LETTA_API_KEY (or LETTA_PASSWORD) is missing from env.");
+    }
+  } else {
+    if (entry.env?.PROVIDER_TYPE !== "viking") {
+      issues.push(`PROVIDER_TYPE should be "viking", got "${entry.env?.PROVIDER_TYPE ?? "(missing)"}".`);
+    }
+
+    const openrouterApiKey = entry.env?.OPENROUTER_API_KEY ?? "";
+    if (!openrouterApiKey) {
+      issues.push("OPENROUTER_API_KEY is missing from env.");
+    }
+
+    const openrouterModel = entry.env?.OPENROUTER_MODEL ?? "";
+    if (!openrouterModel) {
+      issues.push("OPENROUTER_MODEL is missing from env.");
+    } else if (openrouterModel !== provider.openrouterModel) {
+      issues.push(`OPENROUTER_MODEL mismatch: config has "${openrouterModel}", expected "${provider.openrouterModel}".`);
+    }
+
+    if (provider.vikingUrl && (entry.env?.VIKING_URL ?? "") !== provider.vikingUrl) {
+      issues.push(`VIKING_URL mismatch: config has "${entry.env?.VIKING_URL ?? ""}", expected "${provider.vikingUrl}".`);
+    }
   }
 
   if ((entry.timeout ?? 0) < 60) {

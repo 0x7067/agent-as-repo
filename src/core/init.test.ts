@@ -165,6 +165,7 @@ describe("generateConfigYaml", () => {
       description: "React Native mobile app",
       extensions: [".ts", ".tsx", ".js"],
       ignoreDirs: ["node_modules", ".git", "dist"],
+      providerType: "letta",
     });
 
     expect(output).toContain("model: openai/gpt-4.1");
@@ -183,10 +184,11 @@ describe("generateConfigYaml", () => {
       description: "test",
       extensions: [".ts"],
       ignoreDirs: [],
+      providerType: "letta",
     });
     const parsed = yaml.load(output) as Record<string, unknown>;
     expect(parsed).toBeDefined();
-    expect(parsed.letta).toBeDefined();
+    expect(parsed.provider).toBeDefined();
     expect(parsed.repos).toBeDefined();
   });
 
@@ -200,6 +202,7 @@ describe("generateConfigYaml", () => {
       description: longDescription,
       extensions: [".ts"],
       ignoreDirs: [],
+      providerType: "letta",
     });
     // With lineWidth 120: description fits on one line
     // With default lineWidth 80 (or {} options): wraps using >- block scalar
@@ -220,6 +223,7 @@ describe("generateConfigYaml", () => {
       description: "App: a test # with special chars",
       extensions: [".ts"],
       ignoreDirs: [],
+      providerType: "letta",
     });
     // With quotingType: '"', the description should use double quotes
     // With quotingType: '' (or default), it uses single quotes
@@ -236,7 +240,21 @@ describe("generateConfigYaml", () => {
       description: "test",
       extensions: [".ts"],
       ignoreDirs: [],
+      providerType: "letta",
     });
     expect(output).toContain("path: ~/projects/app");
+  });
+
+  it("emits viking provider config when providerType is viking", () => {
+    const output = generateConfigYaml({
+      repoName: "app",
+      repoPath: "~/projects/app",
+      description: "test",
+      extensions: [".ts"],
+      ignoreDirs: [],
+      providerType: "viking",
+    });
+    expect(output).toContain("type: viking");
+    expect(output).toContain("openrouter_model");
   });
 });

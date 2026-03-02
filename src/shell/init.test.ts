@@ -40,7 +40,7 @@ describe.sequential("runInit", () => {
 
     process.chdir(workspace);
     process.env.LETTA_API_KEY = "test-key";
-    const rl = makeRl([repoDir]) as unknown as readline.Interface;
+    const rl = makeRl(["", repoDir]) as unknown as readline.Interface;
 
     await expect(runInit(rl)).rejects.toThrow("Not a git repository");
     expect(process.exitCode).toBe(1);
@@ -54,7 +54,7 @@ describe.sequential("runInit", () => {
 
     process.chdir(workspace);
     process.env.LETTA_API_KEY = "test-key";
-    const rl = makeRl([repoDir]) as unknown as readline.Interface;
+    const rl = makeRl(["", repoDir]) as unknown as readline.Interface;
 
     await expect(runInit(rl)).rejects.toThrow("No code files detected");
     expect(process.exitCode).toBe(1);
@@ -68,7 +68,7 @@ describe.sequential("runInit", () => {
 
     process.chdir(workspace);
     process.env.LETTA_API_KEY = "test-key";
-    const rl = makeRl([repoDir, "", "y"]) as unknown as readline.Interface;
+    const rl = makeRl(["", repoDir, "", "y"]) as unknown as readline.Interface;
 
     const result = await runInit(rl);
     expect(result.repoName).toBe("repo");
@@ -98,6 +98,30 @@ describe.sequential("runInit", () => {
     expect(result.repoName).toBe("repo");
     await expect(fs.access(path.join(workspace, ".env"))).resolves.toBeUndefined();
     await expect(fs.access(path.join(workspace, "config.yaml"))).resolves.toBeUndefined();
+  });
+
+  it("supports viking provider with --provider in non-interactive mode", async () => {
+    const workspace = await makeTempDir("init-workspace-viking-");
+    const repoDir = path.join(workspace, "repo");
+    await fs.mkdir(path.join(repoDir, ".git"), { recursive: true });
+    await fs.writeFile(path.join(repoDir, "index.ts"), "export const ready = true;\n", "utf-8");
+
+    process.chdir(workspace);
+    delete process.env.OPENROUTER_API_KEY;
+    const rl = makeRl([]) as unknown as readline.Interface;
+
+    await runInit(rl, {
+      provider: "viking",
+      apiKey: "or-abc123",
+      repoPath: repoDir,
+      assumeYes: true,
+      allowPrompts: false,
+    });
+
+    const envContent = await fs.readFile(path.join(workspace, ".env"), "utf8");
+    const configContent = await fs.readFile(path.join(workspace, "config.yaml"), "utf8");
+    expect(envContent).toContain("OPENROUTER_API_KEY=or-abc123");
+    expect(configContent).toContain("type: viking");
   });
 });
 

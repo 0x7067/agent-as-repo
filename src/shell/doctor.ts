@@ -8,20 +8,49 @@ import type { GitPort } from "../ports/git.js";
 import { nodeFileSystem } from "./adapters/node-filesystem.js";
 import { nodeGit } from "./adapters/node-git.js";
 
-export async function checkApiKey(): Promise<CheckResult> {
-  if (!process.env.LETTA_API_KEY) {
-    return { name: "API key", status: "fail", message: "LETTA_API_KEY not set. Add it to .env or your environment." };
+type ProviderType = "letta" | "viking";
+
+function expectedApiKeyEnv(providerType: ProviderType): "LETTA_API_KEY" | "OPENROUTER_API_KEY" {
+  return providerType === "viking" ? "OPENROUTER_API_KEY" : "LETTA_API_KEY";
+}
+
+async function detectProviderType(configPath: string, fs: FileSystemPort = nodeFileSystem): Promise<ProviderType> {
+  try {
+    const { loadConfig } = await import("./config-loader.js");
+    const config = await loadConfig(configPath, fs);
+    return config.provider.type;
+  } catch {
+    return "letta";
+  }
+}
+
+export async function checkApiKey(providerType: ProviderType = "letta"): Promise<CheckResult> {
+  const envName = expectedApiKeyEnv(providerType);
+  if (!process.env[envName]) {
+    return { name: "API key", status: "fail", message: `${envName} not set. Add it to .env or your environment.` };
   }
   return { name: "API key", status: "pass", message: "Set in environment" };
 }
 
-export async function checkApiConnection(provider: AgentProvider, agentId: string): Promise<CheckResult> {
+export async function checkApiConnection(
+  provider: AgentProvider,
+  agentId: string,
+  providerType: ProviderType = "letta",
+): Promise<CheckResult> {
   try {
     await provider.listPassages(agentId);
-    return { name: "API connection", status: "pass", message: "Connected to Letta Cloud" };
+    return {
+      name: "API connection",
+      status: "pass",
+      message: providerType === "viking" ? "Connected to OpenViking/OpenRouter runtime" : "Connected to Letta Cloud",
+    };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    return { name: "API connection", status: "fail", message: `Cannot reach Letta API: ${msg}` };
+    return {
+      name: "API connection",
+      status: "fail",
+      message: providerType === "viking" ? `Cannot reach Viking/OpenRouter runtime: ${msg}` : `Cannot reach Letta API: ${msg}`,
+    };
   }
 }
 
@@ -121,8 +150,9 @@ export async function checkStateConsistency(configPath: string): Promise<CheckRe
 
 export async function runAllChecks(provider: AgentProvider | null, configPath: string): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
+  const providerType = await detectProviderType(configPath);
 
-  results.push(await checkApiKey());
+  results.push(await checkApiKey(providerType));
 
   if (provider) {
     try {
@@ -135,7 +165,7 @@ export async function runAllChecks(provider: AgentProvider | null, configPath: s
         .find((agent) => agent !== undefined);
       const firstAgent = configuredAgent ?? Object.values(state.agents)[0];
       if (firstAgent) {
-        results.push(await checkApiConnection(provider, firstAgent.agentId));
+        results.push(await checkApiConnection(provider, firstAgent.agentId, providerType));
       } else {
         results.push({ name: "API connection", status: "warn", message: "No agents yet — run setup to verify connection" });
       }
@@ -169,13 +199,15 @@ export async function runDoctorFixes(
 ): Promise<DoctorFixResult> {
   const applied: string[] = [];
   const suggestions: string[] = [];
+  const providerType = await detectProviderType(configPath, fs);
+  const envName = expectedApiKeyEnv(providerType);
 
   const envPath = path.resolve(cwd, ".env");
   try {
     await fs.access(envPath);
   } catch {
-    await fs.writeFile(envPath, "LETTA_API_KEY=your-key-here\n");
-    applied.push(`Created ${envPath} with LETTA_API_KEY template.`);
+    await fs.writeFile(envPath, `${envName}=your-key-here\n`);
+    applied.push(`Created ${envPath} with ${envName} template.`);
   }
 
   try {
