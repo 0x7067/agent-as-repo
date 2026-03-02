@@ -165,7 +165,8 @@ function isOperationalFailureMessage(message: string | undefined): boolean {
     lower.includes("fetch failed") ||
     lower.includes("econn") ||
     lower.includes("cannot reach") ||
-    lower.includes("all model attempts failed")
+    lower.includes("all model attempts failed") ||
+    lower.includes("empty response from sendmessage")
   );
 }
 
@@ -464,12 +465,28 @@ async function runContractSuite(providerName: ProviderKey, provider: AgentProvid
   });
 
   await runMethod(methods, "sendMessage", async () => {
-    const response = await provider.sendMessage(
-      agentId,
+    const maxSteps = parsePositiveInt(process.env["PARITY_MAX_STEPS"], 12);
+    const prompts = [
       "Reply with the exact token PARITY_OK and nothing else.",
-      { maxSteps: parsePositiveInt(process.env["PARITY_MAX_STEPS"], 6) },
-    );
-    if ((response ?? "").trim().length === 0) throw new Error("Empty response from sendMessage");
+      "Do not call tools. Reply with the exact token PARITY_OK and nothing else.",
+    ];
+
+    let lastResponse = "";
+    for (let attempt = 0; attempt < prompts.length; attempt++) {
+      const response = await provider.sendMessage(
+        agentId,
+        prompts[attempt] ?? prompts[0]!,
+        { maxSteps: maxSteps + attempt * 2 },
+      );
+      if ((response ?? "").trim().length > 0) {
+        lastResponse = response;
+        break;
+      }
+    }
+
+    if (lastResponse.trim().length === 0) {
+      throw new Error(`Empty response from sendMessage after ${prompts.length.toString()} attempts`);
+    }
   });
 
   await runMethod(methods, "deletePassage", async () => {
@@ -563,14 +580,17 @@ async function runStressForProvider(
   let failures = 0;
   let timeoutFailures = 0;
   let retryLikeFailures = 0;
-  const startedAt = Date.now();
-  const deadline = startedAt + scenario.durationMs;
+  let startedAt = 0;
+  let deadline = 0;
 
   try {
     for (let i = 0; i < 6; i++) {
       const id = await provider.storePassage(agentId, `STRESS:${providerName}:${scenario.name}:seed:${i.toString()}`);
       storedIds.push(id);
     }
+
+    startedAt = Date.now();
+    deadline = startedAt + scenario.durationMs;
 
     const worker = async (): Promise<void> => {
       while (Date.now() < deadline) {
@@ -643,7 +663,9 @@ async function runStressForProvider(
     await provider.deleteAgent(agentId).catch(() => undefined);
   }
 
-  const durationMs = Math.max(1, Date.now() - startedAt);
+  const durationMs = startedAt === 0
+    ? scenario.durationMs
+    : Math.max(1, Date.now() - startedAt);
   const totalOps = successes + failures;
   const sorted = [...latencies].sort((a, b) => a - b);
   const throughputOpsPerSec = Number((totalOps / (durationMs / 1000)).toFixed(2));

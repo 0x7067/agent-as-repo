@@ -43,6 +43,23 @@ function getRetryAfterMs(err: unknown): number | null {
   return null;
 }
 
+function extractAssistantText(message: AssistantMessage): string {
+  const content = message.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+
+  const textParts = content
+    .map((part) => {
+      if (typeof part === "object" && part !== null && typeof (part as { text?: unknown }).text === "string") {
+        return (part as { text: string }).text;
+      }
+      return "";
+    })
+    .filter((part) => part.trim().length > 0);
+
+  return textParts.join("\n");
+}
+
 export class LettaProvider implements AgentProvider {
   constructor(private client: Letta, private retryBaseDelay = 1000) {}
 
@@ -169,11 +186,12 @@ export class LettaProvider implements AgentProvider {
       this.client.agents.messages.create(agentId, payload),
     );
 
-    for (const msg of resp.messages) {
-      if (msg.message_type === "assistant_message") {
-        const assistantMsg = msg;
-        const text = assistantMsg.content;
-        return typeof text === "string" ? text : "";
+    for (let i = resp.messages.length - 1; i >= 0; i--) {
+      const msg = resp.messages[i];
+      if (msg?.message_type !== "assistant_message") continue;
+      const text = extractAssistantText(msg);
+      if (text.trim().length > 0) {
+        return text;
       }
     }
 

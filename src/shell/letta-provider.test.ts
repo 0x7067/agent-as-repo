@@ -767,6 +767,44 @@ describe("LettaProvider", () => {
       const reply = await provider.sendMessage("agent-abc", "test");
       expect(reply).toBe("agent reply");
     });
+
+    it("returns concatenated text when assistant content is structured", async () => {
+      const client = makeMockClient();
+      client.agents.messages.create.mockResolvedValue({
+        messages: [
+          {
+            message_type: "assistant_message",
+            id: "m1",
+            date: "",
+            content: [
+              { type: "text", text: "PARITY_OK" },
+              { type: "text", text: "done" },
+            ],
+          },
+        ],
+        stop_reason: { stop_reason: "end_turn" },
+        usage: {},
+      });
+      const provider = new LettaProvider(mockClientAs(client));
+      const reply = await provider.sendMessage("agent-abc", "test");
+      expect(reply).toBe("PARITY_OK\ndone");
+    });
+
+    it("prefers the latest non-empty assistant message", async () => {
+      const client = makeMockClient();
+      client.agents.messages.create.mockResolvedValue({
+        messages: [
+          { message_type: "assistant_message", id: "m1", date: "", content: "older" },
+          { message_type: "assistant_message", id: "m2", date: "", content: "   " },
+          { message_type: "assistant_message", id: "m3", date: "", content: "newest" },
+        ],
+        stop_reason: { stop_reason: "end_turn" },
+        usage: {},
+      });
+      const provider = new LettaProvider(mockClientAs(client));
+      const reply = await provider.sendMessage("agent-abc", "test");
+      expect(reply).toBe("newest");
+    });
   });
 
   describe("createAgent initial block values", () => {
