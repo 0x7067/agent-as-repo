@@ -1,0 +1,46 @@
+[git]
+provider = "git-hub"
+branch_prefix = "feature/"
+main_branch = "main"
+
+[git.gitlab]
+base_url = "https://gitlab.com"
+
+[git.github]
+
+[git.codeberg]
+base_url = "https://codeberg.org"
+ci_provider = "forgejo-actions"
+
+[project_mgmt]
+provider = "asana"
+
+[project_mgmt.asana]
+
+[project_mgmt.notion]
+
+[project_mgmt.clickup]
+
+[project_mgmt.airtable]
+
+[project_mgmt.linear]
+
+[prompts]
+
+[dev_server]
+run_before = []
+working_dir = ""
+auto_start = false
+worktree_symlinks = []
+
+[appearance.asana.statuses]
+
+[appearance.notion.statuses]
+
+[appearance.clickup.statuses]
+
+[appearance.airtable.statuses]
+
+[appearance.linear.statuses]
+
+[automation]
