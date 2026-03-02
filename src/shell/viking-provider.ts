@@ -55,6 +55,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isDeletePassageAmbiguousFsError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return message.includes("http 500") && message.includes("/api/v1/fs");
+}
+
 export class VikingProvider implements AgentProvider {
   private readonly fallbackModels: string[];
   private readonly requestTimeoutMs: number;
@@ -119,12 +125,23 @@ export class VikingProvider implements AgentProvider {
   }
 
   async deletePassage(agentId: string, passageId: string): Promise<void> {
-    await this.viking.deleteFile(`viking://resources/${agentId}/passages/${passageId}.txt`);
+    const targetUri = `viking://resources/${agentId}/passages/${passageId}.txt`;
+    try {
+      await this.viking.deleteFile(targetUri);
+      return;
+    } catch (error) {
+      if (!isDeletePassageAmbiguousFsError(error)) throw error;
+
+      const siblingUris = await this.viking.listDirectory(`viking://resources/${agentId}/passages/`);
+      const stillExists = siblingUris.some((uri) => uri.endsWith(`/${passageId}.txt`));
+      if (!stillExists) return;
+      throw error;
+    }
   }
 
   async listPassages(agentId: string): Promise<Passage[]> {
     const uris = await this.viking.listDirectory(`viking://resources/${agentId}/passages/`);
-    return Promise.all(
+    const settled = await Promise.allSettled(
       uris.map(async (uri) => {
         const text = await this.viking.readFile(uri);
         const filename = uri.slice(uri.lastIndexOf("/") + 1);
@@ -132,6 +149,24 @@ export class VikingProvider implements AgentProvider {
         return { id, text };
       }),
     );
+
+    const passages: Passage[] = [];
+    let firstError: unknown;
+    for (const entry of settled) {
+      if (entry.status === "fulfilled") {
+        passages.push(entry.value);
+        continue;
+      }
+      if (firstError === undefined) {
+        firstError = entry.reason;
+      }
+    }
+
+    if (passages.length === 0 && firstError !== undefined) {
+      throw firstError;
+    }
+
+    return passages;
   }
 
   async getBlock(agentId: string, label: string): Promise<MemoryBlock> {

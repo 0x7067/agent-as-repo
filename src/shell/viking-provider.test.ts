@@ -151,6 +151,36 @@ describe("VikingProvider", () => {
         "viking://resources/myrepo/passages/abc-123.txt",
       );
     });
+
+    it("treats ambiguous 500 as idempotent when passage no longer exists", async () => {
+      (mockViking.deleteFile as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error("HTTP 500 from http://localhost:1933/api/v1/fs?uri=viking%3A%2F%2Fresources%2Fmyrepo%2Fpassages%2Fabc-123.txt"),
+      );
+      (mockViking.listDirectory as ReturnType<typeof vi.fn>).mockResolvedValue([
+        "viking://resources/myrepo/passages/other.txt",
+      ]);
+
+      await expect(provider.deletePassage("myrepo", "abc-123")).resolves.toBeUndefined();
+      expect(mockViking.listDirectory).toHaveBeenCalledWith("viking://resources/myrepo/passages/");
+    });
+
+    it("rethrows ambiguous 500 when passage is still listed", async () => {
+      (mockViking.deleteFile as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error("HTTP 500 from http://localhost:1933/api/v1/fs?uri=viking%3A%2F%2Fresources%2Fmyrepo%2Fpassages%2Fabc-123.txt"),
+      );
+      (mockViking.listDirectory as ReturnType<typeof vi.fn>).mockResolvedValue([
+        "viking://resources/myrepo/passages/abc-123.txt",
+      ]);
+
+      await expect(provider.deletePassage("myrepo", "abc-123")).rejects.toThrow("HTTP 500");
+    });
+
+    it("rethrows non-ambiguous errors from deleteFile", async () => {
+      (mockViking.deleteFile as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("HTTP 404 from x"));
+
+      await expect(provider.deletePassage("myrepo", "abc-123")).rejects.toThrow("HTTP 404");
+      expect(mockViking.listDirectory).not.toHaveBeenCalled();
+    });
   });
 
   describe("listPassages", () => {
@@ -178,6 +208,32 @@ describe("VikingProvider", () => {
         { id: "uuid-1", text: "passage one" },
         { id: "uuid-2", text: "passage two" },
       ]);
+    });
+
+    it("returns successful passages when one read fails", async () => {
+      (mockViking.listDirectory as ReturnType<typeof vi.fn>).mockResolvedValue([
+        "viking://resources/myrepo/passages/uuid-1.txt",
+        "viking://resources/myrepo/passages/uuid-2.txt",
+      ]);
+      (mockViking.readFile as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce("passage one")
+        .mockRejectedValueOnce(new Error("HTTP 500 from /api/v1/content/read"));
+
+      const passages = await provider.listPassages("myrepo");
+
+      expect(passages).toEqual([{ id: "uuid-1", text: "passage one" }]);
+    });
+
+    it("throws when all reads fail", async () => {
+      (mockViking.listDirectory as ReturnType<typeof vi.fn>).mockResolvedValue([
+        "viking://resources/myrepo/passages/uuid-1.txt",
+        "viking://resources/myrepo/passages/uuid-2.txt",
+      ]);
+      (mockViking.readFile as ReturnType<typeof vi.fn>)
+        .mockRejectedValueOnce(new Error("HTTP 500 from /api/v1/content/read"))
+        .mockRejectedValueOnce(new Error("HTTP 500 from /api/v1/content/read"));
+
+      await expect(provider.listPassages("myrepo")).rejects.toThrow("HTTP 500");
     });
   });
 
