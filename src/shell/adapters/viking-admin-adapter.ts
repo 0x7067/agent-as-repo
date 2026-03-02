@@ -36,10 +36,15 @@ export class VikingAdminAdapter implements AdminPort {
   }
 
   async searchPassages(agentId: string, query: string, limit?: number): Promise<PassageResult[]> {
-    const passages = await this.provider.listPassages(agentId);
-    const lq = query.toLowerCase();
-    const filtered = passages.filter((p) => p.text.toLowerCase().includes(lq));
-    const capped = limit !== undefined ? filtered.slice(0, limit) : filtered;
-    return capped.map((p) => ({ id: p.id, text: p.text }));
+    const results = await this.viking.semanticSearch(
+      query,
+      `viking://resources/${agentId}/passages/`,
+      limit ?? 10,
+    );
+    return results.map((r) => {
+      const filename = r.uri.slice(r.uri.lastIndexOf("/") + 1);
+      const id = filename.endsWith(".txt") ? filename.slice(0, -4) : filename;
+      return { id, text: r.text };
+    });
   }
 }

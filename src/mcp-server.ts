@@ -190,8 +190,9 @@ export async function main(): Promise<void> {
   let admin: AdminPort;
 
   if (providerType === "viking") {
-    const openrouterApiKey = process.env["OPENROUTER_API_KEY"] ?? "";
-    const vikingUrl = process.env["VIKING_URL"] ?? "http://localhost:1933";
+    const openrouterApiKey = process.env["OPENROUTER_API_KEY"];
+    if (!openrouterApiKey) throw new Error("Missing OPENROUTER_API_KEY env var for viking provider");
+    const vikingUrl = process.env["VIKING_URL"] ?? "http://localhost:1933"; // VIKING_URL env override (no config file in MCP server)
     const vikingApiKey = process.env["VIKING_API_KEY"];
     const model = process.env["OPENROUTER_MODEL"] ?? "openai/gpt-4o-mini";
     const viking = new VikingHttpClient(vikingUrl, vikingApiKey);

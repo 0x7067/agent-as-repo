@@ -163,7 +163,7 @@ function createProvider(config: Config): AgentProvider {
     if (!process.env["OPENROUTER_API_KEY"]) {
       throw new CliUserError('Missing OPENROUTER_API_KEY. Add it to .env.');
     }
-    const vikingUrl = process.env["VIKING_URL"] ?? "http://localhost:1933";
+    const vikingUrl = config.provider.vikingUrl ?? process.env["VIKING_URL"] ?? "http://localhost:1933";
     const vikingApiKey = process.env["VIKING_API_KEY"];
     const openrouterApiKey = process.env["OPENROUTER_API_KEY"]!;
     const viking = new VikingHttpClient(vikingUrl, vikingApiKey);
