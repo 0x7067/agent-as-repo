@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { VikingHttpClient } from "./viking-http.js";
 
 function makeResponse(
@@ -23,6 +23,10 @@ describe("VikingHttpClient", () => {
     mockFetch = vi.fn();
     vi.stubGlobal("fetch", mockFetch);
     client = new VikingHttpClient(BASE_URL);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe("mkdir", () => {
@@ -337,6 +341,80 @@ describe("VikingHttpClient", () => {
 
       await client.mkdir("viking://resources/myrepo/src");
 
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("circuit breaker", () => {
+    it("opens for fs operations after repeated retryable failures and fails fast", async () => {
+      const clientWithBreaker = new VikingHttpClient(BASE_URL, undefined, {
+        maxRetries: 0,
+        breakerFailureThreshold: 2,
+        breakerWindowMs: 10_000,
+        breakerCooldownMs: 5_000,
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(makeResponse(500))
+        .mockResolvedValueOnce(makeResponse(500));
+
+      await expect(clientWithBreaker.deleteResource("viking://resources/myrepo")).rejects.toThrow(/500/);
+      await expect(clientWithBreaker.deleteResource("viking://resources/myrepo")).rejects.toThrow(/500/);
+
+      await expect(clientWithBreaker.deleteResource("viking://resources/myrepo")).rejects.toThrow(
+        /Circuit open for Viking fs operations/,
+      );
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("allows requests again after cooldown window", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+      const clientWithBreaker = new VikingHttpClient(BASE_URL, undefined, {
+        maxRetries: 0,
+        breakerFailureThreshold: 1,
+        breakerWindowMs: 10_000,
+        breakerCooldownMs: 1_000,
+      });
+
+      mockFetch.mockResolvedValueOnce(makeResponse(500));
+      await expect(clientWithBreaker.listDirectory("viking://resources/myrepo")).rejects.toThrow(/500/);
+
+      await expect(clientWithBreaker.listDirectory("viking://resources/myrepo")).rejects.toThrow(
+        /Circuit open for Viking fs operations/,
+      );
+
+      vi.advanceTimersByTime(1_001);
+      mockFetch.mockResolvedValueOnce(makeResponse(200, { status: "ok", result: [] }));
+      await expect(clientWithBreaker.listDirectory("viking://resources/myrepo")).resolves.toEqual([]);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps fs and content circuit domains isolated", async () => {
+      const clientWithBreaker = new VikingHttpClient(BASE_URL, undefined, {
+        maxRetries: 0,
+        breakerFailureThreshold: 1,
+        breakerWindowMs: 10_000,
+        breakerCooldownMs: 5_000,
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(makeResponse(500))
+        .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: { uri: "viking://resources/myrepo/src" } }));
+
+      await expect(clientWithBreaker.readFile("viking://resources/myrepo/src/a.ts")).rejects.toThrow(/500/);
+      await expect(clientWithBreaker.mkdir("viking://resources/myrepo/src")).resolves.toBeUndefined();
+      await expect(clientWithBreaker.readFile("viking://resources/myrepo/src/a.ts")).rejects.toThrow(
+        /Circuit open for Viking content operations/,
+      );
+
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        `${BASE_URL}/api/v1/fs/mkdir`,
+        expect.objectContaining({ method: "POST" }),
+      );
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
   });
