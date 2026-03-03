@@ -144,13 +144,13 @@ describe("collectFiles", () => {
 
   it("accepts injected FileSystemPort", async () => {
     const mockFs: FileSystemPort = {
-      readFile: async () => "mock content",
-      writeFile: async () => {},
-      stat: async () => ({ size: 100, isDirectory: () => false }),
-      access: async () => {},
-      rename: async () => {},
-      copyFile: async () => {},
-      glob: async () => ["src/mock.ts"],
+      readFile: () => Promise.resolve("mock content"),
+      writeFile: () => Promise.resolve(),
+      stat: () => Promise.resolve({ size: 100, isDirectory: () => false }),
+      access: () => Promise.resolve(),
+      rename: () => Promise.resolve(),
+      copyFile: () => Promise.resolve(),
+      glob: () => Promise.resolve(["src/mock.ts"]),
     };
 
     const files = await collectFiles(makeConfig("/fake/path"), mockFs);
@@ -178,14 +178,14 @@ describe("collectFiles", () => {
   it("includes files exactly at maxFileSizeKb limit", async () => {
     // 1 byte = ~0.001 KB; we want a file exactly at boundary
     const mockFs: FileSystemPort = {
-      readFile: async () => "content",
-      writeFile: async () => {},
+      readFile: () => Promise.resolve("content"),
+      writeFile: () => Promise.resolve(),
       // File size exactly at maxFileSizeKb (50 KB)
-      stat: async () => ({ size: 50 * 1024, isDirectory: () => false }),
-      access: async () => {},
-      rename: async () => {},
-      copyFile: async () => {},
-      glob: async () => ["src/boundary.ts"],
+      stat: () => Promise.resolve({ size: 50 * 1024, isDirectory: () => false }),
+      access: () => Promise.resolve(),
+      rename: () => Promise.resolve(),
+      copyFile: () => Promise.resolve(),
+      glob: () => Promise.resolve(["src/boundary.ts"]),
     };
 
     const config = makeConfig("/fake/path", { maxFileSizeKb: 50 });
@@ -197,14 +197,14 @@ describe("collectFiles", () => {
 
   it("excludes files just above maxFileSizeKb limit", async () => {
     const mockFs: FileSystemPort = {
-      readFile: async () => "content",
-      writeFile: async () => {},
+      readFile: () => Promise.resolve("content"),
+      writeFile: () => Promise.resolve(),
       // File size just over 50 KB
-      stat: async () => ({ size: 50 * 1024 + 1, isDirectory: () => false }),
-      access: async () => {},
-      rename: async () => {},
-      copyFile: async () => {},
-      glob: async () => ["src/too-big.ts"],
+      stat: () => Promise.resolve({ size: 50 * 1024 + 1, isDirectory: () => false }),
+      access: () => Promise.resolve(),
+      rename: () => Promise.resolve(),
+      copyFile: () => Promise.resolve(),
+      glob: () => Promise.resolve(["src/too-big.ts"]),
     };
 
     const config = makeConfig("/fake/path", { maxFileSizeKb: 50 });

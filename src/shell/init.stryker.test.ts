@@ -14,32 +14,38 @@ function makeFakeFs(files: Record<string, string> = {}): FileSystemPort & { stor
   const store = new Map(Object.entries(files));
   return {
     store,
-    readFile: async (p) => {
+    readFile: (p) => {
       const v = store.get(p);
-      if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-      return v;
+      if (v === undefined) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+      return Promise.resolve(v);
     },
-    writeFile: async (p, d) => { store.set(p, d); },
-    stat: async (p) => {
+    writeFile: (p, d) => {
+      store.set(p, d);
+      return Promise.resolve();
+    },
+    stat: (p) => {
       const v = store.get(p);
-      if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-      return { size: v.length, isDirectory: () => v === "__DIR__" };
+      if (v === undefined) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+      return Promise.resolve({ size: v.length, isDirectory: () => v === "__DIR__" });
     },
-    access: async (p) => {
-      if (!store.has(p)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    access: (p) => {
+      if (!store.has(p)) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+      return Promise.resolve();
     },
-    rename: async (from, to) => {
+    rename: (from, to) => {
       const v = store.get(from);
-      if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      if (v === undefined) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
       store.delete(from);
       store.set(to, v);
+      return Promise.resolve();
     },
-    copyFile: async (src, dest) => {
+    copyFile: (src, dest) => {
       const v = store.get(src);
-      if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      if (v === undefined) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
       store.set(dest, v);
+      return Promise.resolve();
     },
-    glob: async () => ["index.ts", "src/main.ts"],
+    glob: () => Promise.resolve(["index.ts", "src/main.ts"]),
     watch: () => ({ close: vi.fn(), on: vi.fn().mockReturnThis() } as unknown as WatcherHandle),
   };
 }
@@ -188,7 +194,7 @@ describe("runInit (port-injected, stryker)", () => {
       "/repo/.git": "__DIR__",
       "/repo/package.json": JSON.stringify({ description: "My cool library" }),
     });
-    fakeFs.glob = async () => ["index.ts"];
+    fakeFs.glob = () => Promise.resolve(["index.ts"]);
 
     const result = await runInit(mockRl, {
       apiKey: "sk-key",
@@ -213,7 +219,7 @@ describe("runInit (port-injected, stryker)", () => {
 
     const answers = ["", "", "n"];
     const rl: MockRl = {
-      question: vi.fn(async () => answers.shift() ?? ""),
+      question: vi.fn(() => Promise.resolve(answers.shift() ?? "")),
     };
 
     await expect(

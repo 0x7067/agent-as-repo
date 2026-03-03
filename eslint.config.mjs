@@ -223,21 +223,6 @@ export default tseslint.config(
 				},
 			},
 		},
-	{
-		files: [
-			"src/shell/doctor.stryker.test.ts",
-			"src/shell/doctor.test.ts",
-			"src/shell/file-collector.test.ts",
-			"src/shell/init.stryker.test.ts",
-			"src/shell/init.test.ts",
-			"src/shell/sync.test.ts",
-		],
-		rules: {
-			// Narrow temporary override while we continue migrating test mocks.
-			"@typescript-eslint/require-await": "off",
-		},
-	},
-
 	// ============================================================
 	// 📄 SPIKES: Exploratory scripts — relax strict rules
 	// ============================================================

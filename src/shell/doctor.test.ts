@@ -149,9 +149,9 @@ describe("doctor shell checks", () => {
     };
     await fs.writeFile(path.join(tempDir, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
 
-    const listPassages = vi.fn(async (agentId: string) => {
-      if (agentId === "configured-agent") return [];
-      throw new Error("should not use orphan agent");
+    const listPassages = vi.fn((agentId: string) => {
+      if (agentId === "configured-agent") return Promise.resolve([]);
+      return Promise.reject(new Error("should not use orphan agent"));
     });
     const provider = { listPassages } as unknown as AgentProvider;
 
@@ -171,32 +171,38 @@ function makeFakeFs(files: Record<string, string> = {}): FileSystemPort & { stor
   const store = new Map(Object.entries(files));
   return {
     store,
-    readFile: async (p) => {
+    readFile: (p) => {
       const v = store.get(p);
-      if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-      return v;
+      if (v === undefined) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+      return Promise.resolve(v);
     },
-    writeFile: async (p, d) => { store.set(p, d); },
-    stat: async (p) => {
+    writeFile: (p, d) => {
+      store.set(p, d);
+      return Promise.resolve();
+    },
+    stat: (p) => {
       const value = store.get(p);
-      if (value !== undefined) return { size: value.length, isDirectory: () => false };
-      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      if (value !== undefined) return Promise.resolve({ size: value.length, isDirectory: () => false });
+      return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
     },
-    access: async (p) => {
-      if (!store.has(p)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    access: (p) => {
+      if (!store.has(p)) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+      return Promise.resolve();
     },
-    rename: async (from, to) => {
+    rename: (from, to) => {
       const v = store.get(from);
-      if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      if (v === undefined) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
       store.delete(from);
       store.set(to, v);
+      return Promise.resolve();
     },
-    copyFile: async (src, dest) => {
+    copyFile: (src, dest) => {
       const v = store.get(src);
-      if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      if (v === undefined) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
       store.set(dest, v);
+      return Promise.resolve();
     },
-    glob: async () => [],
+    glob: () => Promise.resolve([]),
     watch: fakeWatcherHandle,
   };
 }

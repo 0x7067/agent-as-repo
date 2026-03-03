@@ -6,7 +6,7 @@ import { makeMockProvider as makeBase } from "./__test__/mock-provider.js";
 function makeMockProvider() {
   let passageCounter = 0;
   return makeBase({
-    storePassage: vi.fn().mockImplementation(async () => `passage-${String(++passageCounter)}`),
+    storePassage: vi.fn().mockImplementation(() => Promise.resolve(`passage-${String(++passageCounter)}`)),
   });
 }
 
@@ -27,19 +27,20 @@ describe("syncRepo", () => {
   it("uploads new passages before deleting old ones (copy-on-write)", async () => {
     const provider = makeMockProvider();
     const callOrder: string[] = [];
-    provider.storePassage = vi.fn().mockImplementation(async () => {
+    provider.storePassage = vi.fn().mockImplementation(() => {
       callOrder.push("store");
-      return "new-passage";
+      return Promise.resolve("new-passage");
     });
-    provider.deletePassage = vi.fn().mockImplementation(async () => {
+    provider.deletePassage = vi.fn().mockImplementation(() => {
       callOrder.push("delete");
+      return Promise.resolve();
     });
 
     await syncRepo({
       provider,
       agent: testAgent,
       changedFiles: ["src/a.ts"],
-      collectFile: async (path) => ({ path, content: "new content", sizeKb: 1 }),
+      collectFile: (path) => Promise.resolve({ path, content: "new content", sizeKb: 1 }),
       headCommit: "def456",
     });
 
@@ -55,7 +56,7 @@ describe("syncRepo", () => {
       provider,
       agent: testAgent,
       changedFiles: ["src/a.ts"],
-      collectFile: async (path) => ({ path, content: "new content", sizeKb: 1 }),
+      collectFile: (path) => Promise.resolve({ path, content: "new content", sizeKb: 1 }),
       headCommit: "def456",
     });
 
@@ -76,7 +77,7 @@ describe("syncRepo", () => {
       provider,
       agent: testAgent,
       changedFiles: ["src/a.ts"],
-      collectFile: async () => null,
+      collectFile: () => Promise.resolve(null),
       headCommit: "def456",
     });
 
@@ -94,7 +95,7 @@ describe("syncRepo", () => {
       provider,
       agent: testAgent,
       changedFiles: ["src/new.ts"],
-      collectFile: async (path) => ({ path, content: "brand new", sizeKb: 1 }),
+      collectFile: (path) => Promise.resolve({ path, content: "brand new", sizeKb: 1 }),
       headCommit: "def456",
     });
 
@@ -112,7 +113,7 @@ describe("syncRepo", () => {
       provider,
       agent: testAgent,
       changedFiles: ["src/a.ts"],
-      collectFile: async (path) => ({ path, content: "content", sizeKb: 1 }),
+      collectFile: (path) => Promise.resolve({ path, content: "content", sizeKb: 1 }),
       headCommit: "def456",
       chunkingStrategy: customStrategy,
     });
@@ -127,7 +128,7 @@ describe("syncRepo", () => {
       provider,
       agent: testAgent,
       changedFiles: ["src/a.ts"],
-      collectFile: async (path) => ({ path, content: "const x = 1;", sizeKb: 0.01 }),
+      collectFile: (path) => Promise.resolve({ path, content: "const x = 1;", sizeKb: 0.01 }),
       headCommit: "def456",
     });
 
@@ -145,7 +146,7 @@ describe("syncRepo", () => {
       provider,
       agent: testAgent,
       changedFiles: [],
-      collectFile: async () => null,
+      collectFile: () => Promise.resolve(null),
       headCommit: "def456",
     });
 
@@ -161,7 +162,7 @@ describe("syncRepo", () => {
       provider,
       agent: testAgent,
       changedFiles: ["src/a.ts"],
-      collectFile: async (path) => ({ path, content: "x".repeat(200_000), sizeKb: 200 }),
+      collectFile: (path) => Promise.resolve({ path, content: "x".repeat(200_000), sizeKb: 200 }),
       headCommit: "def456",
       maxFileSizeKb: 50,
     });
@@ -183,7 +184,7 @@ describe("syncRepo", () => {
       provider,
       agent: agentNoPassages,
       changedFiles: ["src/new.ts"],
-      collectFile: async () => null, // file deleted
+      collectFile: () => Promise.resolve(null), // file deleted
       headCommit: "def456",
     });
 
@@ -203,7 +204,7 @@ describe("syncRepo", () => {
       provider,
       agent: agentNoPassages,
       changedFiles: ["src/big.ts"],
-      collectFile: async (p) => ({ path: p, content: "x".repeat(200_000), sizeKb: 200 }),
+      collectFile: (p) => Promise.resolve({ path: p, content: "x".repeat(200_000), sizeKb: 200 }),
       headCommit: "def456",
       maxFileSizeKb: 50,
     });
@@ -220,7 +221,7 @@ describe("syncRepo", () => {
       provider,
       agent: testAgent,
       changedFiles: ["src/a.ts"],
-      collectFile: async (p) => ({ path: p, content: "x", sizeKb: 50 }), // exactly 50 KB
+      collectFile: (p) => Promise.resolve({ path: p, content: "x", sizeKb: 50 }), // exactly 50 KB
       headCommit: "def456",
       maxFileSizeKb: 50,
     });
@@ -236,7 +237,7 @@ describe("syncRepo", () => {
       provider,
       agent: testAgent,
       changedFiles: ["src/a.ts", "src/b.ts"],
-      collectFile: async () => null, // both deleted
+      collectFile: () => Promise.resolve(null), // both deleted
       headCommit: "def456",
     });
 
@@ -250,7 +251,7 @@ describe("syncRepo", () => {
       provider,
       agent: testAgent,
       changedFiles: ["src/a.ts"],
-      collectFile: async (p) => ({ path: p, content: "x".repeat(100_000), sizeKb: 200 }),
+      collectFile: (p) => Promise.resolve({ path: p, content: "x".repeat(100_000), sizeKb: 200 }),
       headCommit: "def456",
       maxFileSizeKb: 50,
     });
@@ -267,7 +268,7 @@ describe("syncRepo", () => {
       agent: testAgent,
       changedFiles: ["src/a.ts"],
       // Very large file, but no maxFileSizeKb — should be indexed
-      collectFile: async (p) => ({ path: p, content: "x".repeat(200_000), sizeKb: 999 }),
+      collectFile: (p) => Promise.resolve({ path: p, content: "x".repeat(200_000), sizeKb: 999 }),
       headCommit: "def456",
       // maxFileSizeKb intentionally omitted
     });
@@ -284,7 +285,7 @@ describe("syncRepo", () => {
       provider,
       agent: testAgent,
       changedFiles: ["src/a.ts"],
-      collectFile: async (p) => ({ path: p, content: "x".repeat(200_000), sizeKb: 200 }),
+      collectFile: (p) => Promise.resolve({ path: p, content: "x".repeat(200_000), sizeKb: 200 }),
       headCommit: "def456",
       maxFileSizeKb: 50,
     });
@@ -298,7 +299,7 @@ describe("syncRepo", () => {
   it("passageIds array has correct length for multi-chunk files", async () => {
     const provider = makeMockProvider();
     let storeCount = 0;
-    provider.storePassage = vi.fn().mockImplementation(async () => `pid-${String(++storeCount)}`);
+    provider.storePassage = vi.fn().mockImplementation(() => Promise.resolve(`pid-${String(++storeCount)}`));
 
     const twoChunkStrategy = vi.fn().mockReturnValue([
       { text: "chunk-1", sourcePath: "src/a.ts" },
@@ -309,7 +310,7 @@ describe("syncRepo", () => {
       provider,
       agent: testAgent,
       changedFiles: ["src/a.ts"],
-      collectFile: async (p) => ({ path: p, content: "content", sizeKb: 1 }),
+      collectFile: (p) => Promise.resolve({ path: p, content: "content", sizeKb: 1 }),
       headCommit: "def456",
       chunkingStrategy: twoChunkStrategy,
     });
@@ -323,10 +324,10 @@ describe("syncRepo", () => {
     it("continues syncing other files when one file upload fails", async () => {
       const provider = makeMockProvider();
       let callCount = 0;
-      provider.storePassage = vi.fn().mockImplementation(async (_agentId: string, text: string) => {
+      provider.storePassage = vi.fn().mockImplementation((_agentId: string, text: string) => {
         callCount++;
-        if (text.includes("src/a.ts")) throw new Error("upload failed");
-        return `passage-${String(callCount)}`;
+        if (text.includes("src/a.ts")) return Promise.reject(new Error("upload failed"));
+        return Promise.resolve(`passage-${String(callCount)}`);
       });
 
       const errors: Array<{ file: string; error: Error }> = [];
@@ -334,7 +335,7 @@ describe("syncRepo", () => {
         provider,
         agent: testAgent,
         changedFiles: ["src/a.ts", "src/b.ts"],
-        collectFile: async (path) => ({ path, content: `content of ${path}`, sizeKb: 1 }),
+        collectFile: (path) => Promise.resolve({ path, content: `content of ${path}`, sizeKb: 1 }),
         headCommit: "def456",
         onFileError: (file, error) => errors.push({ file, error }),
       });
@@ -359,7 +360,7 @@ describe("syncRepo", () => {
         provider,
         agent: testAgent,
         changedFiles: ["src/a.ts"],
-        collectFile: async (path) => ({ path, content: "content", sizeKb: 1 }),
+        collectFile: (path) => Promise.resolve({ path, content: "content", sizeKb: 1 }),
         headCommit: "def456",
       });
 
@@ -377,7 +378,7 @@ describe("syncRepo", () => {
         provider,
         agent: testAgent,
         changedFiles: ["src/a.ts", "src/b.ts"],
-        collectFile: async (path) => ({ path, content: "content", sizeKb: 1 }),
+        collectFile: (path) => Promise.resolve({ path, content: "content", sizeKb: 1 }),
         headCommit: "def456",
         onProgress: (completed, total, filePath) => {
           progress.push({ completed, total, filePath });
@@ -397,7 +398,7 @@ describe("syncRepo", () => {
         provider,
         agent: testAgent,
         changedFiles: ["src/a.ts", "src/b.ts"],
-        collectFile: async () => null, // all files "deleted"
+        collectFile: () => Promise.resolve(null), // all files "deleted"
         headCommit: "def456",
         onProgress: (completed) => completedCounts.push(completed),
       });
@@ -413,7 +414,7 @@ describe("syncRepo", () => {
         provider,
         agent: testAgent,
         changedFiles: ["src/a.ts"],
-        collectFile: async (path) => ({ path, content: "new content", sizeKb: 1 }),
+        collectFile: (path) => Promise.resolve({ path, content: "new content", sizeKb: 1 }),
         headCommit: "def456",
       });
 
@@ -432,7 +433,7 @@ describe("syncRepo", () => {
         provider,
         agent: testAgent,
         changedFiles: ["src/a.ts"],
-        collectFile: async (path) => ({ path, content: "new content", sizeKb: 1 }),
+        collectFile: (path) => Promise.resolve({ path, content: "new content", sizeKb: 1 }),
         headCommit: "def456",
       });
 

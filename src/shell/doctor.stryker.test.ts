@@ -16,35 +16,41 @@ function makeFakeFs(files: Record<string, string> = {}): FileSystemPort & { stor
   const store = new Map(Object.entries(files));
   return {
     store,
-    readFile: async (p) => {
+    readFile: (p) => {
       const v = store.get(p);
-      if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-      return v;
+      if (v === undefined) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+      return Promise.resolve(v);
     },
-    writeFile: async (p, d) => { store.set(p, d); },
-    stat: async (p) => {
+    writeFile: (p, d) => {
+      store.set(p, d);
+      return Promise.resolve();
+    },
+    stat: (p) => {
       if (store.has(p)) {
         const value = store.get(p);
-        if (value === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-        return { size: value.length, isDirectory: () => false };
+        if (value === undefined) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+        return Promise.resolve({ size: value.length, isDirectory: () => false });
       }
-      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
     },
-    access: async (p) => {
-      if (!store.has(p)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    access: (p) => {
+      if (!store.has(p)) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+      return Promise.resolve();
     },
-    rename: async (from, to) => {
+    rename: (from, to) => {
       const v = store.get(from);
-      if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      if (v === undefined) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
       store.delete(from);
       store.set(to, v);
+      return Promise.resolve();
     },
-    copyFile: async (src, dest) => {
+    copyFile: (src, dest) => {
       const v = store.get(src);
-      if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      if (v === undefined) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
       store.set(dest, v);
+      return Promise.resolve();
     },
-    glob: async () => [],
+    glob: () => Promise.resolve([]),
     watch: createWatcherHandle,
   };
 }
@@ -96,7 +102,7 @@ describe("checkApiKey (port-injected, stryker)", () => {
 describe("checkApiConnection (port-injected, stryker)", () => {
   it("returns pass when provider.listPassages resolves", async () => {
     const mockProvider = {
-      listPassages: async () => [],
+      listPassages: () => Promise.resolve([]),
     } as unknown as AgentProvider;
     const result = await checkApiConnection(mockProvider, "agent-1");
     expect(result.status).toBe("pass");
@@ -106,7 +112,7 @@ describe("checkApiConnection (port-injected, stryker)", () => {
 
   it("returns fail when provider.listPassages rejects", async () => {
     const mockProvider = {
-      listPassages: async () => { throw new Error("Network error"); },
+      listPassages: () => Promise.reject(new Error("Network error")),
     } as unknown as AgentProvider;
     const result = await checkApiConnection(mockProvider, "agent-1");
     expect(result.status).toBe("fail");
@@ -116,7 +122,7 @@ describe("checkApiConnection (port-injected, stryker)", () => {
 
   it("fail message includes provider error string", async () => {
     const mockProvider = {
-      listPassages: async () => { throw new Error("string-error"); },
+      listPassages: () => Promise.reject(new Error("string-error")),
     } as unknown as AgentProvider;
     const result = await checkApiConnection(mockProvider, "agent-1");
     expect(result.status).toBe("fail");
