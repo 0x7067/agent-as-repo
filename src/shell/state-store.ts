@@ -45,7 +45,7 @@ function migrateLegacyState(raw: unknown): unknown {
     return { stateVersion: STATE_SCHEMA_VERSION, ...record };
   }
 
-  const version = record.stateVersion;
+  const version = record["stateVersion"];
   if (version === 1) {
     return { ...record, stateVersion: STATE_SCHEMA_VERSION };
   }

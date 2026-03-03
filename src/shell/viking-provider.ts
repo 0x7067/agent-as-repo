@@ -279,13 +279,13 @@ export class VikingProvider implements AgentProvider {
 
     const toolHandlers = {
       archival_memory_search: async (args: Record<string, unknown>): Promise<string> => {
-        const query = args.query as string;
+        const query = args["query"] as string;
         const results = await this.viking.semanticSearch(query, `viking://resources/${agentId}/passages/`, 10);
         return JSON.stringify(results);
       },
       memory_replace: async (args: Record<string, unknown>): Promise<string> => {
-        const label = args.label as string;
-        const value = args.value as string;
+        const label = args["label"] as string;
+        const value = args["value"] as string;
         await this.updateBlock(agentId, label, value);
         return `Updated block '${label}'`;
       },

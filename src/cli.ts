@@ -213,12 +213,12 @@ class FakeProvider implements AgentProvider {
   async enableSleeptime(_agentId: string): Promise<void> {}
 
   async storePassage(agentId: string, text: string): Promise<string> {
-    const delayMs = Number.parseInt(process.env.REPO_EXPERT_TEST_DELAY_STORE_MS ?? "0", 10);
+    const delayMs = Number.parseInt(process.env["REPO_EXPERT_TEST_DELAY_STORE_MS"] ?? "0", 10);
     if (!Number.isNaN(delayMs) && delayMs > 0) {
       await delay(delayMs);
     }
-    if (process.env.REPO_EXPERT_TEST_FAIL_LOAD_ONCE === "1") {
-      process.env.REPO_EXPERT_TEST_FAIL_LOAD_ONCE = "0";
+    if (process.env["REPO_EXPERT_TEST_FAIL_LOAD_ONCE"] === "1") {
+      process.env["REPO_EXPERT_TEST_FAIL_LOAD_ONCE"] = "0";
       throw new Error("simulated load failure");
     }
     if (!Object.hasOwn(this.passagesByAgent, agentId)) this.passagesByAgent[agentId] = [];
@@ -266,12 +266,12 @@ class FakeProvider implements AgentProvider {
   }
 
   async sendMessage(_agentId: string, _content: string, _options?: SendMessageOptions): Promise<string> {
-    const delayMs = Number.parseInt(process.env.REPO_EXPERT_TEST_DELAY_BOOTSTRAP_MS ?? "0", 10);
+    const delayMs = Number.parseInt(process.env["REPO_EXPERT_TEST_DELAY_BOOTSTRAP_MS"] ?? "0", 10);
     if (!Number.isNaN(delayMs) && delayMs > 0) {
       await delay(delayMs);
     }
-    if (process.env.REPO_EXPERT_TEST_FAIL_BOOTSTRAP_ONCE === "1") {
-      process.env.REPO_EXPERT_TEST_FAIL_BOOTSTRAP_ONCE = "0";
+    if (process.env["REPO_EXPERT_TEST_FAIL_BOOTSTRAP_ONCE"] === "1") {
+      process.env["REPO_EXPERT_TEST_FAIL_BOOTSTRAP_ONCE"] = "0";
       throw new Error("simulated bootstrap failure");
     }
     return "ok";
@@ -279,7 +279,7 @@ class FakeProvider implements AgentProvider {
 }
 
 function createProviderForCommands(config: Config | null): AgentProvider {
-  if (process.env.REPO_EXPERT_TEST_FAKE_PROVIDER === "1") {
+  if (process.env["REPO_EXPERT_TEST_FAKE_PROVIDER"] === "1") {
     return new FakeProvider();
   }
   if (!config) {
@@ -289,7 +289,7 @@ function createProviderForCommands(config: Config | null): AgentProvider {
 }
 
 async function loadConfigForProvider(configPath: string): Promise<Config | null> {
-  if (process.env.REPO_EXPERT_TEST_FAKE_PROVIDER === "1") return null;
+  if (process.env["REPO_EXPERT_TEST_FAKE_PROVIDER"] === "1") return null;
   return loadConfigSafe(configPath);
 }
 
@@ -1711,8 +1711,8 @@ program
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
 
-    const mcpServers = (config.mcpServers ?? {}) as Record<string, unknown>;
-    if (mcpServers.letta) {
+    const mcpServers = (config["mcpServers"] ?? {}) as Record<string, unknown>;
+    if (mcpServers["letta"]) {
       console.log("Existing 'letta' entry found — overwriting.");
     }
 
@@ -1721,8 +1721,8 @@ program
     if (binaryPath) console.log(`Using SEA binary: ${binaryPath}`);
     const { providerConfig, warnings } = resolveMcpProviderConfig(opts.baseUrl);
     const entry = generateMcpEntry(mcpServerPath, providerConfig, binaryPath);
-    mcpServers.letta = entry;
-    config.mcpServers = mcpServers;
+    mcpServers["letta"] = entry;
+    config["mcpServers"] = mcpServers;
 
     await fs.writeFile(configFile, JSON.stringify(config, null, 2) + "\n", "utf8");
     console.log(`MCP entry written to ${configFile}`);
@@ -1764,8 +1764,8 @@ program
       return;
     }
 
-    const mcpServers = (config.mcpServers ?? {}) as Record<string, unknown>;
-    const entry = mcpServers.letta as Parameters<typeof checkMcpEntry>[0];
+    const mcpServers = (config["mcpServers"] ?? {}) as Record<string, unknown>;
+    const entry = mcpServers["letta"] as Parameters<typeof checkMcpEntry>[0];
     const seaLettaTools = path.resolve(process.cwd(), "dist", "letta-tools");
     const binaryPath = (await pathExists(seaLettaTools)) ? seaLettaTools : undefined;
     const { providerConfig, warnings } = resolveMcpProviderConfig("https://api.letta.com");

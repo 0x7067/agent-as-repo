@@ -190,8 +190,8 @@ export async function runInit(rl: PromptReader, options: RunInitOptions = {}): P
   try {
     const pkgRaw = await fs.readFile(path.join(resolvedPath, "package.json"), "utf8");
     const pkg = JSON.parse(pkgRaw) as Record<string, unknown>;
-    if (typeof pkg.description === "string" && pkg.description) {
-      defaultDescription = pkg.description;
+    if (typeof pkg["description"] === "string" && pkg["description"]) {
+      defaultDescription = pkg["description"];
     }
   } catch {
     // no package.json

@@ -16,7 +16,7 @@ import type {
 function isHttpStatus(err: unknown, code: number): boolean {
   if (typeof err !== "object" || err === null) return false;
   const obj = err as Record<string, unknown>;
-  return obj.status === code || obj.statusCode === code;
+  return obj["status"] === code || obj["statusCode"] === code;
 }
 
 const TRANSIENT_HTTP_CODES = new Set([429, 500, 502, 503]);
@@ -25,16 +25,16 @@ const TRANSIENT_NETWORK_CODES = new Set(["ECONNRESET", "ETIMEDOUT", "ECONNREFUSE
 export function isTransientError(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const obj = err as Record<string, unknown>;
-  const status = obj.status ?? obj.statusCode;
+  const status = obj["status"] ?? obj["statusCode"];
   if (typeof status === "number" && TRANSIENT_HTTP_CODES.has(status)) return true;
-  if (typeof obj.code === "string" && TRANSIENT_NETWORK_CODES.has(obj.code)) return true;
+  if (typeof obj["code"] === "string" && TRANSIENT_NETWORK_CODES.has(obj["code"])) return true;
   return false;
 }
 
 function getRetryAfterMs(err: unknown): number | null {
   if (typeof err !== "object" || err === null) return null;
   const obj = err as Record<string, unknown>;
-  const headers = obj.headers as Record<string, unknown> | undefined;
+  const headers = obj["headers"] as Record<string, unknown> | undefined;
   const raw = headers?.["retry-after"] ?? headers?.["Retry-After"];
   if (typeof raw === "string") {
     const seconds = Number(raw);

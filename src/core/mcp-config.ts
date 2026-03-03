@@ -37,10 +37,10 @@ export function generateMcpEntry(
     OPENROUTER_MODEL: provider.viking?.openrouterModel ?? DEFAULT_OPENROUTER_MODEL,
     VIKING_URL: provider.viking?.vikingUrl ?? DEFAULT_VIKING_URL,
   };
-  if (provider.preferredProvider) env.PROVIDER_TYPE = provider.preferredProvider;
-  if (isNonEmpty(provider.letta?.apiKey)) env.LETTA_API_KEY = provider.letta.apiKey;
-  if (isNonEmpty(provider.viking?.openrouterApiKey)) env.OPENROUTER_API_KEY = provider.viking.openrouterApiKey;
-  if (isNonEmpty(provider.viking?.vikingApiKey)) env.VIKING_API_KEY = provider.viking.vikingApiKey;
+  if (provider.preferredProvider) env["PROVIDER_TYPE"] = provider.preferredProvider;
+  if (isNonEmpty(provider.letta?.apiKey)) env["LETTA_API_KEY"] = provider.letta.apiKey;
+  if (isNonEmpty(provider.viking?.openrouterApiKey)) env["OPENROUTER_API_KEY"] = provider.viking.openrouterApiKey;
+  if (isNonEmpty(provider.viking?.vikingApiKey)) env["VIKING_API_KEY"] = provider.viking.vikingApiKey;
 
   if (binaryPath) {
     return {
@@ -103,7 +103,7 @@ function checkLettaConfig(
   provider: McpProviderConfig,
   issues: string[],
 ): boolean {
-  const hasLettaKey = isNonEmpty(env.LETTA_API_KEY) || isNonEmpty(env.LETTA_PASSWORD);
+  const hasLettaKey = isNonEmpty(env["LETTA_API_KEY"]) || isNonEmpty(env["LETTA_PASSWORD"]);
   const expectedLettaKey = isNonEmpty(provider.letta?.apiKey);
 
   if (expectedLettaKey && !hasLettaKey) {
@@ -111,7 +111,7 @@ function checkLettaConfig(
   }
 
   if (hasLettaKey || expectedLettaKey) {
-    const baseUrl = env.LETTA_BASE_URL ?? "";
+    const baseUrl = env["LETTA_BASE_URL"] ?? "";
     if (!baseUrl) {
       issues.push("LETTA_BASE_URL is missing.");
     } else if (baseUrl.endsWith("/v1")) {
@@ -127,7 +127,7 @@ function checkVikingConfig(
   provider: McpProviderConfig,
   issues: string[],
 ): boolean {
-  const hasVikingKey = isNonEmpty(env.OPENROUTER_API_KEY);
+  const hasVikingKey = isNonEmpty(env["OPENROUTER_API_KEY"]);
   const expectedVikingKey = isNonEmpty(provider.viking?.openrouterApiKey);
 
   if (expectedVikingKey && !hasVikingKey) {
@@ -135,7 +135,7 @@ function checkVikingConfig(
   }
 
   if (hasVikingKey || expectedVikingKey) {
-    const openrouterModel = env.OPENROUTER_MODEL ?? "";
+    const openrouterModel = env["OPENROUTER_MODEL"] ?? "";
     if (openrouterModel) {
       const expectedModel = provider.viking?.openrouterModel;
       if (isNonEmpty(expectedModel) && openrouterModel !== expectedModel) {
@@ -145,7 +145,7 @@ function checkVikingConfig(
       issues.push("OPENROUTER_MODEL is missing from env.");
     }
 
-    const configuredVikingUrl = env.VIKING_URL ?? "";
+    const configuredVikingUrl = env["VIKING_URL"] ?? "";
     const expectedVikingUrl = provider.viking?.vikingUrl;
     if (isNonEmpty(expectedVikingUrl) && configuredVikingUrl !== expectedVikingUrl) {
       issues.push(`VIKING_URL mismatch: config has "${configuredVikingUrl}", expected "${expectedVikingUrl}".`);
@@ -171,7 +171,7 @@ export function checkMcpEntry(
   checkCommandAndArgs(entry, mcpServerPath, binaryPath, issues);
 
   const env = entry.env;
-  checkProviderType(env.PROVIDER_TYPE, issues);
+  checkProviderType(env["PROVIDER_TYPE"], issues);
   const hasLettaKey = checkLettaConfig(env, provider, issues);
   const hasVikingKey = checkVikingConfig(env, provider, issues);
 

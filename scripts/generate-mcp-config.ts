@@ -6,12 +6,12 @@
  */
 import "dotenv/config";
 
-const apiKey = process.env.LETTA_API_KEY;
+const apiKey = process.env["LETTA_API_KEY"];
 if (!apiKey) {
   throw new Error("LETTA_API_KEY not found in .env");
 }
 
-const baseUrl = process.env.LETTA_BASE_URL ?? "https://api.letta.com/v1";
+const baseUrl = process.env["LETTA_BASE_URL"] ?? "https://api.letta.com/v1";
 const isCursor = process.argv.includes("--cursor");
 
 const config = {

@@ -91,7 +91,7 @@ export async function callOpenRouter(
   const url = `${baseUrl}/chat/completions`;
   const body: Record<string, unknown> = { model, messages };
   if (tools.length > 0) {
-    body.tools = tools;
+    body["tools"] = tools;
   }
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
