@@ -11,7 +11,7 @@ describe("onboardAgent", () => {
     const result = await onboardAgent(provider, "my-app", "agent-abc");
 
     expect(result).toBe("Welcome! Here is your onboarding guide...");
-    expect(provider.sendMessage).toHaveBeenCalledWith("agent-abc", expect.stringContaining("my-app"));
-    expect(provider.sendMessage).toHaveBeenCalledWith("agent-abc", expect.stringContaining("Architecture"));
+    expect(provider.sendMessage as ReturnType<typeof vi.fn>).toHaveBeenCalledWith("agent-abc", expect.stringContaining("my-app"));
+    expect(provider.sendMessage as ReturnType<typeof vi.fn>).toHaveBeenCalledWith("agent-abc", expect.stringContaining("Architecture"));
   });
 });

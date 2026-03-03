@@ -31,13 +31,13 @@ export interface SendMessageOptions {
 }
 
 export interface AgentProvider {
-  createAgent(params: CreateAgentParams): Promise<CreateAgentResult>;
-  deleteAgent(agentId: string): Promise<void>;
-  enableSleeptime(agentId: string): Promise<void>;
-  storePassage(agentId: string, text: string): Promise<string>;
-  deletePassage(agentId: string, passageId: string): Promise<void>;
-  listPassages(agentId: string): Promise<Passage[]>;
-  getBlock(agentId: string, label: string): Promise<MemoryBlock>;
-  updateBlock(agentId: string, label: string, value: string): Promise<MemoryBlock>;
-  sendMessage(agentId: string, content: string, options?: SendMessageOptions): Promise<string>;
+  createAgent(this: void, params: CreateAgentParams): Promise<CreateAgentResult>;
+  deleteAgent(this: void, agentId: string): Promise<void>;
+  enableSleeptime(this: void, agentId: string): Promise<void>;
+  storePassage(this: void, agentId: string, text: string): Promise<string>;
+  deletePassage(this: void, agentId: string, passageId: string): Promise<void>;
+  listPassages(this: void, agentId: string): Promise<Passage[]>;
+  getBlock(this: void, agentId: string, label: string): Promise<MemoryBlock>;
+  updateBlock(this: void, agentId: string, label: string, value: string): Promise<MemoryBlock>;
+  sendMessage(this: void, agentId: string, content: string, options?: SendMessageOptions): Promise<string>;
 }

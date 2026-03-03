@@ -7,12 +7,11 @@ describe("bootstrapAgent", () => {
   it("sends architecture and conventions bootstrap prompts", async () => {
     const provider = makeMockProvider();
     await bootstrapAgent(provider, "agent-123");
-    const sendMessage = provider.sendMessage as ReturnType<typeof vi.fn>;
-    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(provider.sendMessage as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(2);
 
-    expect(sendMessage.mock.calls[0][0]).toBe("agent-123");
-    expect(sendMessage.mock.calls[0][1]).toContain("architecture");
+    expect((provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe("agent-123");
+    expect((provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][1]).toContain("architecture");
 
-    expect(sendMessage.mock.calls[1][1]).toContain("conventions");
+    expect((provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[1][1]).toContain("conventions");
   });
 });

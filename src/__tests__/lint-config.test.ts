@@ -36,4 +36,8 @@ describe("Lint config guardrails", () => {
   it("does not disable require-await in the global Vitest rules block", () => {
     expect(getVitestBlock().includes('"@typescript-eslint/require-await": "off"')).toBe(false);
   });
+
+  it("does not disable unbound-method in the global Vitest rules block", () => {
+    expect(getVitestBlock().includes('"@typescript-eslint/unbound-method": "off"')).toBe(false);
+  });
 });

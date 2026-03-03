@@ -76,7 +76,7 @@ describe("fixReconcileDrift", () => {
       missingPassageIds: ["p2"],
     });
 
-    expect(provider.deletePassage).toHaveBeenCalledWith("agent-1", "p-orphan");
+    expect(provider.deletePassage as ReturnType<typeof vi.fn>).toHaveBeenCalledWith("agent-1", "p-orphan");
     expect(updatedMap["a.ts"]).toEqual(["p1"]);
   });
 

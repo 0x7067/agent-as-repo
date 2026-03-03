@@ -43,7 +43,7 @@ describe("getAgentStatus", () => {
     expect(output).toContain("architecture");
     expect(output).toContain("11/5000");
     expect(output).toContain("abc1234");
-    expect(provider.listPassages).toHaveBeenCalledWith("agent-abc");
-    expect(provider.getBlock).toHaveBeenCalledTimes(3);
+    expect(provider.listPassages as ReturnType<typeof vi.fn>).toHaveBeenCalledWith("agent-abc");
+    expect(provider.getBlock as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(3);
   });
 });

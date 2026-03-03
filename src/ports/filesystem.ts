@@ -1,6 +1,6 @@
 export interface StatResult {
   size: number;
-  isDirectory(): boolean;
+  isDirectory(this: void): boolean;
 }
 
 export interface GlobOptions {
@@ -14,19 +14,20 @@ export interface GlobOptions {
 }
 
 export interface WatcherHandle {
-  close(): void;
-  on(event: "error", listener: (err: Error) => void): this;
+  close(this: void): void;
+  on(this: void, event: "error", listener: (err: Error) => void): this;
 }
 
 export interface FileSystemPort {
-  readFile(path: string, encoding: string): Promise<string>;
-  writeFile(path: string, data: string): Promise<void>;
-  stat(path: string): Promise<StatResult>;
-  access(path: string): Promise<void>;
-  rename(from: string, to: string): Promise<void>;
-  copyFile(src: string, dest: string): Promise<void>;
-  glob(patterns: string[], options: GlobOptions): Promise<string[]>;
+  readFile(this: void, path: string, encoding: string): Promise<string>;
+  writeFile(this: void, path: string, data: string): Promise<void>;
+  stat(this: void, path: string): Promise<StatResult>;
+  access(this: void, path: string): Promise<void>;
+  rename(this: void, from: string, to: string): Promise<void>;
+  copyFile(this: void, src: string, dest: string): Promise<void>;
+  glob(this: void, patterns: string[], options: GlobOptions): Promise<string[]>;
   watch(
+    this: void,
     path: string,
     options: { recursive?: boolean },
     listener: (event: string, filename: string | null) => void,

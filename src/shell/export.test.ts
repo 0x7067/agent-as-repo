@@ -34,8 +34,8 @@ describe("exportAgent", () => {
     expect(md).toContain("Files (2)");
     expect(md).toContain("`src/index.ts`");
     expect(md).toContain("`src/app.tsx`");
-    expect(provider.listPassages).toHaveBeenCalledWith("agent-abc");
-    expect(provider.getBlock).toHaveBeenCalledTimes(3);
+    expect(provider.listPassages as ReturnType<typeof vi.fn>).toHaveBeenCalledWith("agent-abc");
+    expect(provider.getBlock as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(3);
   });
 
   it("strips (continued) suffix from continuation chunk file names", async () => {

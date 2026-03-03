@@ -138,11 +138,12 @@ export default tseslint.config(
 			// Strict TypeScript rules
 			"@typescript-eslint/no-explicit-any": "error",
 			"@typescript-eslint/consistent-type-imports": "error",
-			"@typescript-eslint/no-unused-vars": [
-				"error",
-				{ argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
-			],
-			"@typescript-eslint/consistent-type-definitions": ["error", "interface"],
+				"@typescript-eslint/no-unused-vars": [
+					"error",
+					{ argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+				],
+				"@typescript-eslint/consistent-type-definitions": ["error", "interface"],
+				"@typescript-eslint/no-invalid-void-type": ["error", { allowAsThisParameter: true }],
 
 			// Code style
 			"curly": ["error", "all"],
@@ -214,17 +215,25 @@ export default tseslint.config(
 				"max-lines": "off",
 				// Tests use dynamic paths for temp dirs and fixtures
 				"security/detect-non-literal-fs-filename": "off",
-				// Mock method references (vi.fn()) trigger false positives
-				"@typescript-eslint/unbound-method": "off",
-			},
-			languageOptions: {
-				globals: {
-					...vitestPlugin.environments.env.globals,
+				},
+				languageOptions: {
+					globals: {
+						...vitestPlugin.environments.env.globals,
+					},
 				},
 			},
+	{
+		files: [
+			"src/mcp-server.test.ts",
+			"src/shell/viking-provider.test.ts",
+		],
+		rules: {
+			// Narrow temporary override while we continue migrating mocked method assertions.
+			"@typescript-eslint/unbound-method": "off",
 		},
-	// ============================================================
-	// 📄 SPIKES: Exploratory scripts — relax strict rules
+	},
+		// ============================================================
+		// 📄 SPIKES: Exploratory scripts — relax strict rules
 	// ============================================================
 	{
 		files: ["spikes/**/*.ts"],
