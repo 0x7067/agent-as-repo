@@ -62,7 +62,9 @@ async function buildSea(): Promise<void> {
 
 const fn = process.argv.includes("--sea") ? buildSea : buildEsm;
 
-fn().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+try {
+  await fn();
+} catch (error: unknown) {
+  console.error(error);
+  process.exitCode = 1;
+}

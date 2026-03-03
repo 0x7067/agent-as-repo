@@ -1,4 +1,3 @@
-#!/usr/bin/env tsx
 /**
  * Generates MCP server config JSON for Claude Code or Cursor
  * from the project's .env file.
@@ -9,8 +8,7 @@ import "dotenv/config";
 
 const apiKey = process.env.LETTA_API_KEY;
 if (!apiKey) {
-  console.error("Error: LETTA_API_KEY not found in .env");
-  process.exit(1);
+  throw new Error("LETTA_API_KEY not found in .env");
 }
 
 const baseUrl = process.env.LETTA_BASE_URL ?? "https://api.letta.com/v1";
