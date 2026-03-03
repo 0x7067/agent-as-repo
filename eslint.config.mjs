@@ -230,8 +230,6 @@ export default tseslint.config(
 			"src/shell/file-collector.test.ts",
 			"src/shell/init.stryker.test.ts",
 			"src/shell/init.test.ts",
-			"src/shell/self-check.test.ts",
-			"src/shell/state-store.test.ts",
 			"src/shell/sync.test.ts",
 		],
 		rules: {

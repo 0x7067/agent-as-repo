@@ -53,7 +53,7 @@ describe("self-check", () => {
     });
   });
 
-  it("formats output with uppercase status prefixes", async () => {
+  it("formats output with uppercase status prefixes", () => {
     const text = formatSelfChecks([
       { name: "Node.js", status: "pass", message: "ok" },
       { name: "pnpm", status: "fail", message: "missing" },
@@ -62,7 +62,7 @@ describe("self-check", () => {
     expect(text).toContain("FAIL: pnpm - missing");
   });
 
-  it("formats multiple results separated by newline", async () => {
+  it("formats multiple results separated by newline", () => {
     const text = formatSelfChecks([
       { name: "Node.js", status: "pass", message: "v22" },
       { name: "pnpm", status: "pass", message: "9.0" },
@@ -343,22 +343,26 @@ describe("self-check", () => {
 function makeFakeFs(files: Record<string, string> = {}): FileSystemPort {
   const store = new Map(Object.entries(files));
   return {
-    readFile: async (p) => {
+    readFile: (p) => {
       const v = store.get(p);
-      if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-      return v;
+      if (v === undefined) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+      return Promise.resolve(v);
     },
-    writeFile: async (p, d) => { store.set(p, d); },
-    stat: async (p) => {
-      if (store.has(p)) return { size: 0, isDirectory: () => false };
-      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    writeFile: (p, d) => {
+      store.set(p, d);
+      return Promise.resolve();
     },
-    access: async (p) => {
-      if (!store.has(p)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    stat: (p) => {
+      if (store.has(p)) return Promise.resolve({ size: 0, isDirectory: () => false });
+      return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
     },
-    rename: async () => {},
-    copyFile: async () => {},
-    glob: async () => [],
+    access: (p) => {
+      if (!store.has(p)) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+      return Promise.resolve();
+    },
+    rename: () => Promise.resolve(),
+    copyFile: () => Promise.resolve(),
+    glob: () => Promise.resolve([]),
     watch: () => ({ close: vi.fn(), on: vi.fn().mockReturnThis() } as unknown as WatcherHandle),
   };
 }

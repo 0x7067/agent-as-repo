@@ -291,10 +291,10 @@ describe("state store", () => {
 
       const mockFs: FileSystemPort = {
         ...nodeFileSystem,
-        rename: async (from, to) => {
+        rename: (from, to) => {
           renameCalls++;
-          if (renameCalls === 1) throw eaccessErr;
-          await nodeFileSystem.rename(from, to);
+          if (renameCalls === 1) return Promise.reject(eaccessErr);
+          return nodeFileSystem.rename(from, to);
         },
       };
 
@@ -312,9 +312,9 @@ describe("state store", () => {
 
       const mockFs: FileSystemPort = {
         ...nodeFileSystem,
-        rename: async () => {
+        rename: () => {
           renameCalls++;
-          throw genericErr;
+          return Promise.reject(genericErr);
         },
       };
 
@@ -332,9 +332,9 @@ describe("state store", () => {
 
       const mockFs: FileSystemPort = {
         ...nodeFileSystem,
-        rename: async () => {
+        rename: () => {
           renameCalls++;
-          throw busyErr;
+          return Promise.reject(busyErr);
         },
       };
 
@@ -348,7 +348,7 @@ describe("state store", () => {
     const eaccessErr = Object.assign(new Error("EACCES"), { code: "EACCES" });
     const mockFs: FileSystemPort = {
       ...nodeFileSystem,
-      readFile: async () => { throw eaccessErr; },
+      readFile: () => Promise.reject(eaccessErr),
     };
     await expect(loadState("/some/path.json", mockFs)).rejects.toThrow("EACCES");
   });
@@ -419,9 +419,9 @@ describe("state store", () => {
 
       const mockFs: FileSystemPort = {
         ...nodeFileSystem,
-        rename: async () => {
+        rename: () => {
           renameCalls++;
-          throw nullCodeErr;
+          return Promise.reject(nullCodeErr);
         },
       };
 
@@ -440,9 +440,9 @@ describe("state store", () => {
 
       const mockFs: FileSystemPort = {
         ...nodeFileSystem,
-        rename: async () => {
+        rename: () => {
           renameCalls++;
-          throw noCodeErr;
+          return Promise.reject(noCodeErr);
         },
       };
 
@@ -485,7 +485,7 @@ describe("state store", () => {
     const enoentErr = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     const mockFs: FileSystemPort = {
       ...nodeFileSystem,
-      readFile: async () => { throw enoentErr; },
+      readFile: () => Promise.reject(enoentErr),
     };
     const state = await loadState("/some/path.json", mockFs);
     expect(state.stateVersion).toBe(STATE_SCHEMA_VERSION);
@@ -570,9 +570,9 @@ describe("state store", () => {
     let capturedEncoding: string | undefined;
     const mockFs: FileSystemPort = {
       ...nodeFileSystem,
-      readFile: async (_path, encoding) => {
+      readFile: (_path, encoding) => {
         capturedEncoding = encoding;
-        return JSON.stringify({ agents: {} });
+        return Promise.resolve(JSON.stringify({ agents: {} }));
       },
     };
 
