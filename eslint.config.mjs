@@ -212,12 +212,10 @@ export default tseslint.config(
 			"sonarjs/no-hardcoded-passwords": "off",
 				// Tests often have long setup/assertion blocks
 				"max-lines": "off",
-			// Tests use dynamic paths for temp dirs and fixtures
-			"security/detect-non-literal-fs-filename": "off",
-			// Tests use os.tmpdir() / /tmp intentionally
-			"sonarjs/publicly-writable-directories": "off",
-			// Mock method references (vi.fn()) trigger false positives
-			"@typescript-eslint/unbound-method": "off",
+				// Tests use dynamic paths for temp dirs and fixtures
+				"security/detect-non-literal-fs-filename": "off",
+				// Mock method references (vi.fn()) trigger false positives
+				"@typescript-eslint/unbound-method": "off",
 			// Mock implementations satisfy async interfaces without awaiting
 			"@typescript-eslint/require-await": "off",
 		},

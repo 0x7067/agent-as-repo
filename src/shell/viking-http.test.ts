@@ -66,7 +66,7 @@ describe("VikingHttpClient", () => {
 
   describe("writeFile", () => {
     it("uploads via temp_upload then calls add_resource with target", async () => {
-      const tempPath = "/tmp/openviking/upload_abc.txt";
+      const tempPath = "/virtual/openviking/upload_abc.txt";
       mockFetch
         .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: { temp_path: tempPath } }))
         .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: {} }));
@@ -100,7 +100,7 @@ describe("VikingHttpClient", () => {
     });
 
     it("throws if add_resource fails", async () => {
-      const tempPath = "/tmp/openviking/upload_abc.txt";
+      const tempPath = "/virtual/openviking/upload_abc.txt";
       mockFetch
         .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: { temp_path: tempPath } }))
         .mockResolvedValueOnce(makeResponse(500))

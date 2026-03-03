@@ -67,7 +67,7 @@ const testConfig: Config = {
   defaults: { maxFileSizeKb: 50, memoryBlockLimit: 5000, bootstrapOnCreate: false, chunking: "raw" },
   repos: {
     "my-app": {
-      path: "/tmp/my-app",
+      path: "/repo/my-app",
       description: "Test",
       extensions: [".ts"],
       ignoreDirs: ["node_modules"],
@@ -241,7 +241,7 @@ describe("watchRepos", () => {
       provider: makeMockProvider(),
       config: testConfig,
       repoNames: ["my-app"],
-      statePath: "/tmp/my-app/state.json",
+      statePath: "/repo/my-app/state.json",
       intervalMs: 5000,
       debounceMs: 100,
       signal: ac.signal,
@@ -254,7 +254,7 @@ describe("watchRepos", () => {
     const watchCallback = vi.mocked(fakeFs.watch).mock.calls[0]?.[2];
     expect(typeof watchCallback).toBe("function");
     (watchCallback as (eventType: string, fileName: string) => void)("change", "state.json");
-    (watchCallback as (eventType: string, fileName: string) => void)("change", "/tmp/my-app/state.json");
+    (watchCallback as (eventType: string, fileName: string) => void)("change", "/repo/my-app/state.json");
 
     await vi.advanceTimersByTimeAsync(120);
     expect(mockedSyncRepo).not.toHaveBeenCalled();
@@ -737,7 +737,7 @@ describe("watchRepos", () => {
     await watchPromise;
 
     // headCommit called with the repo path
-    expect(fakeGit.headCommit).toHaveBeenCalledWith("/tmp/my-app");
+    expect(fakeGit.headCommit).toHaveBeenCalledWith("/repo/my-app");
   });
 
   it("normalizes backslashes in file paths to forward slashes", async () => {
@@ -1196,7 +1196,7 @@ describe("watchRepos", () => {
       config: testConfig,
       repoNames: ["my-app"],
       // state file is INSIDE the repo path — should be ignored
-      statePath: "/tmp/my-app/.repo-expert-state.json",
+      statePath: "/repo/my-app/.repo-expert-state.json",
       intervalMs: 5000,
       debounceMs: 50,
       signal: ac.signal,
@@ -1318,7 +1318,7 @@ describe("watchRepos", () => {
     await watchPromise;
 
     expect(mockedExpandSubmoduleFiles).toHaveBeenCalledWith(
-      expect.objectContaining({ path: "/tmp/my-app" }),
+      expect.objectContaining({ path: "/repo/my-app" }),
       expect.objectContaining({ path: "libs/my-lib" }),
     );
     const syncCall = mockedSyncRepo.mock.calls[0] as [{ changedFiles: string[] }] | undefined;

@@ -19,7 +19,7 @@ function makeMockProvider(): AgentProvider & { _passageIds: string[] } {
 }
 
 const testConfig: RepoConfig = {
-  path: "/tmp/test-repo",
+  path: "/repo/test-repo",
   description: "Test repo",
   extensions: [".ts"],
   ignoreDirs: ["node_modules"],

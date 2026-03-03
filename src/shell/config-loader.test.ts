@@ -6,7 +6,9 @@ import * as os from "node:os";
 import type { FileSystemPort } from "../ports/filesystem.js";
 
 async function withTempConfig(yamlContent: string, fn: (filePath: string) => Promise<void>) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "config-test-"));
+  const tempRoot = path.join(process.cwd(), ".tmp-config-loader-tests");
+  await fs.mkdir(tempRoot, { recursive: true });
+  const dir = await fs.mkdtemp(path.join(tempRoot, "config-test-"));
   const filePath = path.join(dir, "config.yaml");
   await fs.writeFile(filePath, yamlContent, "utf8");
   try {
@@ -42,7 +44,7 @@ describe("loadConfig", () => {
   });
 
   it("throws on non-existent file", async () => {
-    await expect(loadConfig("/tmp/nonexistent-config-xyz.yaml")).rejects.toThrow();
+    await expect(loadConfig("/repo/nonexistent-config-xyz.yaml")).rejects.toThrow();
   });
 
   it("throws on invalid YAML content", async () => {
