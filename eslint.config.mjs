@@ -218,7 +218,6 @@ export default tseslint.config(
 	},
 	{
 		files: [
-			"src/__tests__/architecture.test.ts",
 			"src/cli.test.ts",
 			"src/shell/adapters/node-filesystem.test.ts",
 			"src/shell/init.test.ts",
