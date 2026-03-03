@@ -207,9 +207,6 @@ export default tseslint.config(
 			...vitestPlugin.configs.recommended.rules,
 			// Tests reuse strings for readability
 			"sonarjs/no-duplicate-string": "off",
-			// Test fixtures use fake credentials intentionally
-			// eslint-disable-next-line sonarjs/no-hardcoded-passwords
-			"sonarjs/no-hardcoded-passwords": "off",
 			// Tests often have long setup/assertion blocks
 			"max-lines": "off",
 			// Tests use dynamic paths for temp dirs and fixtures

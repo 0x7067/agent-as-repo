@@ -33,6 +33,10 @@ describe("Lint config guardrails", () => {
     expect(isRuleDisabled("sonarjs/publicly-writable-directories")).toBe(false);
   });
 
+  it("does not disable sonarjs/no-hardcoded-passwords in the global Vitest rules block", () => {
+    expect(getVitestBlock().includes('"sonarjs/no-hardcoded-passwords": "off"')).toBe(false);
+  });
+
   it("does not disable require-await in the global Vitest rules block", () => {
     expect(getVitestBlock().includes('"@typescript-eslint/require-await": "off"')).toBe(false);
   });
