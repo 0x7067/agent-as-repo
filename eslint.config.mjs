@@ -235,9 +235,7 @@ export default tseslint.config(
 		files: [
 			"src/cli.test.ts",
 			"src/mcp-server.test.ts",
-			"src/shell/doctor.stryker.test.ts",
 			"src/shell/doctor.test.ts",
-			"src/shell/init.test.ts",
 			"src/shell/letta-provider.test.ts",
 			"src/shell/self-check.test.ts",
 			"src/shell/state-store.test.ts",

@@ -8,6 +8,12 @@ import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
 import type { GitPort } from "../ports/git.js";
 import type { AgentProvider } from "./provider.js";
 
+const GIT_VERSION = "git version 2.39.0";
+const PROJECT_CONFIG_PATH = "/project/config.yaml";
+const PROJECT_ENV_PATH = "/project/.env";
+const PROJECT_STATE_PATH = "/project/.repo-expert-state.json";
+const REAL_ENV_CONTENT = "LETTA_API_KEY=real-key\n";
+
 function createWatcherHandle(): WatcherHandle {
   return { close: () => {}, on: () => ({}) } as unknown as WatcherHandle;
 }
@@ -58,7 +64,7 @@ function makeFakeFs(files: Record<string, string> = {}): FileSystemPort & { stor
 function makeFakeGit(overrides: Partial<GitPort> = {}): GitPort {
   return {
     submoduleStatus: () => "",
-    version: () => "git version 2.39.0",
+    version: () => GIT_VERSION,
     headCommit: () => "abc123",
     diffFiles: () => [],
     ...overrides,
@@ -132,38 +138,38 @@ describe("checkApiConnection (port-injected, stryker)", () => {
 
 describe("checkConfigFile (port-injected, stryker)", () => {
   it("returns pass when config file exists", async () => {
-    const fakeFs = makeFakeFs({ "/project/config.yaml": "repos: {}" });
-    const result = await checkConfigFile("/project/config.yaml", fakeFs);
+    const fakeFs = makeFakeFs({ [PROJECT_CONFIG_PATH]: "repos: {}" });
+    const result = await checkConfigFile(PROJECT_CONFIG_PATH, fakeFs);
     expect(result.status).toBe("pass");
     expect(result.name).toBe("Config file");
   });
 
   it("returns fail when config file does not exist", async () => {
     const fakeFs = makeFakeFs({});
-    const result = await checkConfigFile("/project/config.yaml", fakeFs);
+    const result = await checkConfigFile(PROJECT_CONFIG_PATH, fakeFs);
     expect(result.status).toBe("fail");
     expect(result.message).toContain("repo-expert init");
   });
 
   it("message includes config path when file exists", async () => {
-    const fakeFs = makeFakeFs({ "/project/config.yaml": "repos: {}" });
-    const result = await checkConfigFile("/project/config.yaml", fakeFs);
-    expect(result.message).toContain("/project/config.yaml");
+    const fakeFs = makeFakeFs({ [PROJECT_CONFIG_PATH]: "repos: {}" });
+    const result = await checkConfigFile(PROJECT_CONFIG_PATH, fakeFs);
+    expect(result.message).toContain(PROJECT_CONFIG_PATH);
   });
 
   it("message includes config path when file does not exist", async () => {
     const fakeFs = makeFakeFs({});
-    const result = await checkConfigFile("/project/config.yaml", fakeFs);
-    expect(result.message).toContain("/project/config.yaml");
+    const result = await checkConfigFile(PROJECT_CONFIG_PATH, fakeFs);
+    expect(result.message).toContain(PROJECT_CONFIG_PATH);
   });
 });
 
 describe("checkGit (port-injected, stryker)", () => {
   it("returns pass when git is available", () => {
-    const fakeGit = makeFakeGit({ version: () => "git version 2.39.0" });
+    const fakeGit = makeFakeGit({ version: () => GIT_VERSION });
     const result = checkGit(fakeGit);
     expect(result.status).toBe("pass");
-    expect(result.message).toBe("git version 2.39.0");
+    expect(result.message).toBe(GIT_VERSION);
   });
 
   it("returns fail when git throws", () => {
@@ -174,7 +180,7 @@ describe("checkGit (port-injected, stryker)", () => {
   });
 
   it("name field is 'Git'", () => {
-    const fakeGit = makeFakeGit({ version: () => "git version 2.39.0" });
+    const fakeGit = makeFakeGit({ version: () => GIT_VERSION });
     const result = checkGit(fakeGit);
     expect(result.name).toBe("Git");
   });
@@ -195,72 +201,72 @@ describe("checkGit (port-injected, stryker)", () => {
 describe("runDoctorFixes (port-injected, stryker)", () => {
   it("creates .env when missing", async () => {
     const fakeFs = makeFakeFs({});
-    await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
-    expect(fakeFs.store.get("/project/.env")).toContain("LETTA_API_KEY");
-    expect(fakeFs.store.has("/project/.repo-expert-state.json")).toBe(true);
+    await runDoctorFixes(PROJECT_CONFIG_PATH, "/project", fakeFs);
+    expect(fakeFs.store.get(PROJECT_ENV_PATH)).toContain("LETTA_API_KEY");
+    expect(fakeFs.store.has(PROJECT_STATE_PATH)).toBe(true);
   });
 
   it("does not overwrite existing .env", async () => {
-    const fakeFs = makeFakeFs({ "/project/.env": "LETTA_API_KEY=real-key\n" });
-    const result = await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
-    expect(fakeFs.store.get("/project/.env")).toBe("LETTA_API_KEY=real-key\n");
+    const fakeFs = makeFakeFs({ [PROJECT_ENV_PATH]: REAL_ENV_CONTENT });
+    const result = await runDoctorFixes(PROJECT_CONFIG_PATH, "/project", fakeFs);
+    expect(fakeFs.store.get(PROJECT_ENV_PATH)).toBe(REAL_ENV_CONTENT);
     expect(result.applied.every((s) => !s.includes(".env"))).toBe(true);
   });
 
   it("copies config.example.yaml when config missing and example exists", async () => {
     const fakeFs = makeFakeFs({ "/project/config.example.yaml": "repos: {}" });
-    await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
-    expect(fakeFs.store.has("/project/config.yaml")).toBe(true);
+    await runDoctorFixes(PROJECT_CONFIG_PATH, "/project", fakeFs);
+    expect(fakeFs.store.has(PROJECT_CONFIG_PATH)).toBe(true);
   });
 
   it("adds suggestion when config and example both missing", async () => {
     const fakeFs = makeFakeFs({});
-    const result = await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
+    const result = await runDoctorFixes(PROJECT_CONFIG_PATH, "/project", fakeFs);
     expect(result.suggestions.some((s) => s.includes("repo-expert init"))).toBe(true);
   });
 
   it("applied includes .env path when created", async () => {
     const fakeFs = makeFakeFs({});
-    const result = await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
+    const result = await runDoctorFixes(PROJECT_CONFIG_PATH, "/project", fakeFs);
     expect(result.applied.some((s) => s.includes(".env"))).toBe(true);
   });
 
   it("applied includes config path when copied from example", async () => {
     const fakeFs = makeFakeFs({ "/project/config.example.yaml": "repos: {}" });
-    const result = await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
+    const result = await runDoctorFixes(PROJECT_CONFIG_PATH, "/project", fakeFs);
     expect(result.applied.some((s) => s.includes("config.example.yaml"))).toBe(true);
   });
 
   it("applied includes state path when state created", async () => {
     const fakeFs = makeFakeFs({});
-    const result = await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
+    const result = await runDoctorFixes(PROJECT_CONFIG_PATH, "/project", fakeFs);
     expect(result.applied.some((s) => s.includes(".repo-expert-state.json"))).toBe(true);
   });
 
   it("suggests no fixes needed when all files exist", async () => {
     const fakeFs = makeFakeFs({
-      "/project/.env": "LETTA_API_KEY=real-key\n",
-      "/project/config.yaml": "repos: {}",
-      "/project/.repo-expert-state.json": "{}",
+      [PROJECT_ENV_PATH]: REAL_ENV_CONTENT,
+      [PROJECT_CONFIG_PATH]: "repos: {}",
+      [PROJECT_STATE_PATH]: "{}",
     });
-    const result = await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
+    const result = await runDoctorFixes(PROJECT_CONFIG_PATH, "/project", fakeFs);
     expect(result.applied).toHaveLength(0);
     expect(result.suggestions.some((s) => s.includes("No automatic fixes"))).toBe(true);
   });
 
   it("does not copy example if config already exists", async () => {
     const fakeFs = makeFakeFs({
-      "/project/config.yaml": "repos: {}",
+      [PROJECT_CONFIG_PATH]: "repos: {}",
       "/project/config.example.yaml": "example: {}",
     });
-    await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
-    expect(fakeFs.store.get("/project/config.yaml")).toBe("repos: {}");
+    await runDoctorFixes(PROJECT_CONFIG_PATH, "/project", fakeFs);
+    expect(fakeFs.store.get(PROJECT_CONFIG_PATH)).toBe("repos: {}");
   });
 
   it("state file is created with valid JSON", async () => {
     const fakeFs = makeFakeFs({});
-    await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
-    const stateContent = fakeFs.store.get("/project/.repo-expert-state.json");
+    await runDoctorFixes(PROJECT_CONFIG_PATH, "/project", fakeFs);
+    const stateContent = fakeFs.store.get(PROJECT_STATE_PATH);
     expect(stateContent).toBeDefined();
     if (typeof stateContent !== "string") throw new Error("Expected state file to be written");
     expect(() => {
@@ -269,9 +275,9 @@ describe("runDoctorFixes (port-injected, stryker)", () => {
   });
 
   it("does not overwrite existing state file", async () => {
-    const fakeFs = makeFakeFs({ "/project/.repo-expert-state.json": '{"agents":{}}' });
-    const result = await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
-    expect(fakeFs.store.get("/project/.repo-expert-state.json")).toBe('{"agents":{}}');
+    const fakeFs = makeFakeFs({ [PROJECT_STATE_PATH]: '{"agents":{}}' });
+    const result = await runDoctorFixes(PROJECT_CONFIG_PATH, "/project", fakeFs);
+    expect(fakeFs.store.get(PROJECT_STATE_PATH)).toBe('{"agents":{}}');
     expect(result.applied.every((s) => !s.includes(".repo-expert-state.json"))).toBe(true);
   });
 });
