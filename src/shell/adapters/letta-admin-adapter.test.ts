@@ -126,7 +126,7 @@ describe("LettaAdminAdapter", () => {
         { id: "p-1", text: "found it" },
         { id: "p-2", text: "also this" },
       ]);
-      expect(client.agents.passages.search).toHaveBeenCalledWith("agent-1", { query: "auth", top_k: undefined });
+      expect(client.agents.passages.search).toHaveBeenCalledWith("agent-1", { query: "auth", top_k: null });
     });
 
     it("passes limit as top_k", async () => {

@@ -60,7 +60,7 @@ class RequestCircuitBreaker {
 
 export class VikingHttpClient {
   private readonly baseUrl: string;
-  private readonly apiKey?: string;
+  private readonly apiKey: string | undefined;
   private readonly maxRetries: number;
   private readonly circuitBreaker: RequestCircuitBreaker;
 

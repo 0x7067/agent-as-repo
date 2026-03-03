@@ -205,14 +205,15 @@ async function requestFinalAssistantMessage(params: {
     signal,
     requestTimeoutMs,
     maxSteps,
-    debug,
+  debug,
   } = params;
 
   debug("max_steps reached with pending tool flow; requesting final completion without tools");
-  const finalResponse = await callOpenRouter(messages, [], model, apiKey, baseUrl, {
-    signal,
-    timeoutMs: requestTimeoutMs,
-  });
+  const requestOptions: OpenRouterRequestOptions = {
+    ...(signal === undefined ? {} : { signal }),
+    ...(requestTimeoutMs === undefined ? {} : { timeoutMs: requestTimeoutMs }),
+  };
+  const finalResponse = await callOpenRouter(messages, [], model, apiKey, baseUrl, requestOptions);
   const finalChoice = getFirstChoiceOrThrow(finalResponse, "finalization");
   const finalContent = getMessageContentText(finalChoice.message.content);
   debug(`finalization finish_reason=${finalChoice.finish_reason} content_length=${String(finalContent.length)}`);
@@ -223,6 +224,7 @@ async function requestFinalAssistantMessage(params: {
   throw new Error(`Tool loop exhausted after ${String(maxSteps)} steps without a final assistant response`);
 }
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- Tool-calling orchestration intentionally keeps loop control and fallback behavior in one place.
 export async function toolCallingLoop(params: {
   systemPrompt: string;
   userMessage: string;
@@ -257,13 +259,14 @@ export async function toolCallingLoop(params: {
 
   const debugEnabled = process.env["REPO_EXPERT_DEBUG_OPENROUTER"] === "1";
   const debug = debugEnabled ? writeDebug : disabledDebug;
+  const requestOptions: OpenRouterRequestOptions = {
+    ...(signal === undefined ? {} : { signal }),
+    ...(requestTimeoutMs === undefined ? {} : { timeoutMs: requestTimeoutMs }),
+  };
 
   while (steps < maxSteps) {
     const startedAt = Date.now();
-    const response = await callOpenRouter(messages, tools, model, apiKey, baseUrl, {
-      signal,
-      timeoutMs: requestTimeoutMs,
-    });
+    const response = await callOpenRouter(messages, tools, model, apiKey, baseUrl, requestOptions);
     steps++;
     const choice = getFirstChoiceOrThrow(response, `step-${String(steps)}`);
     const toolCalls = getToolCalls(choice);
@@ -290,16 +293,17 @@ export async function toolCallingLoop(params: {
         return choice.message.content ?? "";
       }
 
-      return requestFinalAssistantMessage({
+      const finalRequestParams = {
         messages,
         model,
         apiKey,
-        baseUrl,
-        signal,
-        requestTimeoutMs,
         maxSteps,
         debug,
-      });
+        ...(baseUrl === undefined ? {} : { baseUrl }),
+        ...(signal === undefined ? {} : { signal }),
+        ...(requestTimeoutMs === undefined ? {} : { requestTimeoutMs }),
+      };
+      return requestFinalAssistantMessage(finalRequestParams);
     }
   }
 

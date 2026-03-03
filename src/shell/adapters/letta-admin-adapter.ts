@@ -7,7 +7,7 @@ export class LettaAdminAdapter implements AdminPort {
   async listAgents(): Promise<AgentSummary[]> {
     const summary: AgentSummary[] = [];
     for await (const a of this.client.agents.list()) {
-      summary.push({ id: a.id, name: a.name, description: a.description, model: a.model ?? null });
+      summary.push({ id: a.id, name: a.name, description: a.description ?? null, model: a.model ?? null });
     }
     return summary;
   }
@@ -28,7 +28,7 @@ export class LettaAdminAdapter implements AdminPort {
   }
 
   async searchPassages(agentId: string, query: string, limit?: number): Promise<PassageResult[]> {
-    const results = await this.client.agents.passages.search(agentId, { query, top_k: limit });
+    const results = await this.client.agents.passages.search(agentId, { query, top_k: limit ?? null });
     return (results as unknown as Array<{ id: string; text: string }>).map((r) => ({ id: r.id, text: r.text }));
   }
 }

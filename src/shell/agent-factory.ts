@@ -13,17 +13,18 @@ export async function createRepoAgent(
   repoConfig: RepoConfig,
   letta: CreateRepoAgentLettaOptions,
 ): Promise<AgentState> {
-  const { agentId } = await provider.createAgent({
+  const createAgentParams: Parameters<AgentProvider["createAgent"]>[0] = {
     name: `repo-expert-${repoName}`,
     repoName,
     description: repoConfig.description,
-    persona: repoConfig.persona,
     tags: ["repo-expert", ...repoConfig.tags],
-    tools: repoConfig.tools,
     model: letta.model,
     embedding: letta.embedding,
     memoryBlockLimit: repoConfig.memoryBlockLimit,
-  });
+    ...(repoConfig.persona === undefined ? {} : { persona: repoConfig.persona }),
+    ...(repoConfig.tools === undefined ? {} : { tools: repoConfig.tools }),
+  };
+  const { agentId } = await provider.createAgent(createAgentParams);
 
   return {
     agentId,

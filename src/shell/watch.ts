@@ -234,13 +234,14 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     syncing.add(repoName);
     try {
       const start = Date.now();
-      const changedFilesResult = await resolveChangedFiles({
+      const changedFilesParams = {
         repoConfig,
         agentInfo,
         isEventSync,
-        eventChangedFiles,
         repoName,
-      });
+        ...(eventChangedFiles === undefined ? {} : { eventChangedFiles }),
+      };
+      const changedFilesResult = await resolveChangedFiles(changedFilesParams);
       if (changedFilesResult === undefined) return;
 
       const changedFiles = [...new Set(changedFilesResult)];

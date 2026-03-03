@@ -15,10 +15,11 @@ export async function expandSubmoduleFiles(
 ): Promise<string[]> {
   if (!submodule.initialized) return [];
 
+  const repoConfigWithoutBasePath: RepoConfig = { ...repoConfig };
+  delete repoConfigWithoutBasePath.basePath;
   const files = await collectFiles({
-    ...repoConfig,
+    ...repoConfigWithoutBasePath,
     path: path.join(repoConfig.path, submodule.path),
-    basePath: undefined,
     includeSubmodules: false, // don't recurse into nested submodules
   });
 

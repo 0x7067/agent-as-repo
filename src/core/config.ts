@@ -88,6 +88,7 @@ function validateSemantics(parsed: z.infer<typeof rawConfigSchema>): string[] {
   return issues;
 }
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- Centralized config normalization intentionally branches across provider and legacy schema variants.
 export function parseConfig(raw: unknown): Config {
   let parsed: z.infer<typeof rawConfigSchema>;
   try {
@@ -112,9 +113,18 @@ export function parseConfig(raw: unknown): Config {
   let providerConfig: ProviderConfig;
   if (parsed.provider) {
     if (parsed.provider.type === "letta") {
-      providerConfig = { type: "letta", model: parsed.provider.model, embedding: parsed.provider.embedding, fastModel: parsed.provider.fast_model };
+      providerConfig = {
+        type: "letta",
+        model: parsed.provider.model,
+        embedding: parsed.provider.embedding,
+        ...(parsed.provider.fast_model === undefined ? {} : { fastModel: parsed.provider.fast_model }),
+      };
     } else {
-      providerConfig = { type: "viking", openrouterModel: parsed.provider.openrouter_model, vikingUrl: parsed.provider.viking_url };
+      providerConfig = {
+        type: "viking",
+        openrouterModel: parsed.provider.openrouter_model,
+        ...(parsed.provider.viking_url === undefined ? {} : { vikingUrl: parsed.provider.viking_url }),
+      };
     }
   } else {
     // migrate old letta: format
@@ -122,7 +132,12 @@ export function parseConfig(raw: unknown): Config {
     if (!legacyLetta) {
       throw new ConfigError(["Missing legacy letta provider settings"]);
     }
-    providerConfig = { type: "letta", model: legacyLetta.model, embedding: legacyLetta.embedding, fastModel: legacyLetta.fast_model };
+    providerConfig = {
+      type: "letta",
+      model: legacyLetta.model,
+      embedding: legacyLetta.embedding,
+      ...(legacyLetta.fast_model === undefined ? {} : { fastModel: legacyLetta.fast_model }),
+    };
   }
 
   const userDefaults = parsed.defaults ?? {};
@@ -136,19 +151,20 @@ export function parseConfig(raw: unknown): Config {
 
   const repos: Record<string, RepoConfig> = {};
   for (const [name, repo] of Object.entries(parsed.repos)) {
+    const tools = repo.tools ?? userDefaults.tools;
     repos[name] = {
       path: repo.path,
-      basePath: repo.base_path,
       description: repo.description,
       extensions: repo.extensions,
       ignoreDirs: repo.ignore_dirs,
       tags: repo.tags ?? [],
-      persona: repo.persona,
-      tools: repo.tools ?? userDefaults.tools,
       maxFileSizeKb: repo.max_file_size_kb ?? defaults.maxFileSizeKb,
       memoryBlockLimit: repo.memory_block_limit ?? defaults.memoryBlockLimit,
       bootstrapOnCreate: repo.bootstrap_on_create ?? defaults.bootstrapOnCreate,
       includeSubmodules: repo.include_submodules ?? false,
+      ...(repo.base_path === undefined ? {} : { basePath: repo.base_path }),
+      ...(repo.persona === undefined ? {} : { persona: repo.persona }),
+      ...(tools === undefined ? {} : { tools }),
     };
   }
 

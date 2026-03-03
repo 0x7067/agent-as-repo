@@ -72,7 +72,7 @@ describe("expandSubmoduleFiles", () => {
     mockedCollectFiles.mockResolvedValue([]);
     await expandSubmoduleFiles(makeRepoConfig({ path: "/repo" }), initializedSub);
     expect(mockedCollectFiles).toHaveBeenCalledWith(
-      expect.objectContaining({ path: "/repo/libs/my-lib", basePath: undefined }),
+      expect.objectContaining({ path: "/repo/libs/my-lib" }),
     );
   });
 

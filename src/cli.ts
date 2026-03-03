@@ -336,19 +336,22 @@ function resolveMcpProviderConfig(baseUrl: string): { providerConfig: McpProvide
     warnings.push("No provider key found. MCP entry is written, but the server will fail until a provider key is added.");
   }
 
+  const lettaProviderConfig = {
+    ...(lettaApiKey === undefined ? {} : { apiKey: lettaApiKey }),
+    baseUrl: process.env["LETTA_BASE_URL"] ?? baseUrl,
+  };
+  const vikingProviderConfig = {
+    ...(openrouterApiKey === undefined ? {} : { openrouterApiKey }),
+    openrouterModel,
+    vikingUrl,
+    ...(process.env["VIKING_API_KEY"] === undefined ? {} : { vikingApiKey: process.env["VIKING_API_KEY"] }),
+  };
+
   return {
     providerConfig: {
-      preferredProvider,
-      letta: {
-        apiKey: lettaApiKey,
-        baseUrl: process.env["LETTA_BASE_URL"] ?? baseUrl,
-      },
-      viking: {
-        openrouterApiKey,
-        openrouterModel,
-        vikingUrl,
-        vikingApiKey: process.env["VIKING_API_KEY"],
-      },
+      ...(preferredProvider === undefined ? {} : { preferredProvider }),
+      letta: lettaProviderConfig,
+      viking: vikingProviderConfig,
     },
     warnings,
   };
@@ -616,9 +619,10 @@ async function loadAskConfigDefaults(configPath: string | undefined): Promise<{
   }
 
   const config = await loadConfigSafe(resolvedPath);
+  const fastModel = config.provider.type === "letta" ? config.provider.fastModel : undefined;
   return {
-    fastModel: config.provider.type === "letta" ? config.provider.fastModel : undefined,
     askTimeoutMs: config.defaults.askTimeoutMs ?? defaults.askTimeoutMs,
+    ...(fastModel === undefined ? {} : { fastModel }),
   };
 }
 
@@ -629,10 +633,14 @@ async function askAgent(
   settings: AskRuntimeSettings,
 ): Promise<string> {
   const overrideModel = settings.useFast ? settings.fastModel : undefined;
+  const sendOptions = {
+    ...(overrideModel === undefined ? {} : { overrideModel }),
+    ...(settings.maxSteps === undefined ? {} : { maxSteps: settings.maxSteps }),
+  };
   return withTimeoutSignal(
     `Ask "${agent.repoName}"`,
     settings.askTimeoutMs,
-    (signal) => provider.sendMessage(agent.agentId, question, { overrideModel, maxSteps: settings.maxSteps, signal }),
+    (signal) => provider.sendMessage(agent.agentId, question, { ...sendOptions, signal }),
   );
 }
 
@@ -675,12 +683,15 @@ program
   .action(async (opts: InitOpts) => {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     try {
-      await runInit({ question: (prompt) => question(rl, prompt) }, {
-        apiKey: opts.apiKey,
-        repoPath: opts.repoPath,
-        provider: opts.provider,
+      const initOptions = {
+        ...(opts.apiKey === undefined ? {} : { apiKey: opts.apiKey }),
+        ...(opts.repoPath === undefined ? {} : { repoPath: opts.repoPath }),
+        ...(opts.provider === undefined ? {} : { provider: opts.provider }),
         assumeYes: Boolean(opts.yes),
         allowPrompts: !noInputEnabled() && interactiveInputAvailable(),
+      };
+      await runInit({ question: (prompt) => question(rl, prompt) }, {
+        ...initOptions,
       });
     } catch {
       // runInit sets process.exitCode and logs errors
@@ -978,11 +989,12 @@ program
     const buildAskSettings = async (): Promise<AskRuntimeSettings> => {
       const configDefaults = await loadAskConfigDefaults(opts.config);
       const fastModel = opts.fastModel ?? configDefaults.fastModel;
+      const maxSteps = parseOptionalMaxSteps(opts.maxSteps);
       return {
-        fastModel,
         askTimeoutMs: parseOptionalPositiveInt(opts.askTimeoutMs, configDefaults.askTimeoutMs),
-        maxSteps: parseOptionalMaxSteps(opts.maxSteps),
         useFast: Boolean(opts.fast) && Boolean(fastModel),
+        ...(fastModel === undefined ? {} : { fastModel }),
+        ...(maxSteps === undefined ? {} : { maxSteps }),
       };
     };
 
@@ -1172,11 +1184,11 @@ program
         throw new Error(`"${repoName}": provider unavailable for non-dry-run sync`);
       }
       const isTTY = !opts.json && process.stderr.isTTY;
-      const result = await syncRepo({
+      const syncParams = {
         provider,
         agent: agentInfo,
         changedFiles,
-        collectFile: async (filePath) => {
+        collectFile: async (filePath: string) => {
           const absPath = path.join(repoConfig.path, filePath);
           try {
             const fs = await import("node:fs/promises");
@@ -1189,13 +1201,14 @@ program
         },
         headCommit,
         maxFileSizeKb: repoConfig.maxFileSizeKb,
-        onProgress: isTTY
-          ? (completed, total, filePath) => {
-              const label = filePath.length > 60 ? `...${filePath.slice(-57)}` : filePath;
-              process.stderr.write(`\r  [${String(completed)}/${String(total)}] ${label.padEnd(60)}`);
-            }
-          : undefined,
-      });
+        ...(isTTY ? {
+          onProgress: (completed: number, total: number, filePath: string) => {
+            const label = filePath.length > 60 ? `...${filePath.slice(-57)}` : filePath;
+            process.stderr.write(`\r  [${String(completed)}/${String(total)}] ${label.padEnd(60)}`);
+          },
+        } : {}),
+      };
+      const result = await syncRepo(syncParams);
 
       if (isTTY) process.stderr.write(`\r${" ".repeat(72)}\r`); // clear progress line
 

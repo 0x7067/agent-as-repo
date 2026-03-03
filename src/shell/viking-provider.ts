@@ -304,17 +304,18 @@ export class VikingProvider implements AgentProvider {
         }
 
         try {
-          return await toolCallingLoop({
+          const loopParams = {
             systemPrompt,
             userMessage: content,
             tools,
             toolHandlers,
             model: modelCandidate,
             apiKey: this.openrouterApiKey,
-            maxSteps: options?.maxSteps,
-            signal: options?.signal,
             requestTimeoutMs: this.requestTimeoutMs,
-          });
+            ...(options?.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }),
+            ...(options?.signal === undefined ? {} : { signal: options.signal }),
+          };
+          return await toolCallingLoop(loopParams);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           failureMessages.push(`${modelCandidate} (attempt ${String(attempt + 1)}): ${message}`);
