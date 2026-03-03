@@ -9,6 +9,16 @@ vi.mock("./openrouter-client.js", () => ({
 
 import { toolCallingLoop } from "./openrouter-client.js";
 
+interface VikingHttpClientMethods {
+  mkdir: VikingHttpClient["mkdir"];
+  writeFile: VikingHttpClient["writeFile"];
+  readFile: VikingHttpClient["readFile"];
+  deleteFile: VikingHttpClient["deleteFile"];
+  listDirectory: VikingHttpClient["listDirectory"];
+  deleteResource: VikingHttpClient["deleteResource"];
+  semanticSearch: VikingHttpClient["semanticSearch"];
+}
+
 function makeMockViking() {
   return {
     mkdir: vi.fn().mockResolvedValue(),
@@ -18,7 +28,7 @@ function makeMockViking() {
     listDirectory: vi.fn().mockResolvedValue([]),
     deleteResource: vi.fn().mockResolvedValue(),
     semanticSearch: vi.fn().mockResolvedValue([]),
-  } as unknown as VikingHttpClient;
+  } satisfies VikingHttpClientMethods;
 }
 
 function makeMockBlockStorage() {
@@ -27,22 +37,30 @@ function makeMockBlockStorage() {
     set: vi.fn(),
     init: vi.fn(),
     delete: vi.fn(),
-  } as unknown as BlockStorage;
+  } satisfies BlockStorage;
 }
+
+type MockViking = ReturnType<typeof makeMockViking>;
+type MockBlockStorage = ReturnType<typeof makeMockBlockStorage>;
 
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const API_KEY = "test-api-key";
 
 describe("VikingProvider", () => {
-  let mockViking: VikingHttpClient;
-  let mockBlockStorage: BlockStorage;
+  let mockViking: MockViking;
+  let mockBlockStorage: MockBlockStorage;
   let provider: VikingProvider;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockViking = makeMockViking();
     mockBlockStorage = makeMockBlockStorage();
-    provider = new VikingProvider(mockViking, API_KEY, DEFAULT_MODEL, mockBlockStorage);
+    provider = new VikingProvider(
+      mockViking as unknown as VikingHttpClient,
+      API_KEY,
+      DEFAULT_MODEL,
+      mockBlockStorage as unknown as BlockStorage,
+    );
   });
 
   describe("createAgent", () => {

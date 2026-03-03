@@ -17,8 +17,8 @@ export interface CoreMemoryBlock {
 }
 
 export interface AdminPort {
-  listAgents(): Promise<AgentSummary[]>;
-  getAgent(agentId: string): Promise<Record<string, unknown>>;
-  getCoreMemory(agentId: string): Promise<CoreMemoryBlock[]>;
-  searchPassages(agentId: string, query: string, limit?: number): Promise<PassageResult[]>;
+  listAgents(this: void): Promise<AgentSummary[]>;
+  getAgent(this: void, agentId: string): Promise<Record<string, unknown>>;
+  getCoreMemory(this: void, agentId: string): Promise<CoreMemoryBlock[]>;
+  searchPassages(this: void, agentId: string, query: string, limit?: number): Promise<PassageResult[]>;
 }

@@ -203,37 +203,26 @@ export default tseslint.config(
 		plugins: {
 			vitest: vitestPlugin,
 		},
-			rules: {
-				...vitestPlugin.configs.recommended.rules,
-				// Tests reuse strings for readability
-				"sonarjs/no-duplicate-string": "off",
-			 
+		rules: {
+			...vitestPlugin.configs.recommended.rules,
+			// Tests reuse strings for readability
+			"sonarjs/no-duplicate-string": "off",
 			// Test fixtures use fake credentials intentionally
 			// eslint-disable-next-line sonarjs/no-hardcoded-passwords
 			"sonarjs/no-hardcoded-passwords": "off",
-				// Tests often have long setup/assertion blocks
-				"max-lines": "off",
-				// Tests use dynamic paths for temp dirs and fixtures
-				"security/detect-non-literal-fs-filename": "off",
-				},
-				languageOptions: {
-					globals: {
-						...vitestPlugin.environments.env.globals,
-					},
-				},
+			// Tests often have long setup/assertion blocks
+			"max-lines": "off",
+			// Tests use dynamic paths for temp dirs and fixtures
+			"security/detect-non-literal-fs-filename": "off",
+		},
+		languageOptions: {
+			globals: {
+				...vitestPlugin.environments.env.globals,
 			},
-	{
-		files: [
-			"src/mcp-server.test.ts",
-			"src/shell/viking-provider.test.ts",
-		],
-		rules: {
-			// Narrow temporary override while we continue migrating mocked method assertions.
-			"@typescript-eslint/unbound-method": "off",
 		},
 	},
-		// ============================================================
-		// 📄 SPIKES: Exploratory scripts — relax strict rules
+	// ============================================================
+	// 📄 SPIKES: Exploratory scripts — relax strict rules
 	// ============================================================
 	{
 		files: ["spikes/**/*.ts"],

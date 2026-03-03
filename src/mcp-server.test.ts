@@ -40,8 +40,10 @@ function makeMockAdmin(): AdminPort {
     searchPassages: vi.fn().mockResolvedValue([
       { id: "p-1", text: "found it" },
     ]),
-  };
+  } satisfies AdminPort;
 }
+
+type MockAdmin = ReturnType<typeof makeMockAdmin>;
 
 interface ToolResult { content: Array<{ type: string; text: string }>; isError?: boolean }
 type ToolHandler = (args: Record<string, unknown>) => Promise<ToolResult>;
@@ -133,11 +135,13 @@ describe("MCP Server tools", () => {
   let server: McpServer;
   let provider: AgentProvider;
   let admin: AdminPort;
+  let mockAdmin: MockAdmin;
 
   beforeEach(() => {
     server = new McpServer({ name: "test", version: "0.0.1" });
     provider = makeMockProvider();
-    admin = makeMockAdmin();
+    mockAdmin = makeMockAdmin();
+    admin = mockAdmin;
     registerTools(server, provider, admin);
   });
 
@@ -196,7 +200,7 @@ describe("MCP Server tools", () => {
       const data = parseToolJson(result) as { id: string; name: string };
       expect(data.id).toBe("agent-1");
       expect(data.name).toBe("Alice");
-      expect(admin.getAgent).toHaveBeenCalledWith("agent-1");
+      expect(mockAdmin.getAgent).toHaveBeenCalledWith("agent-1");
     });
 
     it("returns isError on failure", async () => {
@@ -410,13 +414,13 @@ describe("MCP Server tools", () => {
       const result = await handler({ agent_id: "agent-1", query: "auth" });
       const data = parseToolJson(result) as Array<{ id: string; text: string }>;
       expect(data).toEqual([{ id: "p-1", text: "found it" }]);
-      expect(admin.searchPassages).toHaveBeenCalledWith("agent-1", "auth", undefined);
+      expect(mockAdmin.searchPassages).toHaveBeenCalledWith("agent-1", "auth", undefined);
     });
 
     it("passes top_k when provided", async () => {
       const handler = extractToolHandler(server, "letta_search_archival");
       await handler({ agent_id: "agent-1", query: "auth", top_k: 5 });
-      expect(admin.searchPassages).toHaveBeenCalledWith("agent-1", "auth", 5);
+      expect(mockAdmin.searchPassages).toHaveBeenCalledWith("agent-1", "auth", 5);
     });
 
     it("returns isError on failure", async () => {
