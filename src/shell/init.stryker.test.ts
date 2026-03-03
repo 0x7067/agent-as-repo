@@ -212,9 +212,9 @@ describe("runInit (port-injected, stryker)", () => {
     });
 
     const answers = ["", "", "n"];
-    const rl = {
+    const rl: MockRl = {
       question: vi.fn(async () => answers.shift() ?? ""),
-    } as unknown as readline.Interface;
+    };
 
     await expect(
       runInit(rl, {

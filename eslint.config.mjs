@@ -214,7 +214,6 @@ export default tseslint.config(
 				"@typescript-eslint/no-unsafe-assignment": "off",
 				"@typescript-eslint/no-unsafe-member-access": "off",
 				"@typescript-eslint/no-unsafe-call": "off",
-				"@typescript-eslint/no-unsafe-argument": "off",
 				"unicorn/prefer-module": "off",
 			// Tests often have long setup/assertion blocks
 			"max-lines": "off",
