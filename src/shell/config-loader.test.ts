@@ -83,13 +83,13 @@ repos:
 
   it("accepts injected FileSystemPort", async () => {
     const mockFs: FileSystemPort = {
-      readFile: async () => validYaml,
-      writeFile: async () => {},
-      stat: async () => ({ size: 0, isDirectory: () => false }),
-      access: async () => {},
-      rename: async () => {},
-      copyFile: async () => {},
-      glob: async () => [],
+      readFile: () => Promise.resolve(validYaml),
+      writeFile: () => Promise.resolve(),
+      stat: () => Promise.resolve({ size: 0, isDirectory: () => false }),
+      access: () => Promise.resolve(),
+      rename: () => Promise.resolve(),
+      copyFile: () => Promise.resolve(),
+      glob: () => Promise.resolve([]),
     };
 
     const config = await loadConfig("/fake/config.yaml", mockFs);
@@ -123,16 +123,16 @@ repos:
     // Inject a mock fs that asserts the encoding passed to readFile
     let capturedEncoding: string | undefined;
     const mockFs = {
-      readFile: async (_path: string, encoding: string) => {
+      readFile: (_path: string, encoding: string) => {
         capturedEncoding = encoding;
-        return validYaml;
+        return Promise.resolve(validYaml);
       },
-      writeFile: async () => {},
-      stat: async () => ({ size: 0, isDirectory: () => false }),
-      access: async () => {},
-      rename: async () => {},
-      copyFile: async () => {},
-      glob: async () => [],
+      writeFile: () => Promise.resolve(),
+      stat: () => Promise.resolve({ size: 0, isDirectory: () => false }),
+      access: () => Promise.resolve(),
+      rename: () => Promise.resolve(),
+      copyFile: () => Promise.resolve(),
+      glob: () => Promise.resolve([]),
     };
 
     await loadConfig("/fake/config.yaml", mockFs);

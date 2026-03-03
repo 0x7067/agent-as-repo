@@ -225,7 +225,6 @@ export default tseslint.config(
 		},
 	{
 		files: [
-			"src/shell/config-loader.test.ts",
 			"src/shell/doctor.stryker.test.ts",
 			"src/shell/doctor.test.ts",
 			"src/shell/file-collector.test.ts",
@@ -234,7 +233,6 @@ export default tseslint.config(
 			"src/shell/self-check.test.ts",
 			"src/shell/state-store.test.ts",
 			"src/shell/sync.test.ts",
-			"src/shell/watch.test.ts",
 		],
 		rules: {
 			// Narrow temporary override while we continue migrating test mocks.

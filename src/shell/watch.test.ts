@@ -623,9 +623,9 @@ describe("watchRepos", () => {
 
   it("applies exponential backoff after consecutive sync failures", async () => {
     let loadCount = 0;
-    mockedLoadState.mockImplementation(async () => {
+    mockedLoadState.mockImplementation(() => {
       loadCount++;
-      return makeState(loadCount === 1 ? null : "abc123");
+      return Promise.resolve(makeState(loadCount === 1 ? null : "abc123"));
     });
     const fakeGit = makeFakeGit({
       headCommit: vi.fn().mockReturnValue("def456"),
@@ -873,9 +873,9 @@ describe("watchRepos", () => {
 
   it("backoff delay uses failure count (not increments -1)", async () => {
     let loadCount = 0;
-    mockedLoadState.mockImplementation(async () => {
+    mockedLoadState.mockImplementation(() => {
       loadCount++;
-      return makeState(loadCount === 1 ? null : "abc123");
+      return Promise.resolve(makeState(loadCount === 1 ? null : "abc123"));
     });
     const fakeGit = makeFakeGit({
       headCommit: vi.fn().mockReturnValue("def456"),
@@ -958,15 +958,15 @@ describe("watchRepos", () => {
     mockedLoadState.mockResolvedValue(state);
     const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123") });
     const fakeFs = makeFakeFs();
-    mockedSyncRepo.mockImplementation(async () => {
-      return {
+    mockedSyncRepo.mockImplementation(() => {
+      return Promise.resolve({
         passages: {},
         lastSyncCommit: "abc123",
         filesRemoved: 0,
         filesReIndexed: 1,
         isFullReIndex: false,
         failedFiles: [],
-      };
+      });
     });
 
     const ac = new AbortController();
@@ -1104,17 +1104,17 @@ describe("watchRepos", () => {
       headCommit: vi.fn().mockReturnValue("def456"),
       diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
     });
-    mockedSyncRepo.mockImplementation(async () => {
+    mockedSyncRepo.mockImplementation(() => {
       syncCount++;
-      if (syncCount === 1) throw new Error("First sync fails");
-      return {
+      if (syncCount === 1) return Promise.reject(new Error("First sync fails"));
+      return Promise.resolve({
         passages: { "src/a.ts": ["p-2"] },
         lastSyncCommit: "def456",
         filesRemoved: 0,
         filesReIndexed: 1,
         isFullReIndex: false,
         failedFiles: [],
-      };
+      });
     });
 
     const log = vi.fn();
