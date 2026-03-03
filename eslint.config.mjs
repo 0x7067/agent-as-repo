@@ -234,8 +234,6 @@ export default tseslint.config(
 	{
 		files: [
 			"src/cli.test.ts",
-			"src/core/mcp-config.test.ts",
-			"src/core/submodule.test.ts",
 			"src/mcp-server.test.ts",
 			"src/shell/doctor.stryker.test.ts",
 			"src/shell/doctor.test.ts",
