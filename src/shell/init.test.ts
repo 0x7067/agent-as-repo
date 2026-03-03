@@ -25,6 +25,24 @@ async function makeTempDir(prefix: string): Promise<string> {
   return dir;
 }
 
+async function mkdirInWorkspace(directoryPath: string): Promise<void> {
+  // Path is constrained under a mkdtemp-created workspace for this test run.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  await fs.mkdir(directoryPath, { recursive: true });
+}
+
+async function writeWorkspaceFile(filePath: string, content: string): Promise<void> {
+  // Path is constrained under a mkdtemp-created workspace for this test run.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  await fs.writeFile(filePath, content, "utf8");
+}
+
+async function readWorkspaceFile(filePath: string): Promise<string> {
+  // Path is constrained under a mkdtemp-created workspace for this test run.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  return fs.readFile(filePath, "utf8");
+}
+
 afterEach(async () => {
   process.chdir(originalCwd);
   process.env.LETTA_API_KEY = originalApiKey;
@@ -36,8 +54,8 @@ describe.sequential("runInit", () => {
   it("fails when repo path is not a git repository", async () => {
     const workspace = await makeTempDir("init-workspace-");
     const repoDir = path.join(workspace, "repo");
-    await fs.mkdir(repoDir, { recursive: true });
-    await fs.writeFile(path.join(repoDir, "src.ts"), "export const x = 1;\n", "utf8");
+    await mkdirInWorkspace(repoDir);
+    await writeWorkspaceFile(path.join(repoDir, "src.ts"), "export const x = 1;\n");
 
     process.chdir(workspace);
     process.env.LETTA_API_KEY = "test-key";
@@ -50,8 +68,8 @@ describe.sequential("runInit", () => {
   it("fails when no code extensions are detected", async () => {
     const workspace = await makeTempDir("init-workspace-");
     const repoDir = path.join(workspace, "repo");
-    await fs.mkdir(path.join(repoDir, ".git"), { recursive: true });
-    await fs.writeFile(path.join(repoDir, "image.png"), "not-really-a-png", "utf8");
+    await mkdirInWorkspace(path.join(repoDir, ".git"));
+    await writeWorkspaceFile(path.join(repoDir, "image.png"), "not-really-a-png");
 
     process.chdir(workspace);
     process.env.LETTA_API_KEY = "test-key";
@@ -64,8 +82,8 @@ describe.sequential("runInit", () => {
   it("writes config.yaml for a valid git repository", async () => {
     const workspace = await makeTempDir("init-workspace-");
     const repoDir = path.join(workspace, "repo");
-    await fs.mkdir(path.join(repoDir, ".git"), { recursive: true });
-    await fs.writeFile(path.join(repoDir, "index.ts"), "export const ready = true;\n", "utf8");
+    await mkdirInWorkspace(path.join(repoDir, ".git"));
+    await writeWorkspaceFile(path.join(repoDir, "index.ts"), "export const ready = true;\n");
 
     process.chdir(workspace);
     process.env.LETTA_API_KEY = "test-key";
@@ -74,7 +92,7 @@ describe.sequential("runInit", () => {
     const result = await runInit(rl);
     expect(result.repoName).toBe("repo");
     const configPath = path.join(workspace, "config.yaml");
-    const config = await fs.readFile(configPath, "utf8");
+    const config = await readWorkspaceFile(configPath);
     expect(config).toContain("repo:");
     expect(config).toContain(".ts");
   });
@@ -82,8 +100,8 @@ describe.sequential("runInit", () => {
   it("supports non-interactive options without prompts", async () => {
     const workspace = await makeTempDir("init-workspace-");
     const repoDir = path.join(workspace, "repo");
-    await fs.mkdir(path.join(repoDir, ".git"), { recursive: true });
-    await fs.writeFile(path.join(repoDir, "index.ts"), "export const ready = true;\n", "utf8");
+    await mkdirInWorkspace(path.join(repoDir, ".git"));
+    await writeWorkspaceFile(path.join(repoDir, "index.ts"), "export const ready = true;\n");
 
     process.chdir(workspace);
     delete process.env.LETTA_API_KEY;
@@ -104,8 +122,8 @@ describe.sequential("runInit", () => {
   it("supports viking provider with --provider in non-interactive mode", async () => {
     const workspace = await makeTempDir("init-workspace-viking-");
     const repoDir = path.join(workspace, "repo");
-    await fs.mkdir(path.join(repoDir, ".git"), { recursive: true });
-    await fs.writeFile(path.join(repoDir, "index.ts"), "export const ready = true;\n", "utf8");
+    await mkdirInWorkspace(path.join(repoDir, ".git"));
+    await writeWorkspaceFile(path.join(repoDir, "index.ts"), "export const ready = true;\n");
 
     process.chdir(workspace);
     delete process.env.OPENROUTER_API_KEY;
@@ -119,8 +137,8 @@ describe.sequential("runInit", () => {
       allowPrompts: false,
     });
 
-    const envContent = await fs.readFile(path.join(workspace, ".env"), "utf8");
-    const configContent = await fs.readFile(path.join(workspace, "config.yaml"), "utf8");
+    const envContent = await readWorkspaceFile(path.join(workspace, ".env"));
+    const configContent = await readWorkspaceFile(path.join(workspace, "config.yaml"));
     expect(envContent).toContain("OPENROUTER_API_KEY=or-abc123");
     expect(configContent).toContain("type: viking");
   });

@@ -220,7 +220,6 @@ export default tseslint.config(
 		files: [
 			"src/cli.test.ts",
 			"src/shell/adapters/node-filesystem.test.ts",
-			"src/shell/init.test.ts",
 			"src/shell/self-check.test.ts",
 			"src/shell/state-store.test.ts",
 		],
