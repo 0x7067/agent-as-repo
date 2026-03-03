@@ -1,8 +1,9 @@
 import * as fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 
-const ROOT = path.resolve(__dirname, "../..");
+const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const CORE_DIR = path.join(ROOT, "src/core");
 const PORTS_DIR = path.join(ROOT, "src/ports");
 
