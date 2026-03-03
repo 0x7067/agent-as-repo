@@ -16,6 +16,24 @@ async function withTempDir(fn: (dir: string) => Promise<void>) {
   }
 }
 
+async function writeStateTestFile(filePath: string, content: string): Promise<void> {
+  // Path is constrained under the mkdtemp-created temp directory used by each test case.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  await fs.writeFile(filePath, content, "utf8");
+}
+
+async function readStateTestFile(filePath: string): Promise<string> {
+  // Path is constrained under the mkdtemp-created temp directory used by each test case.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  return fs.readFile(filePath, "utf8");
+}
+
+async function listStateTestDir(dirPath: string): Promise<string[]> {
+  // Path is constrained under the mkdtemp-created temp directory used by each test case.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  return fs.readdir(dirPath);
+}
+
 describe("state store", () => {
   it("returns empty state when file does not exist", async () => {
     await withTempDir(async (dir) => {
@@ -55,7 +73,7 @@ describe("state store", () => {
   it("throws actionable error for corrupted JSON", async () => {
     await withTempDir(async (dir) => {
       const filePath = path.join(dir, "state.json");
-      await fs.writeFile(filePath, "not valid json {{{{", "utf8");
+      await writeStateTestFile(filePath, "not valid json {{{{");
       let message = "";
       try {
         await loadState(filePath);
@@ -64,7 +82,7 @@ describe("state store", () => {
       }
       expect(message).toContain("Invalid state file");
       expect(message).toContain(filePath);
-      const files = await fs.readdir(dir);
+      const files = await listStateTestDir(dir);
       const backups = files.filter((name) => name.startsWith("state.json.bak."));
       expect(backups.length).toBe(1);
     });
@@ -73,10 +91,9 @@ describe("state store", () => {
   it("throws actionable error for invalid schema", async () => {
     await withTempDir(async (dir) => {
       const filePath = path.join(dir, "state.json");
-      await fs.writeFile(
+      await writeStateTestFile(
         filePath,
         JSON.stringify({ agents: { repo: { agentId: 123 } } }),
-        "utf8",
       );
       await expect(loadState(filePath)).rejects.toThrow("Invalid state file");
       await expect(loadState(filePath)).rejects.toThrow("remove or fix it");
@@ -94,7 +111,7 @@ describe("state store", () => {
           },
         },
       };
-      await fs.writeFile(filePath, JSON.stringify(minimal), "utf8");
+      await writeStateTestFile(filePath, JSON.stringify(minimal));
       const loaded = await loadState(filePath);
       expect(loaded.stateVersion).toBe(STATE_SCHEMA_VERSION);
       expect(loaded.agents["my-app"].agentId).toBe("agent-1");
@@ -112,7 +129,7 @@ describe("state store", () => {
       state = addAgentToState(state, "my-app", "agent-123", "2026-01-01T00:00:00.000Z");
 
       await saveState(filePath, state);
-      const content = await fs.readFile(filePath, "utf8");
+      const content = await readStateTestFile(filePath);
       expect(JSON.parse(content)).toMatchObject({
         stateVersion: STATE_SCHEMA_VERSION,
         agents: {
@@ -120,7 +137,7 @@ describe("state store", () => {
         },
       });
 
-      const files = await fs.readdir(dir);
+      const files = await listStateTestDir(dir);
       const tempFiles = files.filter((name) => name.startsWith(".state.json.tmp."));
       expect(tempFiles).toEqual([]);
     });
@@ -142,7 +159,7 @@ describe("state store", () => {
           },
         },
       };
-      await fs.writeFile(filePath, JSON.stringify(legacy), "utf8");
+      await writeStateTestFile(filePath, JSON.stringify(legacy));
 
       const loaded = await loadState(filePath);
       expect(loaded.stateVersion).toBe(STATE_SCHEMA_VERSION);
@@ -157,10 +174,10 @@ describe("state store", () => {
         stateVersion: 999,
         agents: {},
       };
-      await fs.writeFile(filePath, JSON.stringify(unsupported), "utf8");
+      await writeStateTestFile(filePath, JSON.stringify(unsupported));
 
       await expect(loadState(filePath)).rejects.toThrow("unsupported state version");
-      const files = await fs.readdir(dir);
+      const files = await listStateTestDir(dir);
       const backups = files.filter((name) => name.startsWith("state.json.bak."));
       expect(backups.length).toBe(1);
     });
@@ -199,7 +216,7 @@ describe("state store", () => {
       });
 
       await Promise.all(saves);
-      const raw = await fs.readFile(filePath, "utf8");
+      const raw = await readStateTestFile(filePath);
       expect(() => {
         JSON.parse(raw);
       }).not.toThrow();
@@ -225,7 +242,7 @@ describe("state store", () => {
           },
         },
       };
-      await fs.writeFile(filePath, JSON.stringify(v1State), "utf8");
+      await writeStateTestFile(filePath, JSON.stringify(v1State));
 
       const loaded = await loadState(filePath);
       expect(loaded.stateVersion).toBe(STATE_SCHEMA_VERSION);
@@ -237,7 +254,7 @@ describe("state store", () => {
     // Test that non-object raw values (null) are handled - they will fail schema parse
     await withTempDir(async (dir) => {
       const filePath = path.join(dir, "state.json");
-      await fs.writeFile(filePath, "null", "utf8");
+      await writeStateTestFile(filePath, "null");
       // null is not an object, so schema parse will fail -> StateFileError
       await expect(loadState(filePath)).rejects.toThrow("Invalid state file");
     });
@@ -246,7 +263,7 @@ describe("state store", () => {
   it("StateFileError has name 'StateFileError'", async () => {
     await withTempDir(async (dir) => {
       const filePath = path.join(dir, "state.json");
-      await fs.writeFile(filePath, "bad json {{", "utf8");
+      await writeStateTestFile(filePath, "bad json {{");
       await expect(loadState(filePath)).rejects.toMatchObject({ name: "StateFileError" });
     });
   });
@@ -254,7 +271,7 @@ describe("state store", () => {
   it("StateFileError message includes backup path hint when backup was created", async () => {
     await withTempDir(async (dir) => {
       const filePath = path.join(dir, "state.json");
-      await fs.writeFile(filePath, "bad json {{", "utf8");
+      await writeStateTestFile(filePath, "bad json {{");
       await expect(loadState(filePath)).rejects.toThrow(/A backup was created at/);
     });
   });
@@ -381,7 +398,7 @@ describe("state store", () => {
     // → schema parse will fail → StateFileError
     await withTempDir(async (dir) => {
       const filePath = path.join(dir, "state.json");
-      await fs.writeFile(filePath, "42", "utf8");
+      await writeStateTestFile(filePath, "42");
       await expect(loadState(filePath)).rejects.toThrow("Invalid state file");
     });
   });
@@ -403,7 +420,7 @@ describe("state store", () => {
           },
         },
       };
-      await fs.writeFile(filePath, JSON.stringify(legacy), "utf8");
+      await writeStateTestFile(filePath, JSON.stringify(legacy));
       const loaded = await loadState(filePath);
       expect(loaded.stateVersion).toBe(STATE_SCHEMA_VERSION);
       expect(loaded.agents["my-app"].agentId).toBe("agent-legacy");
@@ -499,10 +516,10 @@ describe("state store", () => {
       const filePath = path.join(dir, "state.json");
       // Use an unsupported version to trigger the StateFileError path
       const unsupported = { stateVersion: 999, agents: {} };
-      await fs.writeFile(filePath, JSON.stringify(unsupported), "utf8");
+      await writeStateTestFile(filePath, JSON.stringify(unsupported));
 
       await expect(loadState(filePath)).rejects.toThrow("unsupported state version");
-      const files = await fs.readdir(dir);
+      const files = await listStateTestDir(dir);
       const backups = files.filter((name) => name.startsWith("state.json.bak."));
       // Exactly one backup — not two
       expect(backups.length).toBe(1);
@@ -512,7 +529,7 @@ describe("state store", () => {
   it("loadState wraps SyntaxError (not ZodError) in StateFileError", async () => {
     await withTempDir(async (dir) => {
       const filePath = path.join(dir, "state.json");
-      await fs.writeFile(filePath, "definitely { not } json", "utf8");
+      await writeStateTestFile(filePath, "definitely { not } json");
       await expect(loadState(filePath)).rejects.toThrow(/Invalid state file/);
     });
   });
@@ -521,7 +538,7 @@ describe("state store", () => {
     await withTempDir(async (dir) => {
       const filePath = path.join(dir, "state.json");
       // A JSON string (not object) produces a ZodError with path=[] (root), triggering || "root" fallback
-      await fs.writeFile(filePath, '"not-an-object"', "utf8");
+      await writeStateTestFile(filePath, '"not-an-object"');
       await expect(loadState(filePath)).rejects.toThrow(/at "root"/);
     });
   });
@@ -535,7 +552,7 @@ describe("state store", () => {
           "my-app": { agentId: 123, repoName: "my-app" },
         },
       };
-      await fs.writeFile(filePath, JSON.stringify(invalid), "utf8");
+      await writeStateTestFile(filePath, JSON.stringify(invalid));
       const err = await loadState(filePath).then(
         () => { throw new Error("loadState should have thrown"); },
         (error: unknown) => error as Error,
@@ -559,7 +576,7 @@ describe("state store", () => {
           },
         },
       };
-      await fs.writeFile(filePath, JSON.stringify(minimal), "utf8");
+      await writeStateTestFile(filePath, JSON.stringify(minimal));
       const loaded = await loadState(filePath);
       // createdAt defaults to ""
       expect(loaded.agents["my-app"].createdAt).toBe("");

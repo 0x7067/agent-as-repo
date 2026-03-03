@@ -219,7 +219,6 @@ export default tseslint.config(
 	{
 		files: [
 			"src/cli.test.ts",
-			"src/shell/state-store.test.ts",
 		],
 		rules: {
 			// Narrow temporary override while we migrate remaining temp-path-heavy tests.
