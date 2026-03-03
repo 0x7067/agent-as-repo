@@ -1,12 +1,13 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
-import * as path from "node:path";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type * as readline from "node:readline/promises";
 import { runInit } from "./init.js";
 import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
 
-interface MockRl extends Pick<readline.Interface, "question"> {}
+interface MockRl {
+  question(prompt: string): Promise<string>;
+}
 
 function makeRl(answers: string[]): MockRl {
   return {
@@ -36,11 +37,11 @@ describe.sequential("runInit", () => {
     const workspace = await makeTempDir("init-workspace-");
     const repoDir = path.join(workspace, "repo");
     await fs.mkdir(repoDir, { recursive: true });
-    await fs.writeFile(path.join(repoDir, "src.ts"), "export const x = 1;\n", "utf-8");
+    await fs.writeFile(path.join(repoDir, "src.ts"), "export const x = 1;\n", "utf8");
 
     process.chdir(workspace);
     process.env.LETTA_API_KEY = "test-key";
-    const rl = makeRl(["", repoDir]) as unknown as readline.Interface;
+    const rl = makeRl(["", repoDir]);
 
     await expect(runInit(rl)).rejects.toThrow("Not a git repository");
     expect(process.exitCode).toBe(1);
@@ -50,11 +51,11 @@ describe.sequential("runInit", () => {
     const workspace = await makeTempDir("init-workspace-");
     const repoDir = path.join(workspace, "repo");
     await fs.mkdir(path.join(repoDir, ".git"), { recursive: true });
-    await fs.writeFile(path.join(repoDir, "image.png"), "not-really-a-png", "utf-8");
+    await fs.writeFile(path.join(repoDir, "image.png"), "not-really-a-png", "utf8");
 
     process.chdir(workspace);
     process.env.LETTA_API_KEY = "test-key";
-    const rl = makeRl(["", repoDir]) as unknown as readline.Interface;
+    const rl = makeRl(["", repoDir]);
 
     await expect(runInit(rl)).rejects.toThrow("No code files detected");
     expect(process.exitCode).toBe(1);
@@ -64,11 +65,11 @@ describe.sequential("runInit", () => {
     const workspace = await makeTempDir("init-workspace-");
     const repoDir = path.join(workspace, "repo");
     await fs.mkdir(path.join(repoDir, ".git"), { recursive: true });
-    await fs.writeFile(path.join(repoDir, "index.ts"), "export const ready = true;\n", "utf-8");
+    await fs.writeFile(path.join(repoDir, "index.ts"), "export const ready = true;\n", "utf8");
 
     process.chdir(workspace);
     process.env.LETTA_API_KEY = "test-key";
-    const rl = makeRl(["", repoDir, "", "y"]) as unknown as readline.Interface;
+    const rl = makeRl(["", repoDir, "", "y"]);
 
     const result = await runInit(rl);
     expect(result.repoName).toBe("repo");
@@ -82,11 +83,11 @@ describe.sequential("runInit", () => {
     const workspace = await makeTempDir("init-workspace-");
     const repoDir = path.join(workspace, "repo");
     await fs.mkdir(path.join(repoDir, ".git"), { recursive: true });
-    await fs.writeFile(path.join(repoDir, "index.ts"), "export const ready = true;\n", "utf-8");
+    await fs.writeFile(path.join(repoDir, "index.ts"), "export const ready = true;\n", "utf8");
 
     process.chdir(workspace);
     delete process.env.LETTA_API_KEY;
-    const rl = makeRl([]) as unknown as readline.Interface;
+    const rl = makeRl([]);
 
     const result = await runInit(rl, {
       apiKey: "abc123",
@@ -104,11 +105,11 @@ describe.sequential("runInit", () => {
     const workspace = await makeTempDir("init-workspace-viking-");
     const repoDir = path.join(workspace, "repo");
     await fs.mkdir(path.join(repoDir, ".git"), { recursive: true });
-    await fs.writeFile(path.join(repoDir, "index.ts"), "export const ready = true;\n", "utf-8");
+    await fs.writeFile(path.join(repoDir, "index.ts"), "export const ready = true;\n", "utf8");
 
     process.chdir(workspace);
     delete process.env.OPENROUTER_API_KEY;
-    const rl = makeRl([]) as unknown as readline.Interface;
+    const rl = makeRl([]);
 
     await runInit(rl, {
       provider: "viking",
@@ -170,7 +171,7 @@ describe("runInit (port-injected)", () => {
       "/repo": "__DIR__",
       "/repo/.git": "__DIR__",
     });
-    const rl = { question: vi.fn().mockResolvedValue("") } as unknown as import("node:readline/promises").Interface;
+    const rl: MockRl = { question: vi.fn().mockResolvedValue("") };
 
     await runInit(rl, {
       apiKey: "sk-test-key",
@@ -190,7 +191,7 @@ describe("runInit (port-injected)", () => {
       "/repo": "__DIR__",
       "/repo/.git": "__DIR__",
     });
-    const rl = { question: vi.fn().mockResolvedValue("") } as unknown as import("node:readline/promises").Interface;
+    const rl: MockRl = { question: vi.fn().mockResolvedValue("") };
 
     const result = await runInit(rl, {
       apiKey: "sk-test-key",
@@ -207,7 +208,7 @@ describe("runInit (port-injected)", () => {
 
   it("throws when repo path is not a directory", async () => {
     const fakeFs = makeFakeFs({ "/repo": "not-a-dir" }); // stat returns isDirectory() = false
-    const rl = { question: vi.fn().mockResolvedValue("") } as unknown as import("node:readline/promises").Interface;
+    const rl: MockRl = { question: vi.fn().mockResolvedValue("") };
 
     await expect(
       runInit(rl, { repoPath: "/repo", assumeYes: true, allowPrompts: false, cwd: "/project", fs: fakeFs }),

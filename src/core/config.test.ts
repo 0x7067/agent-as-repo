@@ -17,13 +17,22 @@ const validRaw = {
   },
 };
 
+function parseConfigError(raw: unknown): ConfigError {
+  try {
+    parseConfig(raw);
+  } catch (error) {
+    if (error instanceof ConfigError) return error;
+    throw error;
+  }
+  throw new Error("expected parseConfig to throw ConfigError");
+}
+
 describe("parseConfig", () => {
   it("parses a valid config with defaults applied", () => {
     const config = parseConfig(validRaw);
     expect(config.provider.type).toBe("letta");
-    if (config.provider.type === "letta") {
-      expect(config.provider.model).toBe("openai/gpt-4.1");
-    }
+    const provider = config.provider as Extract<typeof config.provider, { type: "letta" }>;
+    expect(provider.model).toBe("openai/gpt-4.1");
     expect(config.repos["my-app"].maxFileSizeKb).toBe(50);
     expect(config.repos["my-app"].memoryBlockLimit).toBe(5000);
     expect(config.repos["my-app"].bootstrapOnCreate).toBe(true);
@@ -75,11 +84,9 @@ describe("parseConfig", () => {
       },
     };
     const config = parseConfig(raw);
-    if (config.provider.type === "letta") {
-      expect(config.provider.fastModel).toBe("openai/gpt-4.1-mini");
-    } else {
-      expect.unreachable("expected letta provider");
-    }
+    expect(config.provider.type).toBe("letta");
+    const provider = config.provider as Extract<typeof config.provider, { type: "letta" }>;
+    expect(provider.fastModel).toBe("openai/gpt-4.1-mini");
   });
 
   it("allows per-repo overrides of defaults", () => {
@@ -201,54 +208,36 @@ describe("parseConfig", () => {
   });
 
   it("throws ConfigError with formatted messages on schema violations", () => {
-    try {
-      parseConfig({
-        letta: {},
-        repos: { app: { path: 123, extensions: "not-array" } },
-      });
-      expect.unreachable("should have thrown");
-    } catch (error) {
-      expect(error).toBeInstanceOf(ConfigError);
-      const configErr = error as ConfigError;
-      expect(configErr.issues.length).toBeGreaterThan(0);
-      // Should have readable path-based messages
-      expect(configErr.issues.some((i) => i.includes("letta.model"))).toBe(true);
-      expect(configErr.issues.some((i) => i.includes("repos.app.path"))).toBe(true);
-    }
+    const configErr = parseConfigError({
+      letta: {},
+      repos: { app: { path: 123, extensions: "not-array" } },
+    });
+    expect(configErr.issues.length).toBeGreaterThan(0);
+    // Should have readable path-based messages
+    expect(configErr.issues.some((i) => i.includes("letta.model"))).toBe(true);
+    expect(configErr.issues.some((i) => i.includes("repos.app.path"))).toBe(true);
   });
 
   it("throws ConfigError when extensions don't start with dot", () => {
-    try {
-      parseConfig({
-        ...validRaw,
-        repos: {
-          "my-app": {
-            ...validRaw.repos["my-app"],
-            extensions: [".ts", "js", ".tsx"],
-          },
+    const configErr = parseConfigError({
+      ...validRaw,
+      repos: {
+        "my-app": {
+          ...validRaw.repos["my-app"],
+          extensions: [".ts", "js", ".tsx"],
         },
-      });
-      expect.unreachable("should have thrown");
-    } catch (error) {
-      expect(error).toBeInstanceOf(ConfigError);
-      const configErr = error as ConfigError;
-      expect(configErr.issues.some((i) => i.includes('"js"'))).toBe(true);
-      expect(configErr.issues.some((i) => i.includes("start with"))).toBe(true);
-    }
+      },
+    });
+    expect(configErr.issues.some((i) => i.includes('"js"'))).toBe(true);
+    expect(configErr.issues.some((i) => i.includes("start with"))).toBe(true);
   });
 
   it("throws ConfigError when no repos defined", () => {
-    try {
-      parseConfig({
-        letta: { model: "x", embedding: "y" },
-        repos: {},
-      });
-      expect.unreachable("should have thrown");
-    } catch (error) {
-      expect(error).toBeInstanceOf(ConfigError);
-      const configErr = error as ConfigError;
-      expect(configErr.issues.some((i) => i.includes("at least one repo"))).toBe(true);
-    }
+    const configErr = parseConfigError({
+      letta: { model: "x", embedding: "y" },
+      repos: {},
+    });
+    expect(configErr.issues.some((i) => i.includes("at least one repo"))).toBe(true);
   });
 
   it("re-throws non-ZodError errors as-is (not wrapped in ConfigError)", () => {
@@ -261,40 +250,28 @@ describe("parseConfig", () => {
     // The only way to trigger a non-ZodError from rawConfigSchema.parse() is if Zod itself has a bug.
     // This might be an equivalent mutant for practical purposes.
     // Let's verify: pass null which makes z.parse throw ZodError (not other error)
-    try {
-      parseConfig(null);
-      expect.unreachable("should have thrown");
-    } catch (error) {
-      expect(error).toBeInstanceOf(ConfigError);
-    }
+    expect(() => parseConfig(null)).toThrow(ConfigError);
   });
 
   it("throws ConfigError when ignore_dirs contain path separators", () => {
-    try {
-      parseConfig({
-        ...validRaw,
-        repos: {
-          "my-app": {
-            ...validRaw.repos["my-app"],
-            ignore_dirs: ["node_modules", "src/dist"],
-          },
+    const configErr = parseConfigError({
+      ...validRaw,
+      repos: {
+        "my-app": {
+          ...validRaw.repos["my-app"],
+          ignore_dirs: ["node_modules", "src/dist"],
         },
-      });
-      expect.unreachable("should have thrown");
-    } catch (error) {
-      expect(error).toBeInstanceOf(ConfigError);
-      const configErr = error as ConfigError;
-      expect(configErr.issues.some((i) => i.includes("src/dist"))).toBe(true);
-    }
+      },
+    });
+    expect(configErr.issues.some((i) => i.includes("src/dist"))).toBe(true);
   });
 
   it("migrates old letta: format to provider: { type: 'letta', ... }", () => {
     const config = parseConfig(validRaw);
     expect(config.provider.type).toBe("letta");
-    if (config.provider.type === "letta") {
-      expect(config.provider.model).toBe("openai/gpt-4.1");
-      expect(config.provider.embedding).toBe("openai/text-embedding-3-small");
-    }
+    const provider = config.provider as Extract<typeof config.provider, { type: "letta" }>;
+    expect(provider.model).toBe("openai/gpt-4.1");
+    expect(provider.embedding).toBe("openai/text-embedding-3-small");
   });
 
   it("parses new provider: { type: 'letta' } format", () => {
@@ -304,9 +281,8 @@ describe("parseConfig", () => {
     };
     const config = parseConfig(raw);
     expect(config.provider.type).toBe("letta");
-    if (config.provider.type === "letta") {
-      expect(config.provider.model).toBe("openai/gpt-4.1");
-    }
+    const provider = config.provider as Extract<typeof config.provider, { type: "letta" }>;
+    expect(provider.model).toBe("openai/gpt-4.1");
   });
 
   it("parses viking provider config", () => {
@@ -316,10 +292,9 @@ describe("parseConfig", () => {
     };
     const config = parseConfig(raw);
     expect(config.provider.type).toBe("viking");
-    if (config.provider.type === "viking") {
-      expect(config.provider.openrouterModel).toBe("openai/gpt-4o-mini");
-      expect(config.provider.vikingUrl).toBeUndefined();
-    }
+    const provider = config.provider as Extract<typeof config.provider, { type: "viking" }>;
+    expect(provider.openrouterModel).toBe("openai/gpt-4o-mini");
+    expect(provider.vikingUrl).toBeUndefined();
   });
 
   it("parses viking provider config with optional viking_url", () => {
@@ -328,22 +303,14 @@ describe("parseConfig", () => {
       repos: validRaw.repos,
     };
     const config = parseConfig(raw);
-    if (config.provider.type === "viking") {
-      expect(config.provider.vikingUrl).toBe("http://localhost:1933");
-    } else {
-      expect.unreachable("expected viking provider");
-    }
+    expect(config.provider.type).toBe("viking");
+    const provider = config.provider as Extract<typeof config.provider, { type: "viking" }>;
+    expect(provider.vikingUrl).toBe("http://localhost:1933");
   });
 
   it("throws ConfigError when neither provider nor letta is specified", () => {
-    try {
-      parseConfig({ repos: validRaw.repos });
-      expect.unreachable("should have thrown");
-    } catch (error) {
-      expect(error).toBeInstanceOf(ConfigError);
-      const configErr = error as ConfigError;
-      expect(configErr.issues.some((i) => i.includes("provider") || i.includes("letta"))).toBe(true);
-    }
+    const configErr = parseConfigError({ repos: validRaw.repos });
+    expect(configErr.issues.some((i) => i.includes("provider") || i.includes("letta"))).toBe(true);
   });
 });
 

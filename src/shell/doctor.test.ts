@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
-import * as path from "node:path";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkApiKey, checkConfigFile, checkGit, runAllChecks, runDoctorFixes } from "./doctor.js";
 import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
@@ -24,29 +24,29 @@ afterEach(async () => {
 });
 
 describe("doctor shell checks", () => {
-  it("checkApiKey fails when LETTA_API_KEY is missing", async () => {
+  it("checkApiKey fails when LETTA_API_KEY is missing", () => {
     delete process.env.LETTA_API_KEY;
-    const result = await checkApiKey();
+    const result = checkApiKey();
     expect(result.status).toBe("fail");
     expect(result.message).toContain("LETTA_API_KEY");
   });
 
-  it("checkApiKey passes when LETTA_API_KEY is set", async () => {
+  it("checkApiKey passes when LETTA_API_KEY is set", () => {
     process.env.LETTA_API_KEY = "test-key";
-    const result = await checkApiKey();
+    const result = checkApiKey();
     expect(result.status).toBe("pass");
   });
 
-  it("checkApiKey fails when OPENROUTER_API_KEY is missing for viking provider", async () => {
+  it("checkApiKey fails when OPENROUTER_API_KEY is missing for viking provider", () => {
     delete process.env.OPENROUTER_API_KEY;
-    const result = await checkApiKey("viking");
+    const result = checkApiKey("viking");
     expect(result.status).toBe("fail");
     expect(result.message).toContain("OPENROUTER_API_KEY");
   });
 
-  it("checkApiKey passes when OPENROUTER_API_KEY is set for viking provider", async () => {
+  it("checkApiKey passes when OPENROUTER_API_KEY is set for viking provider", () => {
     process.env.OPENROUTER_API_KEY = "or-test";
-    const result = await checkApiKey("viking");
+    const result = checkApiKey("viking");
     expect(result.status).toBe("pass");
   });
 
@@ -73,7 +73,7 @@ describe("doctor shell checks", () => {
       "    extensions: [.ts]",
       "    ignore_dirs: [node_modules, .git]",
     ].join("\n");
-    await fs.writeFile(configPath, config, "utf-8");
+    await fs.writeFile(configPath, config, "utf8");
 
     delete process.env.LETTA_API_KEY;
     const results = await runAllChecks(null, configPath);
@@ -88,7 +88,7 @@ describe("doctor shell checks", () => {
     const tempDir = await makeTempDir("doctor-fix-");
     process.chdir(tempDir);
     const configPath = path.join(tempDir, "config.yaml");
-    await fs.writeFile(path.join(tempDir, "config.example.yaml"), "repos: {}\nletta:\n  model: x\n  embedding: y\n", "utf-8");
+    await fs.writeFile(path.join(tempDir, "config.example.yaml"), "repos: {}\nletta:\n  model: x\n  embedding: y\n", "utf8");
 
     const result = await runDoctorFixes(configPath);
 
@@ -121,7 +121,7 @@ describe("doctor shell checks", () => {
         "    extensions: [.ts]",
         "    ignore_dirs: [node_modules, .git]",
       ].join("\n"),
-      "utf-8",
+      "utf8",
     );
 
     const state = {
@@ -147,7 +147,7 @@ describe("doctor shell checks", () => {
         },
       },
     };
-    await fs.writeFile(path.join(tempDir, ".repo-expert-state.json"), JSON.stringify(state), "utf-8");
+    await fs.writeFile(path.join(tempDir, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
 
     const listPassages = vi.fn(async (agentId: string) => {
       if (agentId === "configured-agent") return [];
@@ -165,9 +165,10 @@ describe("doctor shell checks", () => {
 });
 
 // Helper: in-memory fake for FileSystemPort
+const fakeWatcherHandle = (): WatcherHandle => ({ close: () => {}, on: () => ({}) }) as WatcherHandle;
+
 function makeFakeFs(files: Record<string, string> = {}): FileSystemPort & { store: Map<string, string> } {
   const store = new Map(Object.entries(files));
-  const vi_fn = () => ({ close: () => {}, on: () => ({}) }) as unknown as WatcherHandle;
   return {
     store,
     readFile: async (p) => {
@@ -177,7 +178,8 @@ function makeFakeFs(files: Record<string, string> = {}): FileSystemPort & { stor
     },
     writeFile: async (p, d) => { store.set(p, d); },
     stat: async (p) => {
-      if (store.has(p)) return { size: store.get(p)!.length, isDirectory: () => false };
+      const value = store.get(p);
+      if (value !== undefined) return { size: value.length, isDirectory: () => false };
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     },
     access: async (p) => {
@@ -195,7 +197,7 @@ function makeFakeFs(files: Record<string, string> = {}): FileSystemPort & { stor
       store.set(dest, v);
     },
     glob: async () => [],
-    watch: vi_fn,
+    watch: fakeWatcherHandle,
   };
 }
 
