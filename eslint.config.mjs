@@ -210,16 +210,12 @@ export default tseslint.config(
 			// Test fixtures use fake credentials intentionally
 			// eslint-disable-next-line sonarjs/no-hardcoded-passwords
 			"sonarjs/no-hardcoded-passwords": "off",
-			// Tests often need `any` for mocking
-			"@typescript-eslint/no-explicit-any": "off",
 			// Mocking patterns trigger unsafe type errors
 			"@typescript-eslint/no-unsafe-assignment": "off",
 			"@typescript-eslint/no-unsafe-member-access": "off",
 			"@typescript-eslint/no-unsafe-call": "off",
 			"@typescript-eslint/no-unsafe-argument": "off",
 			"@typescript-eslint/no-unsafe-return": "off",
-			// Dynamic require is common in test setup
-			"@typescript-eslint/no-require-imports": "off",
 			"unicorn/prefer-module": "off",
 			// Tests often have long setup/assertion blocks
 			"max-lines": "off",
