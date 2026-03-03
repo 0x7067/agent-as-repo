@@ -209,13 +209,25 @@ export default tseslint.config(
 			"sonarjs/no-duplicate-string": "off",
 			// Tests often have long setup/assertion blocks
 			"max-lines": "off",
-			// Tests use dynamic paths for temp dirs and fixtures
-			"security/detect-non-literal-fs-filename": "off",
 		},
 		languageOptions: {
 			globals: {
 				...vitestPlugin.environments.env.globals,
 			},
+		},
+	},
+	{
+		files: [
+			"src/__tests__/architecture.test.ts",
+			"src/cli.test.ts",
+			"src/shell/adapters/node-filesystem.test.ts",
+			"src/shell/init.test.ts",
+			"src/shell/self-check.test.ts",
+			"src/shell/state-store.test.ts",
+		],
+		rules: {
+			// Narrow temporary override while we migrate remaining temp-path-heavy tests.
+			"security/detect-non-literal-fs-filename": "off",
 		},
 	},
 	// ============================================================

@@ -10,6 +10,8 @@ async function withTempConfig(yamlContent: string, fn: (filePath: string) => Pro
   await fs.mkdir(tempRoot, { recursive: true });
   const dir = await fs.mkdtemp(path.join(tempRoot, "config-test-"));
   const filePath = path.join(dir, "config.yaml");
+  // Path is constrained to the mkdtemp-created test directory.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   await fs.writeFile(filePath, yamlContent, "utf8");
   try {
     await fn(filePath);

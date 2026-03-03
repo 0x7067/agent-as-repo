@@ -7,6 +7,8 @@ const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const ESLINT_CONFIG_PATH = path.join(ROOT, "eslint.config.mjs");
 
 function getVitestBlock(): string {
+  // Path is fixed to the repository eslint config file.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   const configText = fs.readFileSync(ESLINT_CONFIG_PATH, "utf8");
   const vitestSelector = 'files: ["**/*.test.ts", "**/*.spec.ts"]';
   const selectorIndex = configText.indexOf(vitestSelector);
@@ -24,6 +26,8 @@ function getVitestBlock(): string {
 }
 
 function isRuleDisabled(ruleName: string): boolean {
+  // Path is fixed to the repository eslint config file.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   const configText = fs.readFileSync(ESLINT_CONFIG_PATH, "utf8");
   return configText.includes(`"${ruleName}": "off"`);
 }
@@ -35,6 +39,10 @@ describe("Lint config guardrails", () => {
 
   it("does not disable sonarjs/no-hardcoded-passwords in the global Vitest rules block", () => {
     expect(getVitestBlock().includes('"sonarjs/no-hardcoded-passwords": "off"')).toBe(false);
+  });
+
+  it("does not disable detect-non-literal-fs-filename in the global Vitest rules block", () => {
+    expect(getVitestBlock().includes('"security/detect-non-literal-fs-filename": "off"')).toBe(false);
   });
 
   it("does not disable require-await in the global Vitest rules block", () => {

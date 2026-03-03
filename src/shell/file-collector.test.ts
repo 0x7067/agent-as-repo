@@ -13,7 +13,11 @@ async function withTempRepo(
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "repo-test-"));
   for (const [filePath, content] of Object.entries(files)) {
     const full = path.join(dir, filePath);
+    // Path is constrained under the mkdtemp-created test directory.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     await fs.mkdir(path.dirname(full), { recursive: true });
+    // Path is constrained under the mkdtemp-created test directory.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     await fs.writeFile(full, content, "utf8");
   }
   try {
@@ -117,6 +121,8 @@ describe("collectFiles", () => {
       async (repoPath) => {
         // Simulate an initialized submodule: create .git file (pointer)
         const subGitFile = path.join(repoPath, "libs/my-lib/.git");
+        // Path is constrained under the mkdtemp-created test directory.
+        // eslint-disable-next-line security/detect-non-literal-fs-filename
         await fs.writeFile(subGitFile, "gitdir: ../../.git/modules/my-lib");
 
         const files = await collectFiles(makeConfig(repoPath, { includeSubmodules: true }));

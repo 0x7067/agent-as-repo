@@ -60,6 +60,8 @@ describe("doctor shell checks", () => {
   it("runAllChecks includes config and git checks when config exists", async () => {
     const tempDir = await makeTempDir("doctor-");
     const repoDir = path.join(tempDir, "repo");
+    // Path is constrained under the mkdtemp-created test directory.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     await fs.mkdir(repoDir, { recursive: true });
     const configPath = path.join(tempDir, "config.yaml");
     const config = [
@@ -73,6 +75,8 @@ describe("doctor shell checks", () => {
       "    extensions: [.ts]",
       "    ignore_dirs: [node_modules, .git]",
     ].join("\n");
+    // Path is constrained under the mkdtemp-created test directory.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     await fs.writeFile(configPath, config, "utf8");
 
     delete process.env.LETTA_API_KEY;
@@ -88,6 +92,8 @@ describe("doctor shell checks", () => {
     const tempDir = await makeTempDir("doctor-fix-");
     process.chdir(tempDir);
     const configPath = path.join(tempDir, "config.yaml");
+    // Path is constrained under the mkdtemp-created test directory.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     await fs.writeFile(path.join(tempDir, "config.example.yaml"), "repos: {}\nletta:\n  model: x\n  embedding: y\n", "utf8");
 
     const result = await runDoctorFixes(configPath);
@@ -105,9 +111,13 @@ describe("doctor shell checks", () => {
     const tempDir = await makeTempDir("doctor-");
     process.chdir(tempDir);
     const repoDir = path.join(tempDir, "repo");
+    // Path is constrained under the mkdtemp-created test directory.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     await fs.mkdir(repoDir, { recursive: true });
 
     const configPath = path.join(tempDir, "config.yaml");
+    // Path is constrained under the mkdtemp-created test directory.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     await fs.writeFile(
       configPath,
       [
@@ -147,6 +157,8 @@ describe("doctor shell checks", () => {
         },
       },
     };
+    // Path is constrained under the mkdtemp-created test directory.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     await fs.writeFile(path.join(tempDir, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
 
     const listPassages = vi.fn((agentId: string) => {
