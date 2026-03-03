@@ -207,13 +207,30 @@ export default tseslint.config(
 			...vitestPlugin.configs.recommended.rules,
 			// Tests reuse strings for readability
 			"sonarjs/no-duplicate-string": "off",
-			// Tests often have long setup/assertion blocks
-			"max-lines": "off",
 		},
 		languageOptions: {
 			globals: {
 				...vitestPlugin.environments.env.globals,
 			},
+		},
+	},
+	{
+		files: [
+			"src/cli.test.ts",
+			"src/core/config.test.ts",
+			"src/mcp-server.test.ts",
+			"src/shell/letta-provider.test.ts",
+			"src/shell/openrouter-client.test.ts",
+			"src/shell/self-check.test.ts",
+			"src/shell/state-store.test.ts",
+			"src/shell/sync.test.ts",
+			"src/shell/viking-http.test.ts",
+			"src/shell/viking-provider.test.ts",
+			"src/shell/watch.test.ts",
+		],
+		rules: {
+			// Narrow temporary override while we split long test files.
+			"max-lines": "off",
 		},
 	},
 	// ============================================================
