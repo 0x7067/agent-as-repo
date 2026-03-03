@@ -22,7 +22,7 @@ export function formatExport(data: ExportData): string {
     lines.push(`## ${block.label}`, "", block.value, "");
   }
 
-  lines.push(`## Files (${data.files.length})`, "");
+  lines.push(`## Files (${String(data.files.length)})`, "");
   for (const file of data.files) {
     lines.push(`- \`${file}\``);
   }

@@ -1,6 +1,5 @@
 import * as os from "node:os";
-import * as path from "node:path";
-import type * as readline from "node:readline/promises";
+import path from "node:path";
 import type { FileSystemPort } from "../ports/filesystem.js";
 import { nodeFileSystem } from "./adapters/node-filesystem.js";
 import {
@@ -16,6 +15,10 @@ interface InitResult {
   repoName: string;
 }
 
+interface PromptReader {
+  question(prompt: string): Promise<string>;
+}
+
 export interface RunInitOptions {
   apiKey?: string;
   repoPath?: string;
@@ -24,6 +27,10 @@ export interface RunInitOptions {
   allowPrompts?: boolean;
   cwd?: string;
   fs?: FileSystemPort;
+}
+
+function isProviderType(value: string): value is "letta" | "viking" {
+  return value === "letta" || value === "viking";
 }
 
 /**
@@ -51,7 +58,8 @@ function tildeify(absPath: string): string {
 /**
  * Interactive init flow. Prompts for API key, repo path, confirms settings, writes files.
  */
-export async function runInit(rl: readline.Interface, options: RunInitOptions = {}): Promise<InitResult> {
+// eslint-disable-next-line sonarjs/cognitive-complexity
+export async function runInit(rl: PromptReader, options: RunInitOptions = {}): Promise<InitResult> {
   const {
     apiKey: apiKeyFromFlag,
     repoPath: repoPathFromFlag,
@@ -63,15 +71,21 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
   } = options;
   console.log("repo-expert init — set up your first agent\n");
 
-  const providerType = providerFromFlag
-    ?? (allowPrompts && !assumeYes
-      ? ((await rl.question("Provider [letta/viking] (default: letta): ")).trim().toLowerCase() || "letta")
-      : "letta");
-  if (providerType !== "letta" && providerType !== "viking") {
-    console.error(`Invalid provider "${providerType}". Expected "letta" or "viking".`);
+  let providerTypeCandidate: string | undefined = providerFromFlag;
+  if (providerTypeCandidate === undefined) {
+    if (allowPrompts && !assumeYes) {
+      const providerInput = await rl.question("Provider [letta/viking] (default: letta): ");
+      providerTypeCandidate = providerInput.trim().toLowerCase() || "letta";
+    } else {
+      providerTypeCandidate = "letta";
+    }
+  }
+  if (!isProviderType(providerTypeCandidate)) {
+    console.error(`Invalid provider "${providerTypeCandidate}". Expected "letta" or "viking".`);
     process.exitCode = 1;
     throw new Error("Invalid provider");
   }
+  const providerType = providerTypeCandidate;
 
   const providerApiKeyEnv = providerType === "viking" ? "OPENROUTER_API_KEY" : "LETTA_API_KEY";
   const providerApiKeyPrompt = providerType === "viking"
@@ -141,7 +155,7 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       console.error(`Directory not found: ${resolvedPath}`);
       process.exitCode = 1;
-      throw new Error("Directory not found");
+      throw new Error("Directory not found", { cause: error });
     }
     throw error;
   }
@@ -167,7 +181,7 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
     throw new Error("No code files detected");
   }
 
-  console.log(`  Found ${files.length} files`);
+  console.log(`  Found ${String(files.length)} files`);
   console.log(`  Detected extensions: ${extensions.join(", ") || "(none)"}`);
   console.log(`  Detected ignore dirs: ${ignoreDirs.join(", ") || "(none)"}`);
 
@@ -186,7 +200,10 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
   const descPrompt = defaultDescription
     ? `Description [${defaultDescription}]: `
     : "Description (e.g. \"React Native mobile app\"): ";
-  const descInput = assumeYes ? "" : (allowPrompts ? await rl.question(`\n${descPrompt}`) : "");
+  let descInput = "";
+  if (!assumeYes && allowPrompts) {
+    descInput = await rl.question(`\n${descPrompt}`);
+  }
   const description = descInput.trim() || defaultDescription || `${repoName} repository`;
 
   // 5. Confirm
@@ -197,7 +214,10 @@ export async function runInit(rl: readline.Interface, options: RunInitOptions = 
   console.log(`  Extensions: ${extensions.join(", ")}`);
   console.log(`  Ignore dirs: ${ignoreDirs.join(", ")}`);
 
-  const confirm = assumeYes ? "y" : (allowPrompts ? await rl.question("\nWrite config.yaml? [Y/n] ") : "y");
+  let confirm = "y";
+  if (!assumeYes && allowPrompts) {
+    confirm = await rl.question("\nWrite config.yaml? [Y/n] ");
+  }
   if (confirm.trim().toLowerCase() === "n") {
     console.log("Aborted.");
     process.exitCode = 1;

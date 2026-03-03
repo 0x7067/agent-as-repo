@@ -20,10 +20,13 @@ export async function exportAgent(
     }
   }
 
+  const filesSorted = [...files];
+  filesSorted.sort((a, b) => a.localeCompare(b));
+
   return formatExport({
     repoName,
     agentId,
     blocks: blocks.map((b, i) => ({ label: BLOCK_LABELS[i], value: b.value })),
-    files: [...files].sort(),
+    files: filesSorted,
   });
 }

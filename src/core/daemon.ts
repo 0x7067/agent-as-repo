@@ -1,4 +1,4 @@
-import * as path from "node:path";
+import path from "node:path";
 
 export const PLIST_LABEL = "com.denguinho.repo-expert-watch";
 
@@ -46,9 +46,9 @@ export function generatePlist(config: DaemonConfig | DaemonBinaryConfig): string
 \t<array>
 ${programArgs}
 \t\t<string>--interval</string>
-\t\t<string>${config.intervalSeconds}</string>
+\t\t<string>${String(config.intervalSeconds)}</string>
 \t\t<string>--debounce</string>
-\t\t<string>${config.debounceMs}</string>
+\t\t<string>${String(config.debounceMs)}</string>
 \t\t<string>--config</string>
 \t\t<string>${config.configPath}</string>
 \t</array>

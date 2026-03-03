@@ -70,7 +70,7 @@ export async function loadPassages(
       continue;
     }
     const { sourcePath, passageId } = result.value;
-    if (!passageMap[sourcePath]) {
+    if (!Object.hasOwn(passageMap, sourcePath)) {
       passageMap[sourcePath] = [];
     }
     passageMap[sourcePath].push(passageId);

@@ -1,4 +1,4 @@
-import * as path from "node:path";
+import path from "node:path";
 import yaml from "js-yaml";
 
 /** Extensions to exclude from detection (binary/asset files). */
@@ -32,10 +32,9 @@ export function detectExtensions(files: string[], maxCount = 10): string[] {
     counts.set(ext, (counts.get(ext) ?? 0) + 1);
   }
 
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, maxCount)
-    .map(([ext]) => ext);
+  const ranked = [...counts.entries()];
+  ranked.sort((a, b) => b[1] - a[1]);
+  return ranked.slice(0, maxCount).map(([ext]) => ext);
 }
 
 /**
@@ -59,9 +58,7 @@ export function suggestIgnoreDirs(files: string[]): string[] {
  * Extract a repo name from a filesystem path.
  */
 export function detectRepoName(repoPath: string): string {
-  // Stryker disable next-line Regex: equivalent — path.basename handles trailing slashes natively; the regex only strips what basename would ignore anyway
-  const cleaned = repoPath.replace(/\/+$/, "");
-  return path.basename(cleaned);
+  return path.basename(repoPath);
 }
 
 export interface InitConfig {

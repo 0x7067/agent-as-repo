@@ -12,9 +12,7 @@ export function buildPersona(
   customPersona?: string,
   tools?: string[],
 ): string {
-  const base = customPersona
-    ? customPersona
-    : `I am a codebase expert for the "${repoName}" repository. ${description}.`;
+  const base = customPersona || `I am a codebase expert for the "${repoName}" repository. ${description}.`;
 
   const lines = [
     base,

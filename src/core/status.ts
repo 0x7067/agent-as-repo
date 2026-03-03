@@ -18,13 +18,13 @@ export function formatAgentStatus(data: AgentStatusData): string {
   const lines: string[] = [
     `${data.repoName}:`,
     `  agent: ${data.agentId}`,
-    `  passages: ${data.passageCount}`,
+    `  passages: ${String(data.passageCount)}`,
   ];
 
   if (data.blocks.length > 0) {
     lines.push("  memory blocks:");
     for (const b of data.blocks) {
-      lines.push(`    ${b.label}: ${b.chars}/${b.limit} chars`);
+      lines.push(`    ${b.label}: ${String(b.chars)}/${String(b.limit)} chars`);
     }
   }
 

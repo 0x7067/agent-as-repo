@@ -1,4 +1,4 @@
-import * as path from "node:path";
+import path from "node:path";
 import type { RepoConfig, FileInfo } from "../core/types.js";
 import type { FileSystemPort } from "../ports/filesystem.js";
 import { nodeFileSystem } from "./adapters/node-filesystem.js";

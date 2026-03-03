@@ -1,4 +1,4 @@
-import * as path from "node:path";
+import path from "node:path";
 import { execFileSync } from "node:child_process";
 import type { FileSystemPort } from "../ports/filesystem.js";
 import { nodeFileSystem } from "./adapters/node-filesystem.js";
@@ -26,7 +26,7 @@ function parseNodeMajor(version: string): number | null {
 function defaultRunCommand(cmd: string, args: string[], cwd: string): string {
   return execFileSync(cmd, args, {
     cwd,
-    encoding: "utf-8",
+    encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"],
   }).trim();
 }
@@ -44,21 +44,21 @@ async function readPackageJson(cwd: string, fs: FileSystemPort): Promise<Package
   }
 }
 
-async function checkNodeVersion(minMajor: number): Promise<SelfCheckResult> {
+function checkNodeVersion(minMajor: number): SelfCheckResult {
   const major = parseNodeMajor(process.version);
   if (major === null) {
     return { name: "Node.js", status: "warn", message: `Could not parse Node version (${process.version})` };
   }
   if (major < minMajor) {
-    return { name: "Node.js", status: "fail", message: `Found ${process.version}, requires Node ${minMajor}+` };
+    return { name: "Node.js", status: "fail", message: `Found ${process.version}, requires Node ${String(minMajor)}+` };
   }
   return { name: "Node.js", status: "pass", message: `Found ${process.version}` };
 }
 
-async function checkPnpm(
+function checkPnpm(
   cwd: string,
   runCommand: (cmd: string, args: string[], cwd: string) => string,
-): Promise<SelfCheckResult> {
+): SelfCheckResult {
   try {
     const version = runCommand("pnpm", ["--version"], cwd);
     return { name: "pnpm", status: "pass", message: `Found ${version}` };
@@ -113,11 +113,11 @@ async function checkDependencies(cwd: string, pkg: PackageJsonShape | null, fs: 
 
   if (missing.length > 0) {
     const sample = missing.slice(0, 5).join(", ");
-    const suffix = missing.length > 5 ? ` (+${missing.length - 5} more)` : "";
+    const suffix = missing.length > 5 ? ` (+${String(missing.length - 5)} more)` : "";
     return { name: "dependencies", status: "fail", message: `Missing installed deps: ${sample}${suffix}` };
   }
 
-  return { name: "dependencies", status: "pass", message: `${depNames.length} dependencies installed` };
+  return { name: "dependencies", status: "pass", message: `${String(depNames.length)} dependencies installed` };
 }
 
 export async function runSelfChecks(
@@ -127,12 +127,12 @@ export async function runSelfChecks(
   runCommand: (cmd: string, args: string[], cwd: string) => string = defaultRunCommand,
 ): Promise<SelfCheckResult[]> {
   const packageJson = await readPackageJson(cwd, fs);
-  const results: SelfCheckResult[] = [];
-  results.push(await checkNodeVersion(minNodeMajor));
-  results.push(await checkPnpm(cwd, runCommand));
-  results.push(checkPackageManagerDeclaration(packageJson));
-  results.push(await checkDependencies(cwd, packageJson, fs));
-  return results;
+  return [
+    checkNodeVersion(minNodeMajor),
+    checkPnpm(cwd, runCommand),
+    checkPackageManagerDeclaration(packageJson),
+    await checkDependencies(cwd, packageJson, fs),
+  ];
 }
 
 export function formatSelfChecks(results: SelfCheckResult[]): string {

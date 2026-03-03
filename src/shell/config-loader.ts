@@ -1,5 +1,5 @@
 import * as os from "node:os";
-import * as path from "node:path";
+import path from "node:path";
 import yaml from "js-yaml";
 import { parseConfig } from "../core/config.js";
 import type { Config } from "../core/types.js";

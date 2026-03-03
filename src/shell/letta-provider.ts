@@ -2,6 +2,7 @@ import type { Letta } from "@letta-ai/letta-client";
 import type { Passage as LettaPassage } from "@letta-ai/letta-client/resources/passages.js";
 import type { BlockResponse } from "@letta-ai/letta-client/resources/blocks/blocks.js";
 import type { AssistantMessage, LettaResponse } from "@letta-ai/letta-client/resources/agents/messages.js";
+import { randomInt } from "node:crypto";
 import { buildPersona } from "../core/prompts.js";
 import type {
   AgentProvider,
@@ -50,7 +51,7 @@ function extractAssistantText(message: AssistantMessage): string {
 
   const textParts = content
     .map((part) => {
-      if (typeof part === "object" && part !== null && typeof (part as { text?: unknown }).text === "string") {
+      if (typeof part === "object" && typeof (part as { text?: unknown }).text === "string") {
         return (part as { text: string }).text;
       }
       return "";
@@ -71,7 +72,7 @@ export class LettaProvider implements AgentProvider {
         if (!isTransientError(error) || attempt === maxRetries) throw error;
         const retryAfter = getRetryAfterMs(error);
         const baseDelay = retryAfter ?? this.retryBaseDelay * Math.pow(2, attempt);
-        const jitter = 0.5 + Math.random() * 0.5;
+        const jitter = randomInt(500, 1001) / 1000;
         await new Promise((resolve) => setTimeout(resolve, baseDelay * jitter));
       }
     }
@@ -119,13 +120,14 @@ export class LettaProvider implements AgentProvider {
     const PAGE_SIZE = 1000;
     const all: Passage[] = [];
     let cursor: string | undefined;
+    let hasMore = true;
 
-    while (true) {
+    while (hasMore) {
       const params: { limit: number; after?: string; ascending: boolean } = {
         limit: PAGE_SIZE,
         ascending: true,
       };
-      if (cursor) params.after = cursor;
+      if (cursor !== undefined) params.after = cursor;
 
       const page = await this.withRetry(() =>
         this.client.agents.passages.list(agentId, params),
@@ -134,9 +136,8 @@ export class LettaProvider implements AgentProvider {
       const valid = typedPage.filter((p) => p.id);
       all.push(...valid.map((p) => ({ id: p.id as string, text: p.text })));
 
-      if (typedPage.length < PAGE_SIZE) break;
       cursor = typedPage.at(-1)?.id ?? undefined;
-      if (!cursor) break;
+      hasMore = typedPage.length === PAGE_SIZE && cursor !== undefined;
     }
 
     return all;
@@ -188,7 +189,7 @@ export class LettaProvider implements AgentProvider {
 
     for (let i = resp.messages.length - 1; i >= 0; i--) {
       const msg = resp.messages[i];
-      if (msg?.message_type !== "assistant_message") continue;
+      if (msg.message_type !== "assistant_message") continue;
       const text = extractAssistantText(msg);
       if (text.trim().length > 0) {
         return text;

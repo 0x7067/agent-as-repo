@@ -34,5 +34,5 @@ export function formatSyncLog(
   const from = fromCommit ? fromCommit.slice(0, 7) : "initial";
   const to = toCommit.slice(0, 7);
   const secs = (durationMs / 1000).toFixed(1);
-  return `[${repoName}] synced ${from}..${to} (${filesChanged} files, ${secs}s)`;
+  return `[${repoName}] synced ${from}..${to} (${String(filesChanged)} files, ${secs}s)`;
 }

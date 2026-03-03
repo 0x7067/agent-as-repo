@@ -19,7 +19,7 @@ export const nodeGit: GitPort = {
     // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
     return execFileSync("git", ["--version"], {
       encoding: "utf8",
-      timeout: 5_000,
+      timeout: 5000,
     }).trim();
   },
 

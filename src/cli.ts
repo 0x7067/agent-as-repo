@@ -1,9 +1,10 @@
 #!/usr/bin/env node
+/* eslint-disable max-lines */
 import "dotenv/config";
 import { Command } from "commander";
 import { Letta } from "@letta-ai/letta-client";
-import * as path from "node:path";
-import * as readline from "node:readline/promises";
+import path from "node:path";
+import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { loadConfig } from "./shell/config-loader.js";
@@ -169,7 +170,7 @@ function createProvider(config: Config): AgentProvider {
     }
     const vikingUrl = config.provider.vikingUrl ?? process.env["VIKING_URL"] ?? "http://localhost:1933";
     const vikingApiKey = process.env["VIKING_API_KEY"];
-    const openrouterApiKey = process.env["OPENROUTER_API_KEY"]!;
+    const openrouterApiKey = process.env["OPENROUTER_API_KEY"];
     const viking = new VikingHttpClient(vikingUrl, vikingApiKey);
     const blockStorage = new FilesystemBlockStorage(resolveOpenVikingBlocksDir());
     return new VikingProvider(
@@ -188,20 +189,25 @@ class FakeProvider implements AgentProvider {
   private passagesByAgent: Record<string, { id: string; text: string }[]> = {};
   private blocksByAgent: Record<string, Record<string, { value: string; limit: number }>> = {};
 
-  async createAgent(_params: CreateAgentParams): Promise<{ agentId: string }> {
-    const agentId = `fake-agent-${this.nextAgentId++}`;
+  createAgent(_params: CreateAgentParams): Promise<{ agentId: string }> {
+    const agentId = `fake-agent-${String(this.nextAgentId++)}`;
     this.passagesByAgent[agentId] = [];
     this.blocksByAgent[agentId] = {
       persona: { value: "fake", limit: 5000 },
       architecture: { value: "fake", limit: 5000 },
       conventions: { value: "fake", limit: 5000 },
     };
-    return { agentId };
+    return Promise.resolve({ agentId });
   }
 
-  async deleteAgent(agentId: string): Promise<void> {
-    delete this.passagesByAgent[agentId];
-    delete this.blocksByAgent[agentId];
+  deleteAgent(agentId: string): Promise<void> {
+    this.passagesByAgent = Object.fromEntries(
+      Object.entries(this.passagesByAgent).filter(([existingAgentId]) => existingAgentId !== agentId),
+    );
+    this.blocksByAgent = Object.fromEntries(
+      Object.entries(this.blocksByAgent).filter(([existingAgentId]) => existingAgentId !== agentId),
+    );
+    return Promise.resolve();
   }
 
   async enableSleeptime(_agentId: string): Promise<void> {}
@@ -215,30 +221,36 @@ class FakeProvider implements AgentProvider {
       process.env.REPO_EXPERT_TEST_FAIL_LOAD_ONCE = "0";
       throw new Error("simulated load failure");
     }
-    if (!this.passagesByAgent[agentId]) this.passagesByAgent[agentId] = [];
-    const id = `fake-passage-${this.nextPassageId++}`;
+    if (!Object.hasOwn(this.passagesByAgent, agentId)) this.passagesByAgent[agentId] = [];
+    const id = `fake-passage-${String(this.nextPassageId++)}`;
     this.passagesByAgent[agentId].push({ id, text });
     return id;
   }
 
-  async deletePassage(agentId: string, passageId: string): Promise<void> {
+  deletePassage(agentId: string, passageId: string): Promise<void> {
     const list = this.passagesByAgent[agentId] ?? [];
     this.passagesByAgent[agentId] = list.filter((p) => p.id !== passageId);
+    return Promise.resolve();
   }
 
-  async listPassages(agentId: string): Promise<Array<{ id: string; text: string }>> {
-    return this.passagesByAgent[agentId] ?? [];
+  listPassages(agentId: string): Promise<Array<{ id: string; text: string }>> {
+    return Promise.resolve(this.passagesByAgent[agentId] ?? []);
   }
 
-  async getBlock(agentId: string, label: string): Promise<{ value: string; limit: number }> {
-    return this.blocksByAgent[agentId]?.[label] ?? { value: "", limit: 5000 };
+  getBlock(agentId: string, label: string): Promise<{ value: string; limit: number }> {
+    if (!Object.hasOwn(this.blocksByAgent, agentId) || !Object.hasOwn(this.blocksByAgent[agentId], label)) {
+      return Promise.resolve({ value: "", limit: 5000 });
+    }
+    return Promise.resolve(this.blocksByAgent[agentId][label]);
   }
 
-  async updateBlock(agentId: string, label: string, value: string): Promise<{ value: string; limit: number }> {
-    if (!this.blocksByAgent[agentId]) this.blocksByAgent[agentId] = {};
-    const limit = this.blocksByAgent[agentId][label]?.limit ?? 5000;
+  updateBlock(agentId: string, label: string, value: string): Promise<{ value: string; limit: number }> {
+    if (!Object.hasOwn(this.blocksByAgent, agentId)) this.blocksByAgent[agentId] = {};
+    const limit = Object.hasOwn(this.blocksByAgent[agentId], label)
+      ? this.blocksByAgent[agentId][label].limit
+      : 5000;
     this.blocksByAgent[agentId][label] = { value, limit };
-    return { value, limit };
+    return Promise.resolve({ value, limit });
   }
 
   async sendMessage(_agentId: string, _content: string, _options?: SendMessageOptions): Promise<string> {
@@ -332,7 +344,8 @@ function resolveMcpProviderConfig(baseUrl: string): { providerConfig: McpProvide
 
 function gitHeadCommit(cwd: string): string | null {
   try {
-    return execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+    return execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim();
   } catch {
     return null;
   }
@@ -352,8 +365,9 @@ function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
 
 function whichAll(binary: string): string[] {
   try {
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- which must be resolved from PATH
     const output = execFileSync("which", ["-a", binary], {
-      encoding: "utf-8",
+      encoding: "utf8",
       stdio: ["pipe", "pipe", "pipe"],
     }).trim();
     return output ? output.split("\n").map((line) => line.trim()).filter(Boolean) : [];
@@ -383,8 +397,7 @@ async function resolveNodeExecutable(): Promise<string | null> {
 }
 
 function requireAgent(state: AppState, repoName: string): AgentState | null {
-  const agentInfo = state.agents[repoName];
-  if (!agentInfo) {
+  if (!Object.hasOwn(state.agents, repoName)) {
     if (Object.keys(state.agents).length === 0) {
       console.error(`No agents found. Run "repo-expert setup" to create them.`);
     } else {
@@ -393,7 +406,7 @@ function requireAgent(state: AppState, repoName: string): AgentState | null {
     process.exitCode = 1;
     return null;
   }
-  return agentInfo;
+  return state.agents[repoName];
 }
 
 function parseIntOrDefault(value: string, fallback: number): number {
@@ -437,7 +450,7 @@ function getVikingRuntimeOptionsFromEnv(): VikingRuntimeOptions {
 }
 
 function formatDurationMs(durationMs: number): string {
-  if (durationMs < 1000) return `${durationMs}ms`;
+  if (durationMs < 1000) return `${String(durationMs)}ms`;
   return `${(durationMs / 1000).toFixed(2)}s`;
 }
 
@@ -450,8 +463,8 @@ async function withTimeout<T>(label: string, timeoutMs: number, fn: () => Promis
   try {
     return await Promise.race([
       fn(),
-      new Promise<T>((_, reject) => {
-        timeoutId = setTimeout(() => { reject(new Error(`${label} timed out after ${timeoutMs}ms`)); }, timeoutMs);
+      new Promise<T>((_resolve, reject) => {
+        timeoutId = setTimeout(() => { reject(new Error(`${label} timed out after ${String(timeoutMs)}ms`)); }, timeoutMs);
       }),
     ]);
   } finally {
@@ -469,9 +482,9 @@ async function withTimeoutSignal<T>(
   try {
     return await Promise.race([
       fn(controller.signal),
-      new Promise<T>((_, reject) => {
+      new Promise<T>((_resolve, reject) => {
         timeoutId = setTimeout(() => {
-          const error = new Error(`${label} timed out after ${timeoutMs}ms`);
+          const error = new Error(`${label} timed out after ${String(timeoutMs)}ms`);
           controller.abort(error);
           reject(error);
         }, timeoutMs);
@@ -496,7 +509,9 @@ async function withRetry<T>(
       lastErr = error;
       if (attempt === retries) break;
       const waitMs = 500 * Math.pow(2, attempt);
-      onRetry(`  ${label} failed (attempt ${attempt + 1}/${retries + 1}): ${(error as Error).message}. Retrying in ${waitMs}ms...`);
+      onRetry(
+        `  ${label} failed (attempt ${String(attempt + 1)}/${String(retries + 1)}): ${(error as Error).message}. Retrying in ${String(waitMs)}ms...`,
+      );
       await delay(waitMs);
     }
   }
@@ -504,19 +519,25 @@ async function withRetry<T>(
 }
 
 function printProgress(loaded: number, total: number): void {
-  process.stdout.write(`\r  Loading passages: ${loaded}/${total}`);
+  process.stdout.write(`\r  Loading passages: ${String(loaded)}/${String(total)}`);
 }
 
 function noInputEnabled(): boolean {
-  return process.argv.includes("--no-input") || Boolean(program.opts<ProgramOpts>().noInput);
+  return process.argv.includes("--no-input") || program.opts<ProgramOpts>().noInput === true;
 }
 
 function interactiveInputAvailable(): boolean {
-  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  return process.stdin.isTTY && process.stdout.isTTY;
 }
 
 function readDebugEnabled(argv: string[]): boolean {
   return argv.includes("--debug");
+}
+
+function question(rl: ReadlineInterface, prompt: string): Promise<string> {
+  return new Promise((resolve) => {
+    rl.question(prompt, resolve);
+  });
 }
 
 const ASK_DEFAULT_TIMEOUT_MS = 60_000;
@@ -595,9 +616,9 @@ program
   .option("--repo-path <path>", "Repository path to configure")
   .option("-y, --yes", "Accept defaults and skip confirmation prompts")
   .action(async (opts: InitOpts) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
     try {
-      await runInit(rl, {
+      await runInit({ question: (prompt) => question(rl, prompt) }, {
         apiKey: opts.apiKey,
         repoPath: opts.repoPath,
         provider: opts.provider,
@@ -671,6 +692,7 @@ program
   .option("--bootstrap-retries <n>", "Retries for bootstrap stage", "2")
   .option("--load-timeout-ms <ms>", "Timeout for passage loading stage", "300000")
   .option("--bootstrap-timeout-ms <ms>", "Timeout for bootstrap stage", "120000")
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   .action(async (opts: SetupOpts) => {
     if (opts.resume && opts.reindex) {
       console.error("Choose either --resume or --reindex, not both.");
@@ -695,14 +717,14 @@ program
 
     for (const repoName of repoNames) {
       const repoStart = Date.now();
-      const repoConfig = config.repos[repoName];
-      if (!repoConfig) {
+      if (!Object.hasOwn(config.repos, repoName)) {
         const message = `Repo "${repoName}" not found in config`;
         console.error(message);
         setupResults.push({ repoName, status: "error", error: message, totalMs: Date.now() - repoStart });
         process.exitCode = 1;
         continue;
       }
+      const repoConfig = config.repos[repoName];
 
       const existingAgent = state.agents[repoName];
       const mode = getSetupMode(existingAgent, repoConfig.bootstrapOnCreate, {
@@ -756,11 +778,11 @@ program
           log(`  Collecting files from ${repoConfig.path}...`);
           const files = await collectFiles(repoConfig);
           filesFound = files.length;
-          log(`  Found ${files.length} files`);
+          log(`  Found ${String(files.length)} files`);
 
           const chunks = files.flatMap((f) => rawTextStrategy(f));
           chunksLoaded = chunks.length;
-          log(`  Loading ${chunks.length} passages...`);
+          log(`  Loading ${String(chunks.length)} passages...`);
           const loadResult = await withRetry(
             `loading passages for "${repoName}"`,
             loadRetries,
@@ -773,7 +795,7 @@ program
           );
           if (chunks.length > 0 && !opts.json) process.stdout.write("\n");
           if (loadResult.failedChunks > 0) {
-            warn(`${loadResult.failedChunks}/${chunks.length} chunks failed to load`);
+            warn(`${String(loadResult.failedChunks)}/${String(chunks.length)} chunks failed to load`);
           }
           state = updatePassageMap(state, repoName, loadResult.passages);
           await saveState(STATE_FILE, state);
@@ -788,7 +810,7 @@ program
           await saveState(STATE_FILE, state);
         }
 
-        if (repoConfig.bootstrapOnCreate && (mode === "create" || mode === "resume_full" || mode === "resume_bootstrap" || mode === "reindex_full")) {
+        if (repoConfig.bootstrapOnCreate) {
           const bootstrapStart = Date.now();
           log(`  Bootstrapping...`);
           await withRetry(
@@ -862,7 +884,7 @@ configCommand
       if (opts.json) {
         console.log(JSON.stringify(summary, null, 2));
       } else {
-        console.log(`Config OK: ${summary.repoCount} repo(s) in ${configPath}`);
+        console.log(`Config OK: ${String(summary.repoCount)} repo(s) in ${configPath}`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -879,7 +901,7 @@ program
   .command("ask [repo] [question]")
   .description("Ask an agent a question")
   .option("--all", "Ask all agents and collect responses")
-  .option("--timeout <ms>", "Per-agent timeout for --all (ms)", `${BROADCAST_ASK_DEFAULT_TIMEOUT_MS}`)
+  .option("--timeout <ms>", "Per-agent timeout for --all (ms)", String(BROADCAST_ASK_DEFAULT_TIMEOUT_MS))
   .option("--fast", "Use the fast model from config for this query")
   .option("--fast-model <model>", "Override the fast model for this query")
   .option("--ask-timeout-ms <ms>", "Timeout for single-agent asks (ms)")
@@ -918,7 +940,7 @@ program
       const provider = createProvider(askAllConfig);
       const agents = entries.map(([repoName, agent]) => ({ repoName, agentId: agent.agentId }));
 
-      console.log(`Broadcasting to ${agents.length} agents...`);
+      console.log(`Broadcasting to ${String(agents.length)} agents...`);
       const results = await broadcastAsk(provider, agents, actualQuestion, {
         timeoutMs: parseIntOrDefault(opts.timeout, BROADCAST_ASK_DEFAULT_TIMEOUT_MS),
       });
@@ -969,6 +991,7 @@ program
   .option("--config <path>", "Config file path", "config.yaml")
   .option("--json", "Output sync results as JSON")
   .option("--dry-run", "Preview sync plan without writing state or calling Letta")
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   .action(async (opts: SyncOpts) => {
     const log = opts.json ? (_: string) => {} : (line: string) => { console.log(line); };
     const configPath = path.resolve(opts.config);
@@ -983,14 +1006,14 @@ program
       const agentInfo = requireAgent(state, repoName);
       if (!agentInfo) return;
 
-      const repoConfig = config.repos[repoName];
-      if (!repoConfig) {
+      if (!Object.hasOwn(config.repos, repoName)) {
         const message = `Repo "${repoName}" not found in config`;
         console.error(message);
         syncResults.push({ repoName, status: "error", error: message });
         process.exitCode = 1;
         continue;
       }
+      const repoConfig = config.repos[repoName];
 
       const headCommit = gitHeadCommit(repoConfig.path);
       if (!headCommit && (!opts.dryRun || !opts.full)) {
@@ -1005,7 +1028,7 @@ program
       if (opts.full) {
         const files = await collectFiles(repoConfig);
         changedFiles = files.map((f) => f.path);
-        log(`Syncing "${repoName}" (full re-index, ${changedFiles.length} files)...`);
+        log(`Syncing "${repoName}" (full re-index, ${String(changedFiles.length)} files)...`);
       } else {
         const sinceRef = opts.since ?? agentInfo.lastSyncCommit;
         if (!sinceRef) {
@@ -1016,9 +1039,10 @@ program
 
         let diff: string;
         try {
+          // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
           diff = execFileSync("git", ["diff", "--name-only", `${sinceRef}..HEAD`], {
             cwd: repoConfig.path,
-            encoding: "utf-8",
+            encoding: "utf8",
             stdio: ["pipe", "pipe", "pipe"],
           }).trim();
         } catch {
@@ -1044,7 +1068,7 @@ program
         } else {
           changedFiles = diffPaths.filter((f) => shouldIncludeFile(f, 0, repoConfig));
         }
-        log(`Syncing "${repoName}" (${changedFiles.length} changed files since ${sinceRef.slice(0, 7)})...`);
+        log(`Syncing "${repoName}" (${String(changedFiles.length)} changed files since ${sinceRef.slice(0, 7)})...`);
       }
 
       if (changedFiles.length === 0) {
@@ -1065,7 +1089,7 @@ program
           changedFiles: changedFiles.length,
           headCommit: headCommit ?? "dry-run",
         });
-        log(`  Dry-run: would sync ${changedFiles.length} files.`);
+        log(`  Dry-run: would sync ${String(changedFiles.length)} files.`);
         continue;
       }
 
@@ -1077,9 +1101,12 @@ program
         continue;
       }
 
+      if (provider === null) {
+        throw new Error(`"${repoName}": provider unavailable for non-dry-run sync`);
+      }
       const isTTY = !opts.json && process.stderr.isTTY;
       const result = await syncRepo({
-        provider: provider!,
+        provider,
         agent: agentInfo,
         changedFiles,
         collectFile: async (filePath) => {
@@ -1098,7 +1125,7 @@ program
         onProgress: isTTY
           ? (completed, total, filePath) => {
               const label = filePath.length > 60 ? `...${filePath.slice(-57)}` : filePath;
-              process.stderr.write(`\r  [${completed}/${total}] ${label.padEnd(60)}`);
+              process.stderr.write(`\r  [${String(completed)}/${String(total)}] ${label.padEnd(60)}`);
             }
           : undefined,
       });
@@ -1106,10 +1133,10 @@ program
       if (isTTY) process.stderr.write(`\r${" ".repeat(72)}\r`); // clear progress line
 
       if (result.isFullReIndex) {
-        log(`  Warning: ${changedFiles.length} files changed — consider --full re-index`);
+        log(`  Warning: ${String(changedFiles.length)} files changed — consider --full re-index`);
       }
 
-      log(`  Removed: ${result.filesRemoved} files, Re-indexed: ${result.filesReIndexed} files`);
+      log(`  Removed: ${String(result.filesRemoved)} files, Re-indexed: ${String(result.filesReIndexed)} files`);
 
       state = updateAgentField(state, repoName, { passages: result.passages, lastSyncCommit: result.lastSyncCommit });
       await saveState(STATE_FILE, state);
@@ -1135,6 +1162,7 @@ program
   .description("List all agents")
   .option("--json", "Output agent list as JSON")
   .option("--live", "Fetch live passage counts from Letta (slower)")
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   .action(async (opts: ListOpts) => {
     const state = await loadState(STATE_FILE);
     const entries = Object.entries(state.agents);
@@ -1183,9 +1211,11 @@ program
       const bootstrap = row.bootstrapped ? "yes" : "no";
       if (opts.live) {
         const driftTag = row.drift ? " [drift]" : "";
-        console.log(`  ${row.repoName}: agent=${row.agentId} files=${row.files} passages=${row.passages} server=${row.serverPassages}${driftTag} bootstrapped=${bootstrap}`);
+        console.log(
+          `  ${row.repoName}: agent=${row.agentId} files=${String(row.files)} passages=${String(row.passages)} server=${String(row.serverPassages)}${driftTag} bootstrapped=${bootstrap}`,
+        );
       } else {
-        console.log(`  ${row.repoName}: agent=${row.agentId} files=${row.files} passages=${row.passages} bootstrapped=${bootstrap}`);
+        console.log(`  ${row.repoName}: agent=${row.agentId} files=${String(row.files)} passages=${String(row.passages)} bootstrapped=${bootstrap}`);
       }
     }
   });
@@ -1261,7 +1291,7 @@ program
   .action(async (opts: DestroyOpts) => {
     const state = await loadState(STATE_FILE);
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
-    const existing = repoNames.filter((n) => state.agents[n]);
+    const existing = repoNames.filter((n) => Object.hasOwn(state.agents, n));
 
     if (existing.length === 0) {
       console.log("No agents to destroy.");
@@ -1269,7 +1299,7 @@ program
     }
 
     if (opts.dryRun) {
-      console.log(`Dry-run: would delete ${existing.length} agent(s): ${existing.join(", ")}`);
+      console.log(`Dry-run: would delete ${String(existing.length)} agent(s): ${existing.join(", ")}`);
       return;
     }
 
@@ -1284,8 +1314,8 @@ program
         process.exitCode = 1;
         return;
       }
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      const answer = await rl.question(`Delete ${existing.length} agent(s) (${existing.join(", ")})? [y/N] `);
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await question(rl, `Delete ${String(existing.length)} agent(s) (${existing.join(", ")})? [y/N] `);
       rl.close();
       if (answer.trim().toLowerCase() !== "y") {
         console.log("Aborted.");
@@ -1321,10 +1351,11 @@ program
   .option("--fix", "Delete orphan passages and clean up stale local entries")
   .option("--json", "Output reconcile results as JSON")
   .option("--verbose", "Include full passage ID lists in JSON output")
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   .action(async (opts: ReconcileOpts) => {
     let state = await loadState(STATE_FILE);
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
-    const existing = repoNames.filter((n) => state.agents[n]);
+    const existing = repoNames.filter((n) => Object.hasOwn(state.agents, n));
 
     if (existing.length === 0) {
       console.log('No agents found. Run "repo-expert setup" to create them.');
@@ -1371,14 +1402,14 @@ program
 
     for (const result of results) {
       if (result.inSync) {
-        console.log(`${result.repoName}: in sync (${result.serverPassageCount} passages)`);
+        console.log(`${result.repoName}: in sync (${String(result.serverPassageCount)} passages)`);
       } else {
         console.log(`${result.repoName}: drift detected`);
         if (result.orphanPassageIds.length > 0) {
-          console.log(`  orphan passages (on server, not in local map): ${result.orphanPassageIds.length}`);
+          console.log(`  orphan passages (on server, not in local map): ${String(result.orphanPassageIds.length)}`);
         }
         if (result.missingPassageIds.length > 0) {
-          console.log(`  missing passages (in local map, not on server): ${result.missingPassageIds.length}`);
+          console.log(`  missing passages (in local map, not on server): ${String(result.missingPassageIds.length)}`);
         }
         if (opts.fix) console.log(`  fixed.`);
       }
@@ -1394,7 +1425,7 @@ program
   .action(async (opts: { repo?: string }) => {
     const state = await loadState(STATE_FILE);
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
-    const existing = repoNames.filter((n) => state.agents[n]);
+    const existing = repoNames.filter((n) => Object.hasOwn(state.agents, n));
 
     if (existing.length === 0) {
       console.log("No agents found.");
@@ -1438,7 +1469,7 @@ program
 
     for (const name of repoNames) {
       if (!requireAgent(state, name)) return;
-      if (!config.repos[name]) {
+      if (!Object.hasOwn(config.repos, name)) {
         console.error(`Repo "${name}" not found in config`);
         process.exitCode = 1;
         return;
@@ -1455,7 +1486,7 @@ program
     process.on("SIGTERM", shutdown);
 
     console.log(
-      `Watching ${repoNames.length} repo(s) (poll every ${intervalMs / 1000}s, debounce ${debounceMs}ms). Press Ctrl+C to stop.`,
+      `Watching ${String(repoNames.length)} repo(s) (poll every ${String(intervalMs / 1000)}s, debounce ${String(debounceMs)}ms). Press Ctrl+C to stop.`,
     );
 
     await watchRepos({
@@ -1522,15 +1553,17 @@ program
 
     // Unload existing daemon if present
     try {
+      // eslint-disable-next-line sonarjs/no-os-command-from-path -- launchctl must be resolved from PATH
       execFileSync("launchctl", ["unload", plistPath], { stdio: "pipe" });
     } catch {
       // Not loaded — fine
     }
 
     await fs.mkdir(path.dirname(plistPath), { recursive: true });
-    await fs.writeFile(plistPath, plist, "utf-8");
+    await fs.writeFile(plistPath, plist, "utf8");
     console.log(`Plist written: ${plistPath}`);
 
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- launchctl must be resolved from PATH
     execFileSync("launchctl", ["load", plistPath]);
     console.log("Daemon loaded. Watch is running.");
     console.log(`  Logs: ${logPath}`);
@@ -1553,6 +1586,7 @@ program
     const plistPath = path.join(home, "Library/LaunchAgents", `${PLIST_LABEL}.plist`);
 
     try {
+      // eslint-disable-next-line sonarjs/no-os-command-from-path -- launchctl must be resolved from PATH
       execFileSync("launchctl", ["unload", plistPath], { stdio: "pipe" });
       console.log("Daemon unloaded.");
     } catch {
@@ -1626,7 +1660,7 @@ program
     mcpServers.letta = entry;
     config.mcpServers = mcpServers;
 
-    await fs.writeFile(configFile, JSON.stringify(config, null, 2) + "\n", "utf-8");
+    await fs.writeFile(configFile, JSON.stringify(config, null, 2) + "\n", "utf8");
     console.log(`MCP entry written to ${configFile}`);
     if (warnings.length > 0) {
       console.log("Warnings:");
@@ -1648,23 +1682,22 @@ program
     const mcpServerPath = path.resolve("src/mcp-server.ts");
     const configFile = path.join(home, ".claude.json");
 
-    let config: Record<string, unknown> = {};
-    try {
-      const raw = await fs.readFile(configFile, "utf8");
-      try {
-        config = JSON.parse(raw) as Record<string, unknown>;
-      } catch {
-        console.error(`Failed to parse ${configFile}: invalid JSON.`);
-        process.exitCode = 1;
-        return;
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    const rawConfig = await fs.readFile(configFile, "utf8").catch((error: unknown) => {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
         console.error(`Config file not found: ${configFile}`);
         process.exitCode = 1;
         return;
       }
       throw error;
+    });
+    if (rawConfig === undefined) return;
+    let config: Record<string, unknown>;
+    try {
+      config = JSON.parse(rawConfig) as Record<string, unknown>;
+    } catch {
+      console.error(`Failed to parse ${configFile}: invalid JSON.`);
+      process.exitCode = 1;
+      return;
     }
 
     const mcpServers = (config.mcpServers ?? {}) as Record<string, unknown>;
@@ -1725,7 +1758,7 @@ program
     const targetPath = path.join(installDir, fileName);
 
     await fs.mkdir(installDir, { recursive: true });
-    await fs.writeFile(targetPath, script, "utf-8");
+    await fs.writeFile(targetPath, script, "utf8");
     console.log(`Completion script written to ${targetPath}`);
   });
 
@@ -1734,7 +1767,8 @@ export async function main(argv = process.argv): Promise<void> {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main().catch((error) => {
+  // eslint-disable-next-line unicorn/prefer-top-level-await
+  void main().catch((error: unknown) => {
     if (error instanceof CliUserError || error instanceof StateFileError) {
       console.error(error.message);
       process.exitCode = error instanceof CliUserError ? error.exitCode : 1;
@@ -1749,3 +1783,4 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exitCode = 1;
   });
 }
+/* eslint-enable max-lines */

@@ -90,8 +90,8 @@ export async function broadcastAsk(
       try {
         const response = await Promise.race([
           provider.sendMessage(agentId, question),
-          new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => { reject(new Error(`Agent "${repoName}" timed out after ${timeoutMs}ms`)); }, timeoutMs);
+          new Promise<never>((_resolve, reject) => {
+            timeoutId = setTimeout(() => { reject(new Error(`Agent "${repoName}" timed out after ${String(timeoutMs)}ms`)); }, timeoutMs);
           }),
         ]);
         return { repoName, response, error: null };
@@ -114,7 +114,7 @@ export async function supervisorFanOut(
     config.workerAgentIds.map((id) => provider.sendMessage(id, content)),
   );
 
-  const summary = workerResponses.map((r, i) => `[Agent ${i + 1}]: ${r}`).join("\n\n");
+  const summary = workerResponses.map((r, i) => `[Agent ${String(i + 1)}]: ${r}`).join("\n\n");
   const managerPrompt = `You received the following responses from worker agents:\n\n${summary}\n\nSummarize and synthesize their findings.`;
   return provider.sendMessage(config.managerAgentId, managerPrompt);
 }

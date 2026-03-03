@@ -61,6 +61,25 @@ function isDeletePassageAmbiguousFsError(error: unknown): boolean {
   return message.includes("http 500") && message.includes("/api/v1/fs");
 }
 
+function unknownToMessage(value: unknown): string {
+  if (value instanceof Error) return value.message;
+  if (typeof value === "string") return value;
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint"
+  ) {
+    return String(value);
+  }
+  if (value === null || value === undefined) return "";
+  try {
+    const encoded = JSON.stringify(value);
+    return encoded;
+  } catch {
+    return "";
+  }
+}
+
 export class VikingProvider implements AgentProvider {
   private readonly fallbackModels: string[];
   private readonly requestTimeoutMs: number;
@@ -151,6 +170,7 @@ export class VikingProvider implements AgentProvider {
     }
   }
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   async listPassages(agentId: string): Promise<Passage[]> {
     const uris = await this.viking.listDirectory(`viking://resources/${agentId}/passages/`);
     const readPassage = async (uri: string): Promise<Passage> => {
@@ -166,14 +186,12 @@ export class VikingProvider implements AgentProvider {
     const failedUris: string[] = [];
     let firstError: unknown;
 
-    for (let i = 0; i < settled.length; i++) {
-      const entry = settled[i];
-      if (!entry) continue;
+    for (const [index, entry] of settled.entries()) {
       if (entry.status === "fulfilled") {
         passages.push(entry.value);
         continue;
       }
-      const uri = uris[i];
+      const uri = uris[index];
       if (uri) {
         failedUris.push(uri);
       }
@@ -197,22 +215,25 @@ export class VikingProvider implements AgentProvider {
     }
 
     if (passages.length === 0 && firstError !== undefined) {
-      throw firstError;
+      throw firstError instanceof Error
+        ? firstError
+        : new Error(unknownToMessage(firstError) || "Failed to list passages");
     }
 
     return passages;
   }
 
-  async getBlock(agentId: string, label: string): Promise<MemoryBlock> {
+  getBlock(agentId: string, label: string): Promise<MemoryBlock> {
     const value = this.blockStorage.get(agentId, label);
-    return { value, limit: 5000 };
+    return Promise.resolve({ value, limit: 5000 });
   }
 
-  async updateBlock(agentId: string, label: string, value: string): Promise<MemoryBlock> {
+  updateBlock(agentId: string, label: string, value: string): Promise<MemoryBlock> {
     this.blockStorage.set(agentId, label, value);
-    return { value, limit: 5000 };
+    return Promise.resolve({ value, limit: 5000 });
   }
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   async sendMessage(agentId: string, content: string, options?: SendMessageOptions): Promise<string> {
     const [personaBlock, archBlock, convBlock] = await Promise.all([
       this.getBlock(agentId, "persona"),
@@ -278,8 +299,8 @@ export class VikingProvider implements AgentProvider {
     for (const modelCandidate of modelCandidates) {
       for (let attempt = 0; attempt <= this.maxRetriesPerModel; attempt++) {
         if (options?.signal?.aborted) {
-          const reason = options.signal.reason;
-          throw reason instanceof Error ? reason : new Error(String(reason ?? "Request aborted"));
+          const reason: unknown = options.signal.reason;
+          throw reason instanceof Error ? reason : new Error(unknownToMessage(reason) || "Request aborted");
         }
 
         try {
@@ -296,7 +317,7 @@ export class VikingProvider implements AgentProvider {
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          failureMessages.push(`${modelCandidate} (attempt ${attempt + 1}): ${message}`);
+          failureMessages.push(`${modelCandidate} (attempt ${String(attempt + 1)}): ${message}`);
           if (options?.signal?.aborted || isAbortLikeError(error)) throw error;
           if (!isRetryableModelError(error)) throw error;
           if (attempt >= this.maxRetriesPerModel) break;

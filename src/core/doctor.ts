@@ -22,7 +22,7 @@ export function formatDoctorReport(results: CheckResult[]): string {
   if (issues === 0) {
     lines.push(`\nAll checks passed.`);
   } else {
-    lines.push(`\n${issues} issue${issues > 1 ? "s" : ""} found.`);
+    lines.push(`\n${String(issues)} issue${issues > 1 ? "s" : ""} found.`);
   }
 
   return lines.join("\n");
