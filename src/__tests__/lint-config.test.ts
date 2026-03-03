@@ -49,6 +49,10 @@ describe("Lint config guardrails", () => {
     expect(getVitestBlock().includes('"max-lines": "off"')).toBe(false);
   });
 
+  it("does not disable no-duplicate-string in the global Vitest rules block", () => {
+    expect(getVitestBlock().includes('"sonarjs/no-duplicate-string": "off"')).toBe(false);
+  });
+
   it("does not disable require-await in the global Vitest rules block", () => {
     expect(getVitestBlock().includes('"@typescript-eslint/require-await": "off"')).toBe(false);
   });
