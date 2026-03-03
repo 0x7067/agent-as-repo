@@ -12,11 +12,17 @@ export async function getAgentStatusData(
     ...BLOCK_LABELS.map((label) => provider.getBlock(agent.agentId, label)),
   ]);
 
-  const blockStatuses: BlockStatus[] = blocks.map((b, i) => ({
-    label: BLOCK_LABELS[i],
-    chars: b.value.length,
-    limit: b.limit,
-  }));
+  const blockStatuses: BlockStatus[] = blocks.map((block, index) => {
+    const label = BLOCK_LABELS.at(index);
+    if (label === undefined) {
+      throw new Error(`Unknown block label index ${String(index)}`);
+    }
+    return {
+      label,
+      chars: block.value.length,
+      limit: block.limit,
+    };
+  });
 
   return {
     repoName,

@@ -14,7 +14,10 @@ export async function exportAgent(
 
   const files = new Set<string>();
   for (const p of passages) {
-    const firstLine = p.text.split("\n")[0];
+    const firstLine = p.text.split("\n").at(0);
+    if (firstLine === undefined) {
+      continue;
+    }
     if (firstLine.startsWith(FILE_PREFIX)) {
       files.add(firstLine.slice(FILE_PREFIX.length).replace(/ \(continued\)$/, ""));
     }
@@ -26,7 +29,13 @@ export async function exportAgent(
   return formatExport({
     repoName,
     agentId,
-    blocks: blocks.map((b, i) => ({ label: BLOCK_LABELS[i], value: b.value })),
+    blocks: blocks.map((block, index) => {
+      const label = BLOCK_LABELS.at(index);
+      if (label === undefined) {
+        throw new Error(`Unknown block label index ${String(index)}`);
+      }
+      return { label, value: block.value };
+    }),
     files: filesSorted,
   });
 }

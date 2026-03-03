@@ -75,7 +75,10 @@ function isErrno(error: unknown, code: string): boolean {
 }
 
 function formatStateSchemaError(error: z.ZodError): string {
-  const issue = error.issues[0];
+  const issue = error.issues.at(0);
+  if (issue === undefined) {
+    return "schema error at \"root\": unknown schema validation error";
+  }
   const location = issue.path.length > 0 ? issue.path.join(".") : "root";
   return `schema error at "${location}": ${issue.message}`;
 }

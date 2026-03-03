@@ -20,7 +20,9 @@ interface PackageJsonShape {
 function parseNodeMajor(version: string): number | null {
   const match = /^v(\d+)/.exec(version);
   if (!match) return null;
-  return Number.parseInt(match[1], 10);
+  const major = match.at(1);
+  if (major === undefined) return null;
+  return Number.parseInt(major, 10);
 }
 
 function defaultRunCommand(cmd: string, args: string[], cwd: string): string {

@@ -34,8 +34,7 @@ export function updatePassageMap(
   repoName: string,
   passages: PassageMap,
 ): AppState {
-  if (!Object.hasOwn(state.agents, repoName)) throw new Error(`No agent found for repo: ${repoName}`);
-  const existing = state.agents[repoName];
+  const existing = getAgentOrThrow(state, repoName);
 
   return {
     ...state,
@@ -51,8 +50,7 @@ export function updateAgentField(
   repoName: string,
   updates: Partial<Omit<AgentState, "agentId" | "repoName" | "createdAt">>,
 ): AppState {
-  if (!Object.hasOwn(state.agents, repoName)) throw new Error(`No agent found for repo: ${repoName}`);
-  const existing = state.agents[repoName];
+  const existing = getAgentOrThrow(state, repoName);
 
   return {
     ...state,
@@ -71,4 +69,14 @@ export function removeAgentFromState(
     Object.entries(state.agents).filter(([name]) => name !== repoName),
   ) as Record<string, AgentState>;
   return { ...state, agents };
+}
+
+function getAgentOrThrow(state: AppState, repoName: string): AgentState {
+  const existing = Object.hasOwn(state.agents, repoName)
+    ? state.agents[repoName]
+    : undefined;
+  if (existing === undefined) {
+    throw new Error(`No agent found for repo: ${repoName}`);
+  }
+  return existing;
 }

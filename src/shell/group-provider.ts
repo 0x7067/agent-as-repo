@@ -46,7 +46,10 @@ export async function roundRobin(
   const responses: string[] = [];
   const turns = Math.min(config.maxTurns, config.agentIds.length);
   for (let i = 0; i < turns; i++) {
-    const agentId = config.agentIds[i % config.agentIds.length];
+    const agentId = config.agentIds.at(i % config.agentIds.length);
+    if (agentId === undefined) {
+      throw new Error(`Missing agent ID at turn ${String(i)}`);
+    }
     const resp = await provider.sendMessage(agentId, content);
     responses.push(resp);
   }

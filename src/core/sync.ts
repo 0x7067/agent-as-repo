@@ -15,8 +15,11 @@ export function computeSyncPlan(
 
   const passagesToDelete: string[] = [];
   for (const file of changedFiles) {
-    if (Object.hasOwn(passages, file)) {
-      passagesToDelete.push(...passages[file]);
+    const existingPassages = Object.hasOwn(passages, file)
+      ? passages[file]
+      : undefined;
+    if (existingPassages !== undefined) {
+      passagesToDelete.push(...existingPassages);
     }
   }
 

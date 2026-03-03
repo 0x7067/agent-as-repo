@@ -28,9 +28,7 @@ export interface SyncResult {
 }
 
 function getOldPassageIds(passages: PassageMap, filePath: string): string[] {
-  return Object.hasOwn(passages, filePath)
-    ? passages[filePath]
-    : [];
+  return passages[filePath] ?? [];
 }
 
 function removeFilePassages(passages: PassageMap, filePath: string): PassageMap {

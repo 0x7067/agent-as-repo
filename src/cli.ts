@@ -222,8 +222,12 @@ class FakeProvider implements AgentProvider {
       throw new Error("simulated load failure");
     }
     if (!Object.hasOwn(this.passagesByAgent, agentId)) this.passagesByAgent[agentId] = [];
+    const passages = getOwnRecordValue(this.passagesByAgent, agentId);
+    if (passages === undefined) {
+      throw new Error(`Missing passage store for fake agent ${agentId}`);
+    }
     const id = `fake-passage-${String(this.nextPassageId++)}`;
-    this.passagesByAgent[agentId].push({ id, text });
+    passages.push({ id, text });
     return id;
   }
 
@@ -238,18 +242,26 @@ class FakeProvider implements AgentProvider {
   }
 
   getBlock(agentId: string, label: string): Promise<{ value: string; limit: number }> {
-    if (!Object.hasOwn(this.blocksByAgent, agentId) || !Object.hasOwn(this.blocksByAgent[agentId], label)) {
+    const blocks = getOwnRecordValue(this.blocksByAgent, agentId);
+    if (blocks === undefined) {
       return Promise.resolve({ value: "", limit: 5000 });
     }
-    return Promise.resolve(this.blocksByAgent[agentId][label]);
+    const block = getOwnRecordValue(blocks, label);
+    if (block === undefined) {
+      return Promise.resolve({ value: "", limit: 5000 });
+    }
+    return Promise.resolve(block);
   }
 
   updateBlock(agentId: string, label: string, value: string): Promise<{ value: string; limit: number }> {
     if (!Object.hasOwn(this.blocksByAgent, agentId)) this.blocksByAgent[agentId] = {};
-    const limit = Object.hasOwn(this.blocksByAgent[agentId], label)
-      ? this.blocksByAgent[agentId][label].limit
-      : 5000;
-    this.blocksByAgent[agentId][label] = { value, limit };
+    const blocks = getOwnRecordValue(this.blocksByAgent, agentId);
+    if (blocks === undefined) {
+      throw new Error(`Missing block store for fake agent ${agentId}`);
+    }
+    const existingBlock = getOwnRecordValue(blocks, label);
+    const limit = existingBlock === undefined ? 5000 : existingBlock.limit;
+    blocks[label] = { value, limit };
     return Promise.resolve({ value, limit });
   }
 
@@ -397,7 +409,8 @@ async function resolveNodeExecutable(): Promise<string | null> {
 }
 
 function requireAgent(state: AppState, repoName: string): AgentState | null {
-  if (!Object.hasOwn(state.agents, repoName)) {
+  const agent = getOwnRecordValue(state.agents, repoName);
+  if (agent === undefined) {
     if (Object.keys(state.agents).length === 0) {
       console.error(`No agents found. Run "repo-expert setup" to create them.`);
     } else {
@@ -406,7 +419,51 @@ function requireAgent(state: AppState, repoName: string): AgentState | null {
     process.exitCode = 1;
     return null;
   }
-  return state.agents[repoName];
+  return agent;
+}
+
+function getOwnRecordValue<T>(record: Record<string, T>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+async function confirmDestroy(existing: string[]): Promise<boolean> {
+  if (noInputEnabled()) {
+    console.error("destroy requires confirmation. Use --force with --no-input for non-interactive runs.");
+    process.exitCode = 1;
+    return false;
+  }
+  if (!interactiveInputAvailable()) {
+    console.error("destroy requires an interactive terminal for confirmation. Use --force in non-interactive environments.");
+    process.exitCode = 1;
+    return false;
+  }
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await question(rl, `Delete ${String(existing.length)} agent(s) (${existing.join(", ")})? [y/N] `);
+  rl.close();
+  if (answer.trim().toLowerCase() !== "y") {
+    console.log("Aborted.");
+    return false;
+  }
+  return true;
+}
+
+async function destroyAgents(
+  provider: AgentProvider,
+  state: AppState,
+  existing: string[],
+): Promise<void> {
+  for (const repoName of existing) {
+    const agentInfo = getOwnRecordValue(state.agents, repoName);
+    if (agentInfo === undefined) {
+      continue;
+    }
+    console.log(`Deleting agent for "${repoName}" (${agentInfo.agentId})...`);
+    try {
+      await provider.deleteAgent(agentInfo.agentId);
+    } catch {
+      console.warn(`  Warning: could not delete agent ${agentInfo.agentId} from Letta`);
+    }
+  }
 }
 
 function parseIntOrDefault(value: string, fallback: number): number {
@@ -717,22 +774,29 @@ program
 
     for (const repoName of repoNames) {
       const repoStart = Date.now();
-      if (!Object.hasOwn(config.repos, repoName)) {
+      const repoConfig = getOwnRecordValue(config.repos, repoName);
+      if (repoConfig === undefined) {
         const message = `Repo "${repoName}" not found in config`;
         console.error(message);
         setupResults.push({ repoName, status: "error", error: message, totalMs: Date.now() - repoStart });
         process.exitCode = 1;
         continue;
       }
-      const repoConfig = config.repos[repoName];
 
-      const existingAgent = state.agents[repoName];
+      const existingAgent = getOwnRecordValue(state.agents, repoName);
       const mode = getSetupMode(existingAgent, repoConfig.bootstrapOnCreate, {
         forceResume: Boolean(opts.resume),
         forceReindex: Boolean(opts.reindex),
       });
 
       if (mode === "skip") {
+        if (existingAgent === undefined) {
+          const message = `Agent for "${repoName}" is missing from state`;
+          console.error(message);
+          setupResults.push({ repoName, status: "error", error: message, mode, totalMs: Date.now() - repoStart });
+          process.exitCode = 1;
+          continue;
+        }
         log(`Agent for "${repoName}" already exists (${existingAgent.agentId}), skipping`);
         setupResults.push({
           repoName,
@@ -765,6 +829,9 @@ program
           state = addAgentToState(state, repoName, agentId, new Date().toISOString());
           await saveState(STATE_FILE, state);
         } else {
+          if (existingAgent === undefined) {
+            throw new Error(`Cannot resume setup for "${repoName}": missing existing agent`);
+          }
           agentId = existingAgent.agentId;
           if (mode === "resume_bootstrap") {
             log(`  Resuming bootstrap for existing agent (${agentId})...`);
@@ -1006,14 +1073,14 @@ program
       const agentInfo = requireAgent(state, repoName);
       if (!agentInfo) return;
 
-      if (!Object.hasOwn(config.repos, repoName)) {
+      const repoConfig = getOwnRecordValue(config.repos, repoName);
+      if (repoConfig === undefined) {
         const message = `Repo "${repoName}" not found in config`;
         console.error(message);
         syncResults.push({ repoName, status: "error", error: message });
         process.exitCode = 1;
         continue;
       }
-      const repoConfig = config.repos[repoName];
 
       const headCommit = gitHeadCommit(repoConfig.path);
       if (!headCommit && (!opts.dryRun || !opts.full)) {
@@ -1303,38 +1370,13 @@ program
       return;
     }
 
-    if (!opts.force) {
-      if (noInputEnabled()) {
-        console.error("destroy requires confirmation. Use --force with --no-input for non-interactive runs.");
-        process.exitCode = 1;
-        return;
-      }
-      if (!interactiveInputAvailable()) {
-        console.error("destroy requires an interactive terminal for confirmation. Use --force in non-interactive environments.");
-        process.exitCode = 1;
-        return;
-      }
-      const rl = createInterface({ input: process.stdin, output: process.stdout });
-      const answer = await question(rl, `Delete ${String(existing.length)} agent(s) (${existing.join(", ")})? [y/N] `);
-      rl.close();
-      if (answer.trim().toLowerCase() !== "y") {
-        console.log("Aborted.");
-        return;
-      }
+    if (!opts.force && !(await confirmDestroy(existing))) {
+      return;
     }
 
     const destroyConfig = await loadConfigForProvider(path.resolve("config.yaml"));
     const provider = createProviderForCommands(destroyConfig);
-
-    for (const repoName of existing) {
-      const agentInfo = state.agents[repoName];
-      console.log(`Deleting agent for "${repoName}" (${agentInfo.agentId})...`);
-      try {
-        await provider.deleteAgent(agentInfo.agentId);
-      } catch {
-        console.warn(`  Warning: could not delete agent ${agentInfo.agentId} from Letta`);
-      }
-    }
+    await destroyAgents(provider, state, existing);
 
     let newState = state;
     for (const repoName of existing) {
@@ -1368,7 +1410,10 @@ program
     let anyDrift = false;
 
     for (const repoName of existing) {
-      const agent = state.agents[repoName];
+      const agent = getOwnRecordValue(state.agents, repoName);
+      if (agent === undefined) {
+        continue;
+      }
       const result = await reconcileAgent(provider, agent);
       results.push(result);
       if (!result.inSync) anyDrift = true;
@@ -1377,7 +1422,10 @@ program
     if (opts.fix && anyDrift) {
       for (const result of results) {
         if (result.inSync) continue;
-        const agent = state.agents[result.repoName];
+        const agent = getOwnRecordValue(state.agents, result.repoName);
+        if (agent === undefined) {
+          continue;
+        }
         const updatedPassages = await fixReconcileDrift(provider, agent, result);
         state = updateAgentField(state, result.repoName, { passages: updatedPassages });
       }
@@ -1435,7 +1483,10 @@ program
     const sleeptimeConfig = await loadConfigForProvider(path.resolve("config.yaml"));
     const provider = createProviderForCommands(sleeptimeConfig);
     for (const repoName of existing) {
-      const agentInfo = state.agents[repoName];
+      const agentInfo = getOwnRecordValue(state.agents, repoName);
+      if (agentInfo === undefined) {
+        continue;
+      }
       process.stdout.write(`Enabling sleep-time for "${repoName}" (${agentInfo.agentId})... `);
       try {
         await provider.enableSleeptime(agentInfo.agentId);

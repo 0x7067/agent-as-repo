@@ -141,6 +141,17 @@ function getToolCalls(choice: ChatCompletionResponse["choices"][number]): ToolCa
   return choice.message.tool_calls ?? [];
 }
 
+function getFirstChoiceOrThrow(
+  response: ChatCompletionResponse,
+  context: string,
+): ChatCompletionResponse["choices"][number] {
+  const choice = response.choices.at(0);
+  if (choice === undefined) {
+    throw new Error(`OpenRouter returned no choices (${context})`);
+  }
+  return choice;
+}
+
 function readTerminalAssistantMessage(choice: ChatCompletionResponse["choices"][number]): string {
   const directContent = getMessageContentText(choice.message.content);
   if (directContent.length > 0) {
@@ -202,7 +213,7 @@ async function requestFinalAssistantMessage(params: {
     signal,
     timeoutMs: requestTimeoutMs,
   });
-  const finalChoice = finalResponse.choices[0];
+  const finalChoice = getFirstChoiceOrThrow(finalResponse, "finalization");
   const finalContent = getMessageContentText(finalChoice.message.content);
   debug(`finalization finish_reason=${finalChoice.finish_reason} content_length=${String(finalContent.length)}`);
   if (finalContent.length > 0) {
@@ -254,7 +265,7 @@ export async function toolCallingLoop(params: {
       timeoutMs: requestTimeoutMs,
     });
     steps++;
-    const choice = response.choices[0];
+    const choice = getFirstChoiceOrThrow(response, `step-${String(steps)}`);
     const toolCalls = getToolCalls(choice);
     const elapsedMs = Date.now() - startedAt;
     debug(`step=${String(steps)} model=${model} finish_reason=${choice.finish_reason} tool_calls=${String(toolCalls.length)} elapsed_ms=${String(elapsedMs)}`);

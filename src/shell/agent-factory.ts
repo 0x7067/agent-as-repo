@@ -70,10 +70,14 @@ export async function loadPassages(
       continue;
     }
     const { sourcePath, passageId } = result.value;
-    if (!Object.hasOwn(passageMap, sourcePath)) {
-      passageMap[sourcePath] = [];
+    const filePassages = Object.hasOwn(passageMap, sourcePath)
+      ? passageMap[sourcePath]
+      : undefined;
+    if (filePassages === undefined) {
+      passageMap[sourcePath] = [passageId];
+      continue;
     }
-    passageMap[sourcePath].push(passageId);
+    filePassages.push(passageId);
   }
 
   return { passages: passageMap, failedChunks };

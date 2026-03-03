@@ -188,7 +188,8 @@ export class LettaProvider implements AgentProvider {
     );
 
     for (let i = resp.messages.length - 1; i >= 0; i--) {
-      const msg = resp.messages[i];
+      const msg = resp.messages.at(i);
+      if (msg === undefined) continue;
       if (msg.message_type !== "assistant_message") continue;
       const text = extractAssistantText(msg);
       if (text.trim().length > 0) {
