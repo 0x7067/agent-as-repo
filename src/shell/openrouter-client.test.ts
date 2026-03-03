@@ -46,6 +46,18 @@ function formatCityArg(args: unknown): string {
   return typeof city === "string" ? city : JSON.stringify(city);
 }
 
+function getJsonRequestBody(mockFetch: ReturnType<typeof vi.fn>, callIndex: number): unknown {
+  const call = mockFetch.mock.calls[callIndex] as [string, RequestInit | undefined] | undefined;
+  if (call === undefined) {
+    throw new TypeError(`Expected fetch call at index ${String(callIndex)}`);
+  }
+  const body = call[1]?.body;
+  if (typeof body !== "string") {
+    throw new TypeError(`Expected string request body at fetch call ${String(callIndex)}`);
+  }
+  return JSON.parse(body);
+}
+
 const TOOLS: ToolDefinition[] = [
   {
     type: "function",
@@ -97,7 +109,7 @@ describe("callOpenRouter", () => {
 
     await callOpenRouter([{ role: "user", content: "Hi" }], [], MODEL, API_KEY);
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    const body = getJsonRequestBody(mockFetch, 0) as Record<string, unknown>;
     expect(body).not.toHaveProperty("tools");
   });
 
@@ -228,7 +240,7 @@ describe("toolCallingLoop", () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
 
     // Second call should include the tool result message
-    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body as string) as {
+    const secondBody = getJsonRequestBody(mockFetch, 1) as {
       messages: Array<{ role: string; tool_call_id?: string; content?: string }>;
     };
     const toolMsg = secondBody.messages.find((m: { role: string }) => m.role === "tool");
@@ -278,7 +290,7 @@ describe("toolCallingLoop", () => {
     });
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
-    const finalBody = JSON.parse(mockFetch.mock.calls[1][1].body as string);
+    const finalBody = getJsonRequestBody(mockFetch, 1) as Record<string, unknown>;
     expect(finalBody).not.toHaveProperty("tools");
     expect(result).toBe("Final answer after tool execution.");
   });
@@ -321,7 +333,7 @@ describe("toolCallingLoop", () => {
 
     expect(result).toBe("Done.");
 
-    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body as string) as {
+    const secondBody = getJsonRequestBody(mockFetch, 1) as {
       messages: Array<{ role: string; tool_call_id?: string; content?: string }>;
     };
     const toolMsg = secondBody.messages.find((m: { role: string }) => m.role === "tool");
@@ -345,7 +357,7 @@ describe("toolCallingLoop", () => {
     });
 
     expect(result).toBe("Done despite malformed args.");
-    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body as string) as {
+    const secondBody = getJsonRequestBody(mockFetch, 1) as {
       messages: Array<{ role: string; tool_call_id?: string; content?: string }>;
     };
     const toolMsg = secondBody.messages.find((m: { role: string }) => m.role === "tool");

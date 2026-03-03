@@ -14,6 +14,22 @@ function makeResponse(
   } as unknown as Response;
 }
 
+function getRequestInit(mockFetch: ReturnType<typeof vi.fn>, callIndex: number): RequestInit {
+  const call = mockFetch.mock.calls[callIndex] as [string, RequestInit | undefined] | undefined;
+  if (call === undefined || call[1] === undefined) {
+    throw new Error(`Expected fetch call with RequestInit at index ${String(callIndex)}`);
+  }
+  return call[1];
+}
+
+function getJsonRequestBody(mockFetch: ReturnType<typeof vi.fn>, callIndex: number): unknown {
+  const requestInit = getRequestInit(mockFetch, callIndex);
+  if (typeof requestInit.body !== "string") {
+    throw new TypeError(`Expected JSON string body at fetch call ${String(callIndex)}`);
+  }
+  return JSON.parse(requestInit.body);
+}
+
 describe("VikingHttpClient", () => {
   const BASE_URL = "http://localhost:1933";
   let client: VikingHttpClient;
@@ -66,7 +82,7 @@ describe("VikingHttpClient", () => {
         `${BASE_URL}/api/v1/resources/temp_upload`,
         expect.objectContaining({ method: "POST" })
       );
-      const firstCallBody = mockFetch.mock.calls[0][1].body;
+      const firstCallBody = getRequestInit(mockFetch, 0).body;
       expect(firstCallBody).toBeInstanceOf(FormData);
 
       // Second call: add_resource with temp_path and target
@@ -277,7 +293,7 @@ describe("VikingHttpClient", () => {
     it("defaults limit to 10 when not provided", async () => {
       mockFetch.mockResolvedValue(makeResponse(200, { status: "ok", result: { memories: [], resources: [], skills: [] } }));
       await client.semanticSearch("query", "viking://resources/myrepo");
-      const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+      const body = getJsonRequestBody(mockFetch, 0) as { limit: number };
       expect(body.limit).toBe(10);
     });
 
@@ -330,7 +346,7 @@ describe("VikingHttpClient", () => {
     it("does not send Authorization header when apiKey is not provided", async () => {
       mockFetch.mockResolvedValue(makeResponse(200, { status: "ok", result: {} }));
       await client.mkdir("viking://resources/myrepo/src");
-      const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>;
+      const headers = getRequestInit(mockFetch, 0).headers as Record<string, string>;
       expect(headers).not.toHaveProperty("Authorization");
     });
 

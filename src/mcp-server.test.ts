@@ -57,6 +57,20 @@ function extractToolHandler(server: McpServer, toolName: string): ToolHandler {
   return (args) => tool.handler(args, {});
 }
 
+function parseToolJson(result: ToolResult): unknown {
+  return JSON.parse(result.content[0].text);
+}
+
+function getSendMessageOptions(provider: AgentProvider): { overrideModel?: string; maxSteps?: number } {
+  const firstCall = (provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0] as
+    | [string, string, { overrideModel?: string; maxSteps?: number }]
+    | undefined;
+  if (firstCall === undefined) {
+    throw new Error("Expected provider.sendMessage to have been called at least once");
+  }
+  return firstCall[2];
+}
+
 describe("parsePositiveInt", () => {
   it("returns fallback when raw is undefined", () => {
     expect(parsePositiveInt(undefined, 60_000)).toBe(60_000);
@@ -161,7 +175,7 @@ describe("MCP Server tools", () => {
     it("returns agent summaries", async () => {
       const handler = extractToolHandler(server, "letta_list_agents");
       const result = await handler({});
-      const data = JSON.parse(result.content[0].text);
+      const data = parseToolJson(result) as Array<{ id: string; name: string; description: string | null; model: string }>;
       expect(data).toHaveLength(2);
       expect(data[0]).toEqual({ id: "agent-1", name: "Alice", description: "Test agent", model: "openai/gpt-4.1" });
     });
@@ -179,7 +193,7 @@ describe("MCP Server tools", () => {
     it("returns full agent details", async () => {
       const handler = extractToolHandler(server, "letta_get_agent");
       const result = await handler({ agent_id: "agent-1" });
-      const data = JSON.parse(result.content[0].text);
+      const data = parseToolJson(result) as { id: string; name: string };
       expect(data.id).toBe("agent-1");
       expect(data.name).toBe("Alice");
       expect(admin.getAgent).toHaveBeenCalledWith("agent-1");
@@ -234,16 +248,16 @@ describe("MCP Server tools", () => {
     it("does not set overrideModel when override_model is absent", async () => {
       const handler = extractToolHandler(server, "letta_send_message");
       await handler({ agent_id: "agent-1", content: "Hi" });
-      const callArgs = (provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(callArgs[2]).toEqual({});
-      expect(callArgs[2].overrideModel).toBeUndefined();
+      const options = getSendMessageOptions(provider);
+      expect(options).toEqual({});
+      expect(options.overrideModel).toBeUndefined();
     });
 
     it("does not set maxSteps when max_steps is absent", async () => {
       const handler = extractToolHandler(server, "letta_send_message");
       await handler({ agent_id: "agent-1", content: "Hi" });
-      const callArgs = (provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(callArgs[2].maxSteps).toBeUndefined();
+      const options = getSendMessageOptions(provider);
+      expect(options.maxSteps).toBeUndefined();
     });
 
     it("uses LETTA_ASK_TIMEOUT_MS env var when timeout_ms not provided", async () => {
@@ -290,15 +304,15 @@ describe("MCP Server tools", () => {
     it("options object has no overrideModel property key when override_model is absent", async () => {
       const handler = extractToolHandler(server, "letta_send_message");
       await handler({ agent_id: "agent-1", content: "Hi" });
-      const callArgs = (provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect("overrideModel" in (callArgs[2] as object)).toBe(false);
+      const options = getSendMessageOptions(provider);
+      expect("overrideModel" in options).toBe(false);
     });
 
     it("options object has no maxSteps property key when max_steps is absent", async () => {
       const handler = extractToolHandler(server, "letta_send_message");
       await handler({ agent_id: "agent-1", content: "Hi" });
-      const callArgs = (provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect("maxSteps" in (callArgs[2] as object)).toBe(false);
+      const options = getSendMessageOptions(provider);
+      expect("maxSteps" in options).toBe(false);
     });
 
     it("explicit timeout_ms wins over LETTA_ASK_TIMEOUT_MS env var", async () => {
@@ -367,7 +381,7 @@ describe("MCP Server tools", () => {
     it("returns memory blocks", async () => {
       const handler = extractToolHandler(server, "letta_get_core_memory");
       const result = await handler({ agent_id: "agent-1" });
-      const data = JSON.parse(result.content[0].text);
+      const data = parseToolJson(result) as Array<{ label: string; value: string; limit: number }>;
       expect(data).toEqual([
         { label: "persona", value: "I am Alice.", limit: 5000 },
         { label: "human", value: "Unknown user.", limit: 5000 },
@@ -378,7 +392,7 @@ describe("MCP Server tools", () => {
       (admin.getCoreMemory as ReturnType<typeof vi.fn>).mockResolvedValue([]);
       const handler = extractToolHandler(server, "letta_get_core_memory");
       const result = await handler({ agent_id: "agent-1" });
-      expect(JSON.parse(result.content[0].text)).toEqual([]);
+      expect(parseToolJson(result) as unknown[]).toEqual([]);
     });
 
     it("returns isError on failure", async () => {
@@ -394,7 +408,7 @@ describe("MCP Server tools", () => {
     it("returns search results", async () => {
       const handler = extractToolHandler(server, "letta_search_archival");
       const result = await handler({ agent_id: "agent-1", query: "auth" });
-      const data = JSON.parse(result.content[0].text);
+      const data = parseToolJson(result) as Array<{ id: string; text: string }>;
       expect(data).toEqual([{ id: "p-1", text: "found it" }]);
       expect(admin.searchPassages).toHaveBeenCalledWith("agent-1", "auth", undefined);
     });
@@ -418,7 +432,7 @@ describe("MCP Server tools", () => {
     it("inserts and returns the passage id", async () => {
       const handler = extractToolHandler(server, "letta_insert_passage");
       const result = await handler({ agent_id: "agent-1", text: "new passage" });
-      const data = JSON.parse(result.content[0].text);
+      const data = parseToolJson(result) as { id: string };
       expect(data.id).toBe("p-new");
       expect(provider.storePassage).toHaveBeenCalledWith("agent-1", "new passage");
     });
@@ -453,7 +467,7 @@ describe("MCP Server tools", () => {
     it("updates and returns the block", async () => {
       const handler = extractToolHandler(server, "letta_update_block");
       const result = await handler({ agent_id: "agent-1", label: "persona", value: "Updated." });
-      const data = JSON.parse(result.content[0].text);
+      const data = parseToolJson(result) as { value: string; limit: number };
       expect(data.value).toBe("Updated.");
       expect(data.limit).toBe(5000);
       expect(provider.updateBlock).toHaveBeenCalledWith("agent-1", "persona", "Updated.");

@@ -734,7 +734,7 @@ describe("LettaProvider", () => {
       ]);
       const provider = new LettaProvider(mockClientAs(client));
       await provider.listPassages("agent-abc");
-      const call = client.agents.passages.list.mock.calls[0][1];
+      const call = client.agents.passages.list.mock.calls[0][1] as { after?: string };
       expect(call.after).toBeUndefined();
     });
   });

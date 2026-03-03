@@ -210,9 +210,8 @@ export default tseslint.config(
 			// Test fixtures use fake credentials intentionally
 			// eslint-disable-next-line sonarjs/no-hardcoded-passwords
 			"sonarjs/no-hardcoded-passwords": "off",
-			// Mocking patterns trigger unsafe type errors
+				// Mocking patterns trigger unsafe type errors
 				"@typescript-eslint/no-unsafe-assignment": "off",
-				"@typescript-eslint/no-unsafe-member-access": "off",
 				"unicorn/prefer-module": "off",
 			// Tests often have long setup/assertion blocks
 			"max-lines": "off",

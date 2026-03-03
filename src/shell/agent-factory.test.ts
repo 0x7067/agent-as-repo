@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createRepoAgent, loadPassages } from "./agent-factory.js";
 import type { RepoConfig } from "../core/types.js";
-import type { AgentProvider } from "./provider.js";
+import type { AgentProvider, CreateAgentParams } from "./provider.js";
 import { makeMockProvider as makeBase } from "./__test__/mock-provider.js";
 
 function makeMockProvider(): AgentProvider & { _passageIds: string[] } {
@@ -41,7 +41,7 @@ describe("createRepoAgent", () => {
     expect(result.agentId).toBe("agent-abc");
     expect(result.repoName).toBe("my-app");
 
-    const params = (provider.createAgent as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const [params] = (provider.createAgent as ReturnType<typeof vi.fn>).mock.calls[0] as [CreateAgentParams];
     expect(params.name).toBe("repo-expert-my-app");
     expect(params.model).toBe("openai/gpt-4.1");
     expect(params.embedding).toBe("openai/text-embedding-3-small");
