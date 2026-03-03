@@ -9,16 +9,17 @@ const ALL_COMMANDS = [
 ];
 
 const ALL_FLAGS = ["--help", "--version", "--no-input", "--debug"];
+const DEFAULT_COMMAND_NAME = "repo-expert";
 
 describe("completion", () => {
   it("generates bash completion with command registration", () => {
-    const script = generateCompletionScript("bash", "repo-expert");
+    const script = generateCompletionScript("bash", DEFAULT_COMMAND_NAME);
     expect(script).toContain("complete -F _repo_expert_completion repo-expert");
     expect(script).toContain("setup");
   });
 
   it("bash script includes all commands as space-separated words", () => {
-    const script = generateCompletionScript("bash", "repo-expert");
+    const script = generateCompletionScript("bash", DEFAULT_COMMAND_NAME);
     for (const cmd of ALL_COMMANDS) {
       // Each command must appear as a full word, not just a substring
       expect(script).toContain(cmd);
@@ -28,14 +29,14 @@ describe("completion", () => {
   });
 
   it("bash script includes all global flags", () => {
-    const script = generateCompletionScript("bash", "repo-expert");
+    const script = generateCompletionScript("bash", DEFAULT_COMMAND_NAME);
     for (const flag of ALL_FLAGS) {
       expect(script).toContain(flag);
     }
   });
 
   it("bash script has commands and flags as space-separated words without gaps", () => {
-    const script = generateCompletionScript("bash", "repo-expert");
+    const script = generateCompletionScript("bash", DEFAULT_COMMAND_NAME);
     // Commands are space-separated in the COMPREPLY line
     expect(script).toContain("init doctor");
     // Flags are space-separated
@@ -67,23 +68,23 @@ describe("completion", () => {
   });
 
   it("generates zsh and fish completion scripts", () => {
-    const zsh = generateCompletionScript("zsh", "repo-expert");
-    const fish = generateCompletionScript("fish", "repo-expert");
+    const zsh = generateCompletionScript("zsh", DEFAULT_COMMAND_NAME);
+    const fish = generateCompletionScript("fish", DEFAULT_COMMAND_NAME);
     expect(zsh).toContain("#compdef repo-expert");
     expect(fish).toContain("complete -c repo-expert");
   });
 
   it("fish script includes all commands", () => {
-    const fish = generateCompletionScript("fish", "repo-expert");
+    const fish = generateCompletionScript("fish", DEFAULT_COMMAND_NAME);
     for (const cmd of ALL_COMMANDS) {
       expect(fish).toContain(cmd);
     }
   });
 
   it("returns expected completion file names", () => {
-    expect(completionFileName("bash", "repo-expert")).toBe("repo-expert.bash");
-    expect(completionFileName("zsh", "repo-expert")).toBe("_repo-expert");
-    expect(completionFileName("fish", "repo-expert")).toBe("repo-expert.fish");
+    expect(completionFileName("bash", DEFAULT_COMMAND_NAME)).toBe("repo-expert.bash");
+    expect(completionFileName("zsh", DEFAULT_COMMAND_NAME)).toBe("_repo-expert");
+    expect(completionFileName("fish", DEFAULT_COMMAND_NAME)).toBe("repo-expert.fish");
   });
 
   it("uses default command name when not specified", () => {

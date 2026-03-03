@@ -8,6 +8,7 @@ vi.mock("node:child_process", () => ({
 }));
 
 const mockedExecFileSync = vi.mocked(execFileSync);
+const TEST_REPO_PATH = "/some/path";
 
 describe("nodeGit adapter", () => {
   it("satisfies GitPort interface", () => {
@@ -17,17 +18,17 @@ describe("nodeGit adapter", () => {
 
   it("calls git with correct submodule status args", () => {
     mockedExecFileSync.mockReturnValue("");
-    nodeGit.submoduleStatus("/some/path");
+    nodeGit.submoduleStatus(TEST_REPO_PATH);
     expect(mockedExecFileSync).toHaveBeenCalledWith(
       "git",
       ["submodule", "status"],
-      expect.objectContaining({ cwd: "/some/path" }),
+      expect.objectContaining({ cwd: TEST_REPO_PATH }),
     );
   });
 
   it("passes encoding utf8 to execFileSync", () => {
     mockedExecFileSync.mockReturnValue("");
-    nodeGit.submoduleStatus("/some/path");
+    nodeGit.submoduleStatus(TEST_REPO_PATH);
     expect(mockedExecFileSync).toHaveBeenCalledWith(
       expect.any(String),
       expect.any(Array),
@@ -37,7 +38,7 @@ describe("nodeGit adapter", () => {
 
   it("returns trimmed output from git", () => {
     mockedExecFileSync.mockReturnValue("  some status output  ");
-    const result = nodeGit.submoduleStatus("/some/path");
+    const result = nodeGit.submoduleStatus(TEST_REPO_PATH);
     expect(result).toBe("  some status output  ");
   });
 

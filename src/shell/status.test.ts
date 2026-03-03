@@ -3,6 +3,8 @@ import { getAgentStatus } from "./status.js";
 import type { AgentState } from "../core/types.js";
 import { makeMockProvider } from "./__test__/mock-provider.js";
 
+const CREATED_AT = "2026-01-01T00:00:00.000Z";
+
 function makeStatusProvider() {
   return makeMockProvider({
     listPassages: vi.fn().mockResolvedValue([
@@ -24,10 +26,10 @@ const testAgent: AgentState = {
   agentId: "agent-abc",
   repoName: "my-app",
   passages: { "src/a.ts": ["p-1"], "src/b.ts": ["p-2"] },
-  lastBootstrap: "2026-01-01T00:00:00.000Z",
+  lastBootstrap: CREATED_AT,
   lastSyncCommit: "abc1234",
-  lastSyncAt: "2026-01-01T00:00:00.000Z",
-  createdAt: "2026-01-01T00:00:00.000Z",
+  lastSyncAt: CREATED_AT,
+  createdAt: CREATED_AT,
 };
 
 describe("getAgentStatus", () => {

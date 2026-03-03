@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { FilesystemBlockStorage } from "./block-storage.js";
 
+const NOT_ANALYZED = "Not yet analyzed.";
+
 describe("FilesystemBlockStorage", () => {
   let tmpDir: string;
   let storage: FilesystemBlockStorage;
@@ -52,12 +54,12 @@ describe("FilesystemBlockStorage", () => {
     it("writes all provided blocks", () => {
       storage.init("agent1", {
         persona: "I am the persona",
-        architecture: "Not yet analyzed.",
-        conventions: "Not yet analyzed.",
+        architecture: NOT_ANALYZED,
+        conventions: NOT_ANALYZED,
       });
       expect(storage.get("agent1", "persona")).toBe("I am the persona");
-      expect(storage.get("agent1", "architecture")).toBe("Not yet analyzed.");
-      expect(storage.get("agent1", "conventions")).toBe("Not yet analyzed.");
+      expect(storage.get("agent1", "architecture")).toBe(NOT_ANALYZED);
+      expect(storage.get("agent1", "conventions")).toBe(NOT_ANALYZED);
     });
 
     it("creates agent directory if it does not exist", () => {

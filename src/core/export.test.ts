@@ -1,13 +1,17 @@
 import { describe, it, expect } from "vitest";
 import { formatExport, type ExportData } from "./export.js";
 
+const DEFAULT_REPO_NAME = "my-app";
+const DEFAULT_AGENT_ID = "agent-abc";
+const PERSONA_TEXT = "I am a repo expert.";
+
 describe("formatExport", () => {
   it("formats blocks and file list as markdown", () => {
     const data: ExportData = {
-      repoName: "my-app",
-      agentId: "agent-abc",
+      repoName: DEFAULT_REPO_NAME,
+      agentId: DEFAULT_AGENT_ID,
       blocks: [
-        { label: "persona", value: "I am a repo expert." },
+        { label: "persona", value: PERSONA_TEXT },
         { label: "architecture", value: "Uses React with Redux." },
         { label: "conventions", value: "ESLint + Prettier." },
       ],
@@ -19,7 +23,7 @@ describe("formatExport", () => {
     expect(md).toContain("# my-app");
     expect(md).toContain("Agent: `agent-abc`");
     expect(md).toContain("## persona");
-    expect(md).toContain("I am a repo expert.");
+    expect(md).toContain(PERSONA_TEXT);
     expect(md).toContain("## architecture");
     expect(md).toContain("Uses React with Redux.");
     expect(md).toContain("## conventions");
@@ -31,8 +35,8 @@ describe("formatExport", () => {
 
   it("shows 0 files when list is empty", () => {
     const data: ExportData = {
-      repoName: "my-app",
-      agentId: "agent-abc",
+      repoName: DEFAULT_REPO_NAME,
+      agentId: DEFAULT_AGENT_ID,
       blocks: [],
       files: [],
     };
@@ -44,8 +48,8 @@ describe("formatExport", () => {
 
   it("uses newline as line separator", () => {
     const data: ExportData = {
-      repoName: "my-app",
-      agentId: "agent-abc",
+      repoName: DEFAULT_REPO_NAME,
+      agentId: DEFAULT_AGENT_ID,
       blocks: [],
       files: [],
     };
@@ -86,10 +90,10 @@ describe("formatExport", () => {
 
   it("has blank lines between sections (not replaced with non-blank)", () => {
     const data: ExportData = {
-      repoName: "my-app",
-      agentId: "agent-abc",
+      repoName: DEFAULT_REPO_NAME,
+      agentId: DEFAULT_AGENT_ID,
       blocks: [
-        { label: "persona", value: "I am a repo expert." },
+        { label: "persona", value: PERSONA_TEXT },
       ],
       files: ["src/index.ts"],
     };

@@ -41,6 +41,8 @@ function makeConfig(repoPath: string, overrides?: Partial<RepoConfig>): RepoConf
   };
 }
 
+const FAKE_REPO_PATH = "/fake/path";
+
 describe("collectFiles", () => {
   it("collects files matching extensions", async () => {
     await withTempRepo(
@@ -159,7 +161,7 @@ describe("collectFiles", () => {
       glob: () => Promise.resolve(["src/mock.ts"]),
     };
 
-    const files = await collectFiles(makeConfig("/fake/path"), mockFs);
+    const files = await collectFiles(makeConfig(FAKE_REPO_PATH), mockFs);
     expect(files).toHaveLength(1);
     expect(files[0].path).toBe("src/mock.ts");
     expect(files[0].content).toBe("mock content");
@@ -194,7 +196,7 @@ describe("collectFiles", () => {
       glob: () => Promise.resolve(["src/boundary.ts"]),
     };
 
-    const config = makeConfig("/fake/path", { maxFileSizeKb: 50 });
+    const config = makeConfig(FAKE_REPO_PATH, { maxFileSizeKb: 50 });
     const files = await collectFiles(config, mockFs);
     // sizeKb === maxFileSizeKb (50 <= 50) → should be included
     expect(files).toHaveLength(1);
@@ -213,7 +215,7 @@ describe("collectFiles", () => {
       glob: () => Promise.resolve(["src/too-big.ts"]),
     };
 
-    const config = makeConfig("/fake/path", { maxFileSizeKb: 50 });
+    const config = makeConfig(FAKE_REPO_PATH, { maxFileSizeKb: 50 });
     const files = await collectFiles(config, mockFs);
     // sizeKb > maxFileSizeKb → should be excluded
     expect(files).toHaveLength(0);
