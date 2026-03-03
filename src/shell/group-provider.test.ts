@@ -3,6 +3,9 @@ import { roundRobin, supervisorFanOut, broadcastAsk } from "./group-provider.js"
 import type { RoundRobinConfig, SupervisorConfig } from "./group-provider.js";
 import { makeMockProvider } from "./__test__/mock-provider.js";
 
+const ROUND_ROBIN_QUESTION = "What is this?";
+const SUPERVISOR_QUESTION = "Explain auth";
+
 describe("roundRobin", () => {
   it("sends message to each agent up to maxTurns", async () => {
     const provider = makeMockProvider();
@@ -12,12 +15,12 @@ describe("roundRobin", () => {
       maxTurns: 2,
     };
 
-    const results = await roundRobin(provider, config, "What is this?");
+    const results = await roundRobin(provider, config, ROUND_ROBIN_QUESTION);
 
     expect(results).toHaveLength(2);
     expect(provider.sendMessage).toHaveBeenCalledTimes(2);
-    expect(provider.sendMessage).toHaveBeenCalledWith("a1", "What is this?");
-    expect(provider.sendMessage).toHaveBeenCalledWith("a2", "What is this?");
+    expect(provider.sendMessage).toHaveBeenCalledWith("a1", ROUND_ROBIN_QUESTION);
+    expect(provider.sendMessage).toHaveBeenCalledWith("a2", ROUND_ROBIN_QUESTION);
   });
 
   it("limits turns to number of agents", async () => {
@@ -48,12 +51,12 @@ describe("supervisorFanOut", () => {
       workerAgentIds: ["w1", "w2"],
     };
 
-    const result = await supervisorFanOut(provider, config, "Explain auth");
+    const result = await supervisorFanOut(provider, config, SUPERVISOR_QUESTION);
 
     expect(result).toBe("synthesized summary");
     // Workers called with original content
-    expect(provider.sendMessage).toHaveBeenCalledWith("w1", "Explain auth");
-    expect(provider.sendMessage).toHaveBeenCalledWith("w2", "Explain auth");
+    expect(provider.sendMessage).toHaveBeenCalledWith("w1", SUPERVISOR_QUESTION);
+    expect(provider.sendMessage).toHaveBeenCalledWith("w2", SUPERVISOR_QUESTION);
     // Manager called with synthesized worker responses
     expect(provider.sendMessage).toHaveBeenCalledWith(
       "manager-1",

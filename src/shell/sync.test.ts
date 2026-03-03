@@ -3,6 +3,9 @@ import { syncRepo } from "./sync.js";
 import type { AgentState } from "../core/types.js";
 import { makeMockProvider as makeBase } from "./__test__/mock-provider.js";
 
+const CREATED_AT = "2026-01-01T00:00:00.000Z";
+const NEW_CONTENT = "new content";
+
 function makeMockProvider() {
   let passageCounter = 0;
   return makeBase({
@@ -17,10 +20,10 @@ const testAgent: AgentState = {
     "src/a.ts": ["p-1", "p-2"],
     "src/b.ts": ["p-3"],
   },
-  lastBootstrap: "2026-01-01T00:00:00.000Z",
+  lastBootstrap: CREATED_AT,
   lastSyncCommit: "abc123",
-  lastSyncAt: "2026-01-01T00:00:00.000Z",
-  createdAt: "2026-01-01T00:00:00.000Z",
+  lastSyncAt: CREATED_AT,
+  createdAt: CREATED_AT,
 };
 
 describe("syncRepo", () => {
@@ -40,7 +43,7 @@ describe("syncRepo", () => {
       provider,
       agent: testAgent,
       changedFiles: ["src/a.ts"],
-      collectFile: (path) => Promise.resolve({ path, content: "new content", sizeKb: 1 }),
+      collectFile: (path) => Promise.resolve({ path, content: NEW_CONTENT, sizeKb: 1 }),
       headCommit: "def456",
     });
 
@@ -56,7 +59,7 @@ describe("syncRepo", () => {
       provider,
       agent: testAgent,
       changedFiles: ["src/a.ts"],
-      collectFile: (path) => Promise.resolve({ path, content: "new content", sizeKb: 1 }),
+      collectFile: (path) => Promise.resolve({ path, content: NEW_CONTENT, sizeKb: 1 }),
       headCommit: "def456",
     });
 
@@ -414,7 +417,7 @@ describe("syncRepo", () => {
         provider,
         agent: testAgent,
         changedFiles: ["src/a.ts"],
-        collectFile: (path) => Promise.resolve({ path, content: "new content", sizeKb: 1 }),
+        collectFile: (path) => Promise.resolve({ path, content: NEW_CONTENT, sizeKb: 1 }),
         headCommit: "def456",
       });
 
@@ -433,7 +436,7 @@ describe("syncRepo", () => {
         provider,
         agent: testAgent,
         changedFiles: ["src/a.ts"],
-        collectFile: (path) => Promise.resolve({ path, content: "new content", sizeKb: 1 }),
+        collectFile: (path) => Promise.resolve({ path, content: NEW_CONTENT, sizeKb: 1 }),
         headCommit: "def456",
       });
 

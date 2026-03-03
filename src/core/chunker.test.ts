@@ -1,13 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { chunkFile, rawTextStrategy } from "./chunker.js";
 
+const SMALL_FILE_PATH = "src/index.ts";
+const SMALL_FILE_CONTENT = "const x = 1;";
+
 describe("chunkFile", () => {
   it("returns a single chunk for small content", () => {
-    const chunks = chunkFile("src/index.ts", "const x = 1;");
+    const chunks = chunkFile(SMALL_FILE_PATH, SMALL_FILE_CONTENT);
     expect(chunks).toHaveLength(1);
     expect(chunks[0].text).toContain("FILE: src/index.ts");
-    expect(chunks[0].text).toContain("const x = 1;");
-    expect(chunks[0].sourcePath).toBe("src/index.ts");
+    expect(chunks[0].text).toContain(SMALL_FILE_CONTENT);
+    expect(chunks[0].sourcePath).toBe(SMALL_FILE_PATH);
   });
 
   it("splits large content into multiple chunks", () => {
@@ -139,7 +142,7 @@ describe("chunkFile", () => {
 
 describe("rawTextStrategy", () => {
   it("produces identical output to chunkFile", () => {
-    const file = { path: "src/index.ts", content: "const x = 1;", sizeKb: 0.012 };
+    const file = { path: SMALL_FILE_PATH, content: SMALL_FILE_CONTENT, sizeKb: 0.012 };
     const fromStrategy = rawTextStrategy(file);
     const fromChunkFile = chunkFile(file.path, file.content);
     expect(fromStrategy).toEqual(fromChunkFile);

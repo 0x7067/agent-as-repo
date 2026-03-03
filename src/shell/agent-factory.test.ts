@@ -4,6 +4,12 @@ import type { RepoConfig } from "../core/types.js";
 import type { AgentProvider, CreateAgentParams } from "./provider.js";
 import { makeMockProvider as makeBase } from "./__test__/mock-provider.js";
 
+const FILE_A = "src/a.ts";
+const FILE_B = "src/b.ts";
+const CHUNK_A = "FILE: src/a.ts\ncontent a";
+const CHUNK_A_CONTINUED = "FILE: src/a.ts (continued)\nmore a";
+const CHUNK_B = "FILE: src/b.ts\ncontent b";
+
 function makeMockProvider(): AgentProvider & { _passageIds: string[] } {
   const passageIds: string[] = [];
   let passageCounter = 0;
@@ -55,15 +61,15 @@ describe("loadPassages", () => {
   it("inserts chunks as passages and returns passage map", async () => {
     const provider = makeMockProvider();
     const chunks = [
-      { text: "FILE: src/a.ts\ncontent a", sourcePath: "src/a.ts" },
-      { text: "FILE: src/a.ts (continued)\nmore a", sourcePath: "src/a.ts" },
-      { text: "FILE: src/b.ts\ncontent b", sourcePath: "src/b.ts" },
+      { text: CHUNK_A, sourcePath: FILE_A },
+      { text: CHUNK_A_CONTINUED, sourcePath: FILE_A },
+      { text: CHUNK_B, sourcePath: FILE_B },
     ];
 
     const result = await loadPassages(provider, "agent-abc", chunks);
     expect(provider.storePassage as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(3);
-    expect(result.passages["src/a.ts"]).toHaveLength(2);
-    expect(result.passages["src/b.ts"]).toHaveLength(1);
+    expect(result.passages[FILE_A]).toHaveLength(2);
+    expect(result.passages[FILE_B]).toHaveLength(1);
     expect(result.failedChunks).toBe(0);
   });
 
@@ -85,16 +91,16 @@ describe("loadPassages", () => {
     });
 
     const chunks = [
-      { text: "FILE: src/a.ts\ncontent a", sourcePath: "src/a.ts" },
-      { text: "FILE: src/a.ts (continued)\nmore a", sourcePath: "src/a.ts" },
-      { text: "FILE: src/b.ts\ncontent b", sourcePath: "src/b.ts" },
+      { text: CHUNK_A, sourcePath: FILE_A },
+      { text: CHUNK_A_CONTINUED, sourcePath: FILE_A },
+      { text: CHUNK_B, sourcePath: FILE_B },
     ];
 
     const result = await loadPassages(provider, "agent-abc", chunks, 1);
     expect(result.failedChunks).toBe(1);
     // src/a.ts should have 1 passage (one succeeded, one failed)
-    expect(result.passages["src/a.ts"]).toHaveLength(1);
-    expect(result.passages["src/b.ts"]).toHaveLength(1);
+    expect(result.passages[FILE_A]).toHaveLength(1);
+    expect(result.passages[FILE_B]).toHaveLength(1);
   });
 
   it("calls onProgress callback during loading", async () => {
