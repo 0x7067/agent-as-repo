@@ -82,6 +82,14 @@ function mockClientAs(client: MockLettaClient): ConstructorParameters<typeof Let
   return client as unknown as ConstructorParameters<typeof LettaProvider>[0];
 }
 
+function getCreateAgentCall(client: MockLettaClient): CreateAgentCallArg {
+  const firstCall = client.agents.create.mock.calls[0] as [CreateAgentCallArg] | undefined;
+  if (firstCall === undefined) {
+    throw new Error("Expected client.agents.create to have been called");
+  }
+  return firstCall[0];
+}
+
 const defaultCreateParams = {
   name: "repo-expert-my-app",
   repoName: "my-app",
@@ -109,7 +117,7 @@ describe("LettaProvider", () => {
 
       await provider.createAgent(defaultCreateParams);
 
-      const call: CreateAgentCallArg = client.agents.create.mock.calls[0][0];
+      const call = getCreateAgentCall(client);
       const labels = call.memory_blocks.map((b) => b.label);
       expect(labels).toEqual(["persona", "architecture", "conventions"]);
       for (const block of call.memory_blocks) {
@@ -123,7 +131,7 @@ describe("LettaProvider", () => {
 
       await provider.createAgent({ ...defaultCreateParams, description: "A test repo", persona: "I am custom." });
 
-      const call: CreateAgentCallArg = client.agents.create.mock.calls[0][0];
+      const call = getCreateAgentCall(client);
       const personaBlock = call.memory_blocks.find((b) => b.label === "persona");
       expect(personaBlock?.value).toContain("I am custom.");
     });
@@ -134,7 +142,7 @@ describe("LettaProvider", () => {
 
       await provider.createAgent({ ...defaultCreateParams, tags: [] });
 
-      const call: CreateAgentCallArg = client.agents.create.mock.calls[0][0];
+      const call = getCreateAgentCall(client);
       expect(call.tools).toContain("archival_memory_search");
     });
 
@@ -148,7 +156,7 @@ describe("LettaProvider", () => {
         tools: ["send_message_to_agents_matching_tags"],
       });
 
-      const call: CreateAgentCallArg = client.agents.create.mock.calls[0][0];
+      const call = getCreateAgentCall(client);
       expect(call.tools).toContain("archival_memory_search");
       expect(call.tools).toContain("send_message_to_agents_matching_tags");
     });
@@ -159,7 +167,7 @@ describe("LettaProvider", () => {
 
       await provider.createAgent({ ...defaultCreateParams, tags: ["repo-expert", "mobile"] });
 
-      const call: CreateAgentCallArg = client.agents.create.mock.calls[0][0];
+      const call = getCreateAgentCall(client);
       expect(call.name).toBe("repo-expert-my-app");
       expect(call.model).toBe("openai/gpt-4.1");
       expect(call.embedding).toBe("openai/text-embedding-3-small");
@@ -172,7 +180,7 @@ describe("LettaProvider", () => {
 
       await provider.createAgent(defaultCreateParams);
 
-      const call: CreateAgentCallArg = client.agents.create.mock.calls[0][0];
+      const call = getCreateAgentCall(client);
       expect(call.enable_sleeptime).toBe(true);
     });
   });

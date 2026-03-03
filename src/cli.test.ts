@@ -212,7 +212,14 @@ describe("cli contract", () => {
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
-    const data = JSON.parse(result.stdout);
+    const data = JSON.parse(result.stdout) as Array<{
+      repoName: string;
+      agentId: string;
+      files: number;
+      passages: number;
+      bootstrapped: boolean;
+      lastSyncAt: string | null;
+    }>;
     expect(data).toEqual([
       {
         repoName: "my-app",

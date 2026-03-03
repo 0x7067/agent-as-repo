@@ -87,21 +87,18 @@ describe("callOpenRouter", () => {
       API_KEY
     );
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      `${DEFAULT_BASE_URL}/chat/completions`,
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({
-          Authorization: `Bearer ${API_KEY}`,
-          "Content-Type": "application/json",
-        }),
-        body: JSON.stringify({
-          model: MODEL,
-          messages: [{ role: "user", content: "Hi" }],
-          tools: TOOLS,
-        }),
-      })
-    );
+    const firstCall = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(firstCall[0]).toBe(`${DEFAULT_BASE_URL}/chat/completions`);
+    expect(firstCall[1].method).toBe("POST");
+    expect(firstCall[1].headers).toEqual(expect.objectContaining({
+      Authorization: `Bearer ${API_KEY}`,
+      "Content-Type": "application/json",
+    }));
+    expect(firstCall[1].body).toBe(JSON.stringify({
+      model: MODEL,
+      messages: [{ role: "user", content: "Hi" }],
+      tools: TOOLS,
+    }));
   });
 
   it("omits tools key when tools array is empty", async () => {

@@ -49,14 +49,11 @@ describe("VikingHttpClient", () => {
     it("posts to /api/v1/fs/mkdir with correct body", async () => {
       mockFetch.mockResolvedValue(makeResponse(200, { status: "ok", result: { uri: "viking://resources/myrepo/src" } }));
       await client.mkdir("viking://resources/myrepo/src");
-      expect(mockFetch).toHaveBeenCalledWith(
-        `${BASE_URL}/api/v1/fs/mkdir`,
-        expect.objectContaining({
-          method: "POST",
-          headers: expect.objectContaining({ "Content-Type": "application/json" }),
-          body: JSON.stringify({ uri: "viking://resources/myrepo/src" }),
-        })
-      );
+      const firstCall = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(firstCall[0]).toBe(`${BASE_URL}/api/v1/fs/mkdir`);
+      expect(firstCall[1].method).toBe("POST");
+      expect(firstCall[1].headers).toEqual(expect.objectContaining({ "Content-Type": "application/json" }));
+      expect(firstCall[1].body).toBe(JSON.stringify({ uri: "viking://resources/myrepo/src" }));
     });
 
     it("throws on non-2xx response", async () => {
@@ -86,14 +83,12 @@ describe("VikingHttpClient", () => {
       expect(firstCallBody).toBeInstanceOf(FormData);
 
       // Second call: add_resource with temp_path and target
-      expect(mockFetch).toHaveBeenNthCalledWith(
-        2,
-        `${BASE_URL}/api/v1/resources`,
-        expect.objectContaining({
-          method: "POST",
-          headers: expect.objectContaining({ "Content-Type": "application/json" }),
-          body: JSON.stringify({ temp_path: tempPath, target: "viking://resources/myrepo/src/a.ts", wait: true, strict: false }),
-        })
+      const secondCall = mockFetch.mock.calls[1] as [string, RequestInit];
+      expect(secondCall[0]).toBe(`${BASE_URL}/api/v1/resources`);
+      expect(secondCall[1].method).toBe("POST");
+      expect(secondCall[1].headers).toEqual(expect.objectContaining({ "Content-Type": "application/json" }));
+      expect(secondCall[1].body).toBe(
+        JSON.stringify({ temp_path: tempPath, target: "viking://resources/myrepo/src/a.ts", wait: true, strict: false }),
       );
     });
 
@@ -267,18 +262,16 @@ describe("VikingHttpClient", () => {
 
       const res = await client.semanticSearch("my query", "viking://resources/myrepo", 5);
 
-      expect(mockFetch).toHaveBeenNthCalledWith(
-        1,
-        `${BASE_URL}/api/v1/search/find`,
-        expect.objectContaining({
-          method: "POST",
-          headers: expect.objectContaining({ "Content-Type": "application/json" }),
-          body: JSON.stringify({
-            query: "my query",
-            target_uri: "viking://resources/myrepo",
-            limit: 5,
-          }),
-        })
+      const firstCall = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(firstCall[0]).toBe(`${BASE_URL}/api/v1/search/find`);
+      expect(firstCall[1].method).toBe("POST");
+      expect(firstCall[1].headers).toEqual(expect.objectContaining({ "Content-Type": "application/json" }));
+      expect(firstCall[1].body).toBe(
+        JSON.stringify({
+          query: "my query",
+          target_uri: "viking://resources/myrepo",
+          limit: 5,
+        }),
       );
       expect(mockFetch).toHaveBeenNthCalledWith(
         2,
@@ -333,14 +326,10 @@ describe("VikingHttpClient", () => {
       const clientWithKey = new VikingHttpClient(BASE_URL, "my-secret-key");
       mockFetch.mockResolvedValue(makeResponse(200, { status: "ok", result: {} }));
       await clientWithKey.mkdir("viking://resources/myrepo/src");
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          headers: expect.objectContaining({
-            Authorization: "Bearer my-secret-key",
-          }),
-        })
-      );
+      const firstCall = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(firstCall[1].headers).toEqual(expect.objectContaining({
+        Authorization: "Bearer my-secret-key",
+      }));
     });
 
     it("does not send Authorization header when apiKey is not provided", async () => {

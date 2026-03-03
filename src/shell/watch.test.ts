@@ -1321,10 +1321,12 @@ describe("watchRepos", () => {
       expect.objectContaining({ path: "/tmp/my-app" }),
       expect.objectContaining({ path: "libs/my-lib" }),
     );
-    expect(mockedSyncRepo).toHaveBeenCalledWith(
-      expect.objectContaining({
-        changedFiles: expect.arrayContaining(["libs/my-lib/src/index.ts", "libs/my-lib/src/util.ts"]),
-      }),
+    const syncCall = mockedSyncRepo.mock.calls[0] as [{ changedFiles: string[] }] | undefined;
+    if (syncCall === undefined) {
+      throw new Error("Expected syncRepo to be called");
+    }
+    expect(syncCall[0].changedFiles).toEqual(
+      expect.arrayContaining(["libs/my-lib/src/index.ts", "libs/my-lib/src/util.ts"]),
     );
   });
 });

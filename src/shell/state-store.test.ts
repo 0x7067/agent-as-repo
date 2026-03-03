@@ -255,9 +255,7 @@ describe("state store", () => {
     await withTempDir(async (dir) => {
       const filePath = path.join(dir, "state.json");
       await fs.writeFile(filePath, "bad json {{", "utf8");
-      await expect(loadState(filePath)).rejects.toMatchObject({
-        message: expect.stringContaining("A backup was created at"),
-      });
+      await expect(loadState(filePath)).rejects.toThrow(/A backup was created at/);
     });
   });
 
@@ -515,10 +513,7 @@ describe("state store", () => {
     await withTempDir(async (dir) => {
       const filePath = path.join(dir, "state.json");
       await fs.writeFile(filePath, "definitely { not } json", "utf8");
-      await expect(loadState(filePath)).rejects.toMatchObject({
-        name: "StateFileError",
-        message: expect.stringContaining("Invalid state file"),
-      });
+      await expect(loadState(filePath)).rejects.toThrow(/Invalid state file/);
     });
   });
 
@@ -527,9 +522,7 @@ describe("state store", () => {
       const filePath = path.join(dir, "state.json");
       // A JSON string (not object) produces a ZodError with path=[] (root), triggering || "root" fallback
       await fs.writeFile(filePath, '"not-an-object"', "utf8");
-      await expect(loadState(filePath)).rejects.toMatchObject({
-        message: expect.stringContaining('at "root"'),
-      });
+      await expect(loadState(filePath)).rejects.toThrow(/at "root"/);
     });
   });
 

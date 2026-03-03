@@ -202,16 +202,14 @@ export default tseslint.config(
 		plugins: {
 			vitest: vitestPlugin,
 		},
-		rules: {
-			...vitestPlugin.configs.recommended.rules,
-			// Tests reuse strings for readability
-			"sonarjs/no-duplicate-string": "off",
+			rules: {
+				...vitestPlugin.configs.recommended.rules,
+				// Tests reuse strings for readability
+				"sonarjs/no-duplicate-string": "off",
 			 
 			// Test fixtures use fake credentials intentionally
 			// eslint-disable-next-line sonarjs/no-hardcoded-passwords
 			"sonarjs/no-hardcoded-passwords": "off",
-				// Mocking patterns trigger unsafe type errors
-				"@typescript-eslint/no-unsafe-assignment": "off",
 				"unicorn/prefer-module": "off",
 			// Tests often have long setup/assertion blocks
 			"max-lines": "off",
