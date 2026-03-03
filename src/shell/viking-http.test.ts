@@ -32,6 +32,13 @@ function getJsonRequestBody(mockFetch: ReturnType<typeof vi.fn>, callIndex: numb
 
 describe("VikingHttpClient", () => {
   const BASE_URL = "http://localhost:1933";
+  const REPO_ROOT_URI = "viking://resources/myrepo";
+  const REPO_SRC_URI = `${REPO_ROOT_URI}/src`;
+  const FILE_A_URI = `${REPO_SRC_URI}/a.ts`;
+  const FILE_B_URI = `${REPO_SRC_URI}/b.ts`;
+  const FILE_GONE_URI = `${REPO_SRC_URI}/gone.ts`;
+  const FILE_MISSING_URI = `${REPO_SRC_URI}/missing.ts`;
+  const FILE_CONTENT = "file content";
   let client: VikingHttpClient;
   let mockFetch: ReturnType<typeof vi.fn>;
 
@@ -47,18 +54,18 @@ describe("VikingHttpClient", () => {
 
   describe("mkdir", () => {
     it("posts to /api/v1/fs/mkdir with correct body", async () => {
-      mockFetch.mockResolvedValue(makeResponse(200, { status: "ok", result: { uri: "viking://resources/myrepo/src" } }));
-      await client.mkdir("viking://resources/myrepo/src");
+      mockFetch.mockResolvedValue(makeResponse(200, { status: "ok", result: { uri: REPO_SRC_URI } }));
+      await client.mkdir(REPO_SRC_URI);
       const firstCall = mockFetch.mock.calls[0] as [string, RequestInit];
       expect(firstCall[0]).toBe(`${BASE_URL}/api/v1/fs/mkdir`);
       expect(firstCall[1].method).toBe("POST");
       expect(firstCall[1].headers).toEqual(expect.objectContaining({ "Content-Type": "application/json" }));
-      expect(firstCall[1].body).toBe(JSON.stringify({ uri: "viking://resources/myrepo/src" }));
+      expect(firstCall[1].body).toBe(JSON.stringify({ uri: REPO_SRC_URI }));
     });
 
     it("throws on non-2xx response", async () => {
       mockFetch.mockResolvedValue(makeResponse(500));
-      await expect(client.mkdir("viking://resources/myrepo/src")).rejects.toThrow(
+      await expect(client.mkdir(REPO_SRC_URI)).rejects.toThrow(
         /500.*\/api\/v1\/fs\/mkdir/
       );
     });
@@ -71,7 +78,7 @@ describe("VikingHttpClient", () => {
         .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: { temp_path: tempPath } }))
         .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: {} }));
 
-      await client.writeFile("viking://resources/myrepo/src/a.ts", "content");
+      await client.writeFile(FILE_A_URI, "content");
 
       // First call: temp_upload with FormData
       expect(mockFetch).toHaveBeenNthCalledWith(
@@ -88,14 +95,14 @@ describe("VikingHttpClient", () => {
       expect(secondCall[1].method).toBe("POST");
       expect(secondCall[1].headers).toEqual(expect.objectContaining({ "Content-Type": "application/json" }));
       expect(secondCall[1].body).toBe(
-        JSON.stringify({ temp_path: tempPath, target: "viking://resources/myrepo/src/a.ts", wait: true, strict: false }),
+        JSON.stringify({ temp_path: tempPath, target: FILE_A_URI, wait: true, strict: false }),
       );
     });
 
     it("throws if temp_upload fails", async () => {
       mockFetch.mockResolvedValueOnce(makeResponse(422));
       await expect(
-        client.writeFile("viking://resources/myrepo/src/a.ts", "content")
+        client.writeFile(FILE_A_URI, "content")
       ).rejects.toThrow(/422.*\/api\/v1\/resources\/temp_upload/);
     });
 
@@ -107,38 +114,38 @@ describe("VikingHttpClient", () => {
         .mockResolvedValueOnce(makeResponse(500))
         .mockResolvedValueOnce(makeResponse(500));
       await expect(
-        client.writeFile("viking://resources/myrepo/src/a.ts", "content")
+        client.writeFile(FILE_A_URI, "content")
       ).rejects.toThrow(/500.*\/api\/v1\/resources/);
     });
   });
 
   describe("readFile", () => {
     it("gets /api/v1/content/read?uri=... and returns content string from result field", async () => {
-      mockFetch.mockResolvedValue(makeResponse(200, { status: "ok", result: "file content" }));
-      const result = await client.readFile("viking://resources/myrepo/src/a.ts");
-      const encodedUri = encodeURIComponent("viking://resources/myrepo/src/a.ts");
+      mockFetch.mockResolvedValue(makeResponse(200, { status: "ok", result: FILE_CONTENT }));
+      const result = await client.readFile(FILE_A_URI);
+      const encodedUri = encodeURIComponent(FILE_A_URI);
       expect(mockFetch).toHaveBeenCalledWith(
         `${BASE_URL}/api/v1/content/read?uri=${encodedUri}`,
         expect.objectContaining({ method: "GET" })
       );
-      expect(result).toBe("file content");
+      expect(result).toBe(FILE_CONTENT);
     });
 
     it("retries on transient 5xx response and eventually succeeds", async () => {
       mockFetch
         .mockResolvedValueOnce(makeResponse(500))
-        .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: "file content" }));
+        .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: FILE_CONTENT }));
 
-      const result = await client.readFile("viking://resources/myrepo/src/a.ts");
+      const result = await client.readFile(FILE_A_URI);
 
-      expect(result).toBe("file content");
+      expect(result).toBe(FILE_CONTENT);
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
     it("throws on non-2xx", async () => {
       mockFetch.mockResolvedValue(makeResponse(404));
       await expect(
-        client.readFile("viking://resources/myrepo/src/missing.ts")
+        client.readFile(FILE_MISSING_URI)
       ).rejects.toThrow(/404.*\/api\/v1\/content\/read/);
     });
   });
@@ -146,8 +153,8 @@ describe("VikingHttpClient", () => {
   describe("deleteFile", () => {
     it("deletes /api/v1/fs?uri=...", async () => {
       mockFetch.mockResolvedValue(makeResponse(200, { status: "ok", result: {} }));
-      await client.deleteFile("viking://resources/myrepo/src/a.ts");
-      const encodedUri = encodeURIComponent("viking://resources/myrepo/src/a.ts");
+      await client.deleteFile(FILE_A_URI);
+      const encodedUri = encodeURIComponent(FILE_A_URI);
       expect(mockFetch).toHaveBeenCalledWith(
         `${BASE_URL}/api/v1/fs?uri=${encodedUri}`,
         expect.objectContaining({ method: "DELETE" })
@@ -160,7 +167,7 @@ describe("VikingHttpClient", () => {
         .mockResolvedValueOnce(makeResponse(404));
 
       await expect(
-        client.deleteFile("viking://resources/myrepo/src/gone.ts")
+        client.deleteFile(FILE_GONE_URI)
       ).resolves.toBeUndefined();
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -169,14 +176,14 @@ describe("VikingHttpClient", () => {
     it("swallows 404", async () => {
       mockFetch.mockResolvedValue(makeResponse(404));
       await expect(
-        client.deleteFile("viking://resources/myrepo/src/gone.ts")
+        client.deleteFile(FILE_GONE_URI)
       ).resolves.toBeUndefined();
     });
 
     it("throws on non-404 errors", async () => {
       mockFetch.mockResolvedValue(makeResponse(500));
       await expect(
-        client.deleteFile("viking://resources/myrepo/src/a.ts")
+        client.deleteFile(FILE_A_URI)
       ).rejects.toThrow(/500.*\/api\/v1\/fs/);
     });
   });
@@ -184,35 +191,35 @@ describe("VikingHttpClient", () => {
   describe("listDirectory", () => {
     it("gets /api/v1/fs/ls?uri=...&simple=true and returns string[]", async () => {
       mockFetch.mockResolvedValue(
-        makeResponse(200, { status: "ok", result: ["viking://resources/myrepo/src/a.ts", "viking://resources/myrepo/src/b.ts"] })
+        makeResponse(200, { status: "ok", result: [FILE_A_URI, FILE_B_URI] })
       );
-      const result = await client.listDirectory("viking://resources/myrepo/src");
-      const encodedUri = encodeURIComponent("viking://resources/myrepo/src");
+      const result = await client.listDirectory(REPO_SRC_URI);
+      const encodedUri = encodeURIComponent(REPO_SRC_URI);
       expect(mockFetch).toHaveBeenCalledWith(
         `${BASE_URL}/api/v1/fs/ls?uri=${encodedUri}&simple=true`,
         expect.objectContaining({ method: "GET" })
       );
       expect(result).toEqual([
-        "viking://resources/myrepo/src/a.ts",
-        "viking://resources/myrepo/src/b.ts",
+        FILE_A_URI,
+        FILE_B_URI,
       ]);
     });
 
     it("retries on transient 429 response and succeeds", async () => {
       mockFetch
         .mockResolvedValueOnce(makeResponse(429))
-        .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: ["viking://resources/myrepo/src/a.ts"] }));
+        .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: [FILE_A_URI] }));
 
-      const result = await client.listDirectory("viking://resources/myrepo/src");
+      const result = await client.listDirectory(REPO_SRC_URI);
 
-      expect(result).toEqual(["viking://resources/myrepo/src/a.ts"]);
+      expect(result).toEqual([FILE_A_URI]);
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
     it("throws on non-2xx", async () => {
       mockFetch.mockResolvedValue(makeResponse(500));
       await expect(
-        client.listDirectory("viking://resources/myrepo/src")
+        client.listDirectory(REPO_SRC_URI)
       ).rejects.toThrow(/500.*\/api\/v1\/fs\/ls/);
     });
   });
@@ -220,8 +227,8 @@ describe("VikingHttpClient", () => {
   describe("deleteResource", () => {
     it("deletes /api/v1/fs?uri=...&recursive=true", async () => {
       mockFetch.mockResolvedValue(makeResponse(200, { status: "ok", result: {} }));
-      await client.deleteResource("viking://resources/myrepo");
-      const encodedUri = encodeURIComponent("viking://resources/myrepo");
+      await client.deleteResource(REPO_ROOT_URI);
+      const encodedUri = encodeURIComponent(REPO_ROOT_URI);
       expect(mockFetch).toHaveBeenCalledWith(
         `${BASE_URL}/api/v1/fs?uri=${encodedUri}&recursive=true`,
         expect.objectContaining({ method: "DELETE" })
@@ -231,14 +238,14 @@ describe("VikingHttpClient", () => {
     it("swallows 404", async () => {
       mockFetch.mockResolvedValue(makeResponse(404));
       await expect(
-        client.deleteResource("viking://resources/myrepo")
+        client.deleteResource(REPO_ROOT_URI)
       ).resolves.toBeUndefined();
     });
 
     it("throws on non-404 errors", async () => {
       mockFetch.mockResolvedValue(makeResponse(500));
       await expect(
-        client.deleteResource("viking://resources/myrepo")
+        client.deleteResource(REPO_ROOT_URI)
       ).rejects.toThrow(/500.*\/api\/v1\/fs/);
     });
   });
@@ -250,17 +257,17 @@ describe("VikingHttpClient", () => {
         result: {
           memories: [],
           resources: [
-            { uri: "viking://resources/myrepo/src/a.ts", abstract: "", score: 0.9 },
+            { uri: FILE_A_URI, abstract: "", score: 0.9 },
           ],
           skills: [],
         },
       };
-      const encodedUri = encodeURIComponent("viking://resources/myrepo/src/a.ts");
+      const encodedUri = encodeURIComponent(FILE_A_URI);
       mockFetch
         .mockResolvedValueOnce(makeResponse(200, apiResponse))
         .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: "actual file content" }));
 
-      const res = await client.semanticSearch("my query", "viking://resources/myrepo", 5);
+      const res = await client.semanticSearch("my query", REPO_ROOT_URI, 5);
 
       const firstCall = mockFetch.mock.calls[0] as [string, RequestInit];
       expect(firstCall[0]).toBe(`${BASE_URL}/api/v1/search/find`);
@@ -269,7 +276,7 @@ describe("VikingHttpClient", () => {
       expect(firstCall[1].body).toBe(
         JSON.stringify({
           query: "my query",
-          target_uri: "viking://resources/myrepo",
+          target_uri: REPO_ROOT_URI,
           limit: 5,
         }),
       );
@@ -279,27 +286,27 @@ describe("VikingHttpClient", () => {
         expect.objectContaining({ method: "GET" })
       );
       expect(res).toEqual([
-        { uri: "viking://resources/myrepo/src/a.ts", text: "actual file content", score: 0.9 },
+        { uri: FILE_A_URI, text: "actual file content", score: 0.9 },
       ]);
     });
 
     it("defaults limit to 10 when not provided", async () => {
       mockFetch.mockResolvedValue(makeResponse(200, { status: "ok", result: { memories: [], resources: [], skills: [] } }));
-      await client.semanticSearch("query", "viking://resources/myrepo");
+      await client.semanticSearch("query", REPO_ROOT_URI);
       const body = getJsonRequestBody(mockFetch, 0) as { limit: number };
       expect(body.limit).toBe(10);
     });
 
     it("returns empty array when no resources", async () => {
       mockFetch.mockResolvedValue(makeResponse(200, { status: "ok", result: { memories: [], resources: [], skills: [] } }));
-      const res = await client.semanticSearch("query", "viking://resources/myrepo");
+      const res = await client.semanticSearch("query", REPO_ROOT_URI);
       expect(res).toEqual([]);
     });
 
     it("throws on non-2xx search response", async () => {
       mockFetch.mockResolvedValue(makeResponse(500));
       await expect(
-        client.semanticSearch("query", "viking://resources/myrepo")
+        client.semanticSearch("query", REPO_ROOT_URI)
       ).rejects.toThrow(/500.*\/api\/v1\/search\/find/);
     });
 
@@ -307,7 +314,7 @@ describe("VikingHttpClient", () => {
       const apiResponse = {
         status: "ok",
         result: {
-          resources: [{ uri: "viking://resources/myrepo/src/a.ts", abstract: "", score: 0.9 }],
+          resources: [{ uri: FILE_A_URI, abstract: "", score: 0.9 }],
         },
       };
       mockFetch
@@ -316,7 +323,7 @@ describe("VikingHttpClient", () => {
         .mockResolvedValueOnce(makeResponse(500))
         .mockResolvedValueOnce(makeResponse(500));
       await expect(
-        client.semanticSearch("query", "viking://resources/myrepo")
+        client.semanticSearch("query", REPO_ROOT_URI)
       ).rejects.toThrow(/500.*\/api\/v1\/content\/read/);
     });
   });
@@ -325,7 +332,7 @@ describe("VikingHttpClient", () => {
     it("sends Authorization header when apiKey is provided", async () => {
       const clientWithKey = new VikingHttpClient(BASE_URL, "my-secret-key");
       mockFetch.mockResolvedValue(makeResponse(200, { status: "ok", result: {} }));
-      await clientWithKey.mkdir("viking://resources/myrepo/src");
+      await clientWithKey.mkdir(REPO_SRC_URI);
       const firstCall = mockFetch.mock.calls[0] as [string, RequestInit];
       expect(firstCall[1].headers).toEqual(expect.objectContaining({
         Authorization: "Bearer my-secret-key",
@@ -334,7 +341,7 @@ describe("VikingHttpClient", () => {
 
     it("does not send Authorization header when apiKey is not provided", async () => {
       mockFetch.mockResolvedValue(makeResponse(200, { status: "ok", result: {} }));
-      await client.mkdir("viking://resources/myrepo/src");
+      await client.mkdir(REPO_SRC_URI);
       const headers = getRequestInit(mockFetch, 0).headers as Record<string, string>;
       expect(headers).not.toHaveProperty("Authorization");
     });
@@ -344,7 +351,7 @@ describe("VikingHttpClient", () => {
         .mockRejectedValueOnce(new TypeError("fetch failed"))
         .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: {} }));
 
-      await client.mkdir("viking://resources/myrepo/src");
+      await client.mkdir(REPO_SRC_URI);
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
@@ -363,10 +370,10 @@ describe("VikingHttpClient", () => {
         .mockResolvedValueOnce(makeResponse(500))
         .mockResolvedValueOnce(makeResponse(500));
 
-      await expect(clientWithBreaker.deleteResource("viking://resources/myrepo")).rejects.toThrow(/500/);
-      await expect(clientWithBreaker.deleteResource("viking://resources/myrepo")).rejects.toThrow(/500/);
+      await expect(clientWithBreaker.deleteResource(REPO_ROOT_URI)).rejects.toThrow(/500/);
+      await expect(clientWithBreaker.deleteResource(REPO_ROOT_URI)).rejects.toThrow(/500/);
 
-      await expect(clientWithBreaker.deleteResource("viking://resources/myrepo")).rejects.toThrow(
+      await expect(clientWithBreaker.deleteResource(REPO_ROOT_URI)).rejects.toThrow(
         /Circuit open for Viking fs operations/,
       );
       expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -384,15 +391,15 @@ describe("VikingHttpClient", () => {
       });
 
       mockFetch.mockResolvedValueOnce(makeResponse(500));
-      await expect(clientWithBreaker.listDirectory("viking://resources/myrepo")).rejects.toThrow(/500/);
+      await expect(clientWithBreaker.listDirectory(REPO_ROOT_URI)).rejects.toThrow(/500/);
 
-      await expect(clientWithBreaker.listDirectory("viking://resources/myrepo")).rejects.toThrow(
+      await expect(clientWithBreaker.listDirectory(REPO_ROOT_URI)).rejects.toThrow(
         /Circuit open for Viking fs operations/,
       );
 
       vi.advanceTimersByTime(1001);
       mockFetch.mockResolvedValueOnce(makeResponse(200, { status: "ok", result: [] }));
-      await expect(clientWithBreaker.listDirectory("viking://resources/myrepo")).resolves.toEqual([]);
+      await expect(clientWithBreaker.listDirectory(REPO_ROOT_URI)).resolves.toEqual([]);
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
@@ -407,11 +414,11 @@ describe("VikingHttpClient", () => {
 
       mockFetch
         .mockResolvedValueOnce(makeResponse(500))
-        .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: { uri: "viking://resources/myrepo/src" } }));
+        .mockResolvedValueOnce(makeResponse(200, { status: "ok", result: { uri: REPO_SRC_URI } }));
 
-      await expect(clientWithBreaker.readFile("viking://resources/myrepo/src/a.ts")).rejects.toThrow(/500/);
-      await expect(clientWithBreaker.mkdir("viking://resources/myrepo/src")).resolves.toBeUndefined();
-      await expect(clientWithBreaker.readFile("viking://resources/myrepo/src/a.ts")).rejects.toThrow(
+      await expect(clientWithBreaker.readFile(FILE_A_URI)).rejects.toThrow(/500/);
+      await expect(clientWithBreaker.mkdir(REPO_SRC_URI)).resolves.toBeUndefined();
+      await expect(clientWithBreaker.readFile(FILE_A_URI)).rejects.toThrow(
         /Circuit open for Viking content operations/,
       );
 

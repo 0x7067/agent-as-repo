@@ -239,7 +239,6 @@ export default tseslint.config(
 			"src/shell/letta-provider.test.ts",
 			"src/shell/self-check.test.ts",
 			"src/shell/state-store.test.ts",
-			"src/shell/viking-http.test.ts",
 			"src/shell/viking-provider.test.ts",
 			"src/shell/watch.test.ts",
 		],
