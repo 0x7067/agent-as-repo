@@ -26,7 +26,7 @@ Persistent AI agents that act as long-term memory for your git repositories. Unl
 
 ## MCP Server
 
-Expose Letta agents to Claude Code, Cursor, or Codex via MCP (8 typed tools). See [docs/mcp-setup.md](docs/mcp-setup.md) for configuration.
+Expose Letta and Viking agents to Claude Code, Cursor, or Codex via MCP (10 typed tools, including unified `agent_list`/`agent_call`). See [docs/mcp-setup.md](docs/mcp-setup.md) for configuration.
 
 ```bash
 pnpm repo-expert mcp-install  # writes entry to ~/.claude.json

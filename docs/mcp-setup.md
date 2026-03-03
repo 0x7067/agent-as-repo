@@ -1,6 +1,6 @@
-# Exposing Letta Agents via MCP
+# Exposing Letta and Viking Agents via MCP
 
-This repo includes a built-in MCP server (`src/mcp-server.ts`) that exposes 8 tightly-typed Letta tools over stdio. No external packages needed beyond `tsx` (dev dependency).
+This repo includes a built-in MCP server (`src/mcp-server.ts`) that exposes 10 tightly-typed tools over stdio, including unified cross-provider tools. No external packages needed beyond `tsx` (dev dependency).
 
 ## Why this wrapper exists
 
@@ -8,7 +8,7 @@ The official `letta-mcp` server exposes hub-style tools where a single `operatio
 
 ## Prerequisites
 
-- Letta Cloud API key (`LETTA_API_KEY`)
+- Letta Cloud API key (`LETTA_API_KEY`) and/or OpenRouter API key (`OPENROUTER_API_KEY`)
 - `tsx` installed (already a dev dependency of this repo)
 
 ## Configure for Claude Code
@@ -73,7 +73,9 @@ Add to `.cursor/mcp.json` in your project root:
 
 | Tool | Params | Description |
 |------|--------|-------------|
-| `letta_list_agents` | _(none)_ | List all agents |
+| `agent_list` | _(none)_ | List agents from all configured providers (`letta` + `viking`) with namespaced IDs |
+| `agent_call` | `agent_id`, `content`, `override_model?`, `timeout_ms?`, `max_steps?` | Send message to namespaced `agent_id` (`letta:<id>` or `viking:<id>`) |
+| `letta_list_agents` | _(none)_ | Legacy compatibility list tool (primary provider) |
 | `letta_get_agent` | `agent_id` | Full agent details |
 | `letta_send_message` | `agent_id`, `content`, `override_model?`, `timeout_ms?`, `max_steps?` | Send message, get response |
 | `letta_get_core_memory` | `agent_id` | All memory blocks |
@@ -134,7 +136,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
   | LETTA_BASE_URL=https://api.letta.com LETTA_API_KEY=<your-key> npx tsx src/mcp-server.ts
 ```
 
-Should return `serverInfo: { name: "letta-tools" }` with 8 tools.
+Should return `serverInfo: { name: "letta-tools" }` with 10 tools.
 
 ## Troubleshooting
 

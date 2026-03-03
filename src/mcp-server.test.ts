@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { registerTools, parsePositiveInt, withTimeout } from "./mcp-server.js";
+import { parseNamespacedAgentId, registerTools, registerUnifiedTools, parsePositiveInt, withTimeout } from "./mcp-server.js";
 import type { AgentProvider } from "./shell/provider.js";
 import type { AdminPort } from "./ports/admin.js";
 
@@ -466,5 +466,123 @@ describe("MCP Server tools", () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toBe("not found");
     });
+  });
+});
+
+describe("Unified MCP tools", () => {
+  it("parses namespaced agent IDs", () => {
+    expect(parseNamespacedAgentId("letta:agent-1")).toEqual({ provider: "letta", agentId: "agent-1" });
+    expect(parseNamespacedAgentId("viking:repo-a")).toEqual({ provider: "viking", agentId: "repo-a" });
+  });
+
+  it("rejects malformed namespaced agent IDs", () => {
+    expect(() => parseNamespacedAgentId("agent-1")).toThrow("must be namespaced");
+    expect(() => parseNamespacedAgentId("foo:agent-1")).toThrow("Unsupported provider prefix");
+    expect(() => parseNamespacedAgentId("letta:")).toThrow("must be namespaced");
+  });
+
+  it("agent_list returns flat namespaced list with provider metadata", async () => {
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    const lettaProvider = makeMockProvider();
+    const vikingProvider = makeMockProvider();
+    const lettaAdmin = makeMockAdmin();
+    const vikingAdmin = makeMockAdmin();
+    (vikingAdmin.listAgents as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: "repo-a", name: "Repo A", description: null, model: null },
+    ]);
+    registerUnifiedTools(server, {
+      providers: {
+        letta: { provider: lettaProvider, admin: lettaAdmin },
+        viking: { provider: vikingProvider, admin: vikingAdmin },
+      },
+      bootstrapErrors: {},
+    });
+
+    const handler = extractToolHandler(server, "agent_list");
+    const result = await handler({});
+    const data = JSON.parse(result.content[0].text) as {
+      agents: Array<{ id: string; provider: string; provider_agent_id: string }>;
+    };
+
+    expect(data.agents).toEqual(
+      expect.arrayContaining([
+        { id: "letta:agent-1", provider: "letta", provider_agent_id: "agent-1", name: "Alice", description: "Test agent", model: "openai/gpt-4.1" },
+        { id: "letta:agent-2", provider: "letta", provider_agent_id: "agent-2", name: "Bob", description: null, model: "openai/gpt-4.1-mini" },
+        { id: "viking:repo-a", provider: "viking", provider_agent_id: "repo-a", name: "Repo A", description: null, model: null },
+      ]),
+    );
+  });
+
+  it("agent_list returns partial results with per-provider errors", async () => {
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    const lettaProvider = makeMockProvider();
+    const vikingProvider = makeMockProvider();
+    const lettaAdmin = makeMockAdmin();
+    const vikingAdmin = makeMockAdmin();
+    (vikingAdmin.listAgents as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("viking down"));
+
+    registerUnifiedTools(server, {
+      providers: {
+        letta: { provider: lettaProvider, admin: lettaAdmin },
+        viking: { provider: vikingProvider, admin: vikingAdmin },
+      },
+      bootstrapErrors: {},
+    });
+
+    const handler = extractToolHandler(server, "agent_list");
+    const result = await handler({});
+    const data = JSON.parse(result.content[0].text) as {
+      agents: Array<{ id: string }>;
+      errors?: Array<{ provider: string; error: string }>;
+    };
+
+    expect(data.agents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "letta:agent-1" }),
+        expect.objectContaining({ id: "letta:agent-2" }),
+      ]),
+    );
+    expect(data.errors).toEqual([{ provider: "viking", error: "viking down" }]);
+  });
+
+  it("agent_call routes message by provider namespace", async () => {
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    const lettaProvider = makeMockProvider();
+    const vikingProvider = makeMockProvider();
+    (lettaProvider.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue("from letta");
+    (vikingProvider.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue("from viking");
+    registerUnifiedTools(server, {
+      providers: {
+        letta: { provider: lettaProvider, admin: makeMockAdmin() },
+        viking: { provider: vikingProvider, admin: makeMockAdmin() },
+      },
+      bootstrapErrors: {},
+    });
+
+    const handler = extractToolHandler(server, "agent_call");
+    const lettaResult = await handler({ agent_id: "letta:agent-1", content: "ping" });
+    const vikingResult = await handler({ agent_id: "viking:repo-a", content: "ping" });
+
+    expect(lettaResult.content[0].text).toBe("from letta");
+    expect(vikingResult.content[0].text).toBe("from viking");
+    expect(lettaProvider.sendMessage).toHaveBeenCalledWith("agent-1", "ping", {});
+    expect(vikingProvider.sendMessage).toHaveBeenCalledWith("repo-a", "ping", {});
+  });
+
+  it("agent_call returns error when provider is not configured", async () => {
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    const lettaProvider = makeMockProvider();
+    registerUnifiedTools(server, {
+      providers: {
+        letta: { provider: lettaProvider, admin: makeMockAdmin() },
+      },
+      bootstrapErrors: {},
+    });
+
+    const handler = extractToolHandler(server, "agent_call");
+    const result = await handler({ agent_id: "viking:repo-a", content: "ping" });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("not configured");
   });
 });

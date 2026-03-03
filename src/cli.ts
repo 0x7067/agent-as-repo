@@ -283,38 +283,50 @@ async function loadConfigSafe(configPath: string): Promise<Config> {
   }
 }
 
-async function loadConfigOptional(configPath: string): Promise<Config | null> {
-  try {
-    return await loadConfig(configPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    if (error instanceof ConfigError) return null;
-    throw error;
-  }
-}
+function resolveMcpProviderConfig(baseUrl: string): { providerConfig: McpProviderConfig; warnings: string[] } {
+  const warnings: string[] = [];
+  const lettaApiKey = process.env["LETTA_API_KEY"] ?? process.env["LETTA_PASSWORD"];
+  const openrouterApiKey = process.env["OPENROUTER_API_KEY"];
+  const openrouterModel = process.env["OPENROUTER_MODEL"] ?? "openai/gpt-4o-mini";
+  const vikingUrl = process.env["VIKING_URL"] ?? "http://localhost:1933";
+  const providerTypeRaw = process.env["PROVIDER_TYPE"];
 
-function resolveMcpProviderConfig(config: Config | null, baseUrl: string): McpProviderConfig {
-  if (config?.provider.type === "viking") {
-    const openrouterApiKey = process.env["OPENROUTER_API_KEY"];
-    if (!openrouterApiKey) {
-      throw new CliUserError("Missing OPENROUTER_API_KEY.\nAdd it to .env for Viking MCP mode.");
-    }
-    return {
-      type: "viking",
-      openrouterApiKey,
-      openrouterModel: process.env["OPENROUTER_MODEL"] ?? config.provider.openrouterModel,
-      vikingUrl: process.env["VIKING_URL"] ?? config.provider.vikingUrl,
-      vikingApiKey: process.env["VIKING_API_KEY"],
-    };
+  let preferredProvider: "letta" | "viking" | undefined;
+  if (providerTypeRaw === "letta" || providerTypeRaw === "viking") {
+    preferredProvider = providerTypeRaw;
+  } else if (providerTypeRaw) {
+    warnings.push(`Ignoring invalid PROVIDER_TYPE="${providerTypeRaw}". Use "letta" or "viking".`);
+  } else if (lettaApiKey) {
+    preferredProvider = "letta";
+  } else if (openrouterApiKey) {
+    preferredProvider = "viking";
   }
 
-  if (!process.env["LETTA_API_KEY"]) {
-    throw new CliUserError('Missing LETTA_API_KEY.\nRun "repo-expert init" to configure, or add it to .env manually.');
+  if (!lettaApiKey) {
+    warnings.push("LETTA_API_KEY is not set; Letta agents will not be available in unified MCP.");
   }
+  if (!openrouterApiKey) {
+    warnings.push("OPENROUTER_API_KEY is not set; Viking agents will not be available in unified MCP.");
+  }
+  if (!lettaApiKey && !openrouterApiKey) {
+    warnings.push("No provider key found. MCP entry is written, but the server will fail until a provider key is added.");
+  }
+
   return {
-    type: "letta",
-    apiKey: process.env["LETTA_API_KEY"],
-    baseUrl,
+    providerConfig: {
+      preferredProvider,
+      letta: {
+        apiKey: lettaApiKey,
+        baseUrl: process.env["LETTA_BASE_URL"] ?? baseUrl,
+      },
+      viking: {
+        openrouterApiKey,
+        openrouterModel,
+        vikingUrl,
+        vikingApiKey: process.env["VIKING_API_KEY"],
+      },
+    },
+    warnings,
   };
 }
 
@@ -1609,15 +1621,19 @@ program
     const seaLettaTools = path.resolve(process.cwd(), "dist", "letta-tools");
     const binaryPath = (await pathExists(seaLettaTools)) ? seaLettaTools : undefined;
     if (binaryPath) console.log(`Using SEA binary: ${binaryPath}`);
-    const configPath = path.resolve("config.yaml");
-    const appConfig = await loadConfigOptional(configPath);
-    const providerConfig = resolveMcpProviderConfig(appConfig, opts.baseUrl);
+    const { providerConfig, warnings } = resolveMcpProviderConfig(opts.baseUrl);
     const entry = generateMcpEntry(mcpServerPath, providerConfig, binaryPath);
     mcpServers.letta = entry;
     config.mcpServers = mcpServers;
 
     await fs.writeFile(configFile, JSON.stringify(config, null, 2) + "\n", "utf-8");
     console.log(`MCP entry written to ${configFile}`);
+    if (warnings.length > 0) {
+      console.log("Warnings:");
+      for (const warning of warnings) {
+        console.log(`  - ${warning}`);
+      }
+    }
     console.log("Restart Claude Code to pick up the change.");
   });
 
@@ -1655,27 +1671,21 @@ program
     const entry = mcpServers.letta as Parameters<typeof checkMcpEntry>[0];
     const seaLettaTools = path.resolve(process.cwd(), "dist", "letta-tools");
     const binaryPath = (await pathExists(seaLettaTools)) ? seaLettaTools : undefined;
-    const configPath = path.resolve("config.yaml");
-    const appConfig = await loadConfigOptional(configPath);
-    const providerConfig = appConfig?.provider.type === "viking"
-      ? {
-          type: "viking",
-          openrouterApiKey: process.env["OPENROUTER_API_KEY"] ?? "",
-          openrouterModel: process.env["OPENROUTER_MODEL"] ?? appConfig.provider.openrouterModel,
-          vikingUrl: process.env["VIKING_URL"] ?? appConfig.provider.vikingUrl,
-          vikingApiKey: process.env["VIKING_API_KEY"],
-        } satisfies McpProviderConfig
-      : {
-          type: "letta",
-          apiKey: process.env["LETTA_API_KEY"] ?? "",
-          baseUrl: process.env["LETTA_BASE_URL"] ?? "https://api.letta.com",
-        } satisfies McpProviderConfig;
+    const { providerConfig, warnings } = resolveMcpProviderConfig("https://api.letta.com");
     const result = checkMcpEntry(entry, mcpServerPath, providerConfig, binaryPath);
 
     if (opts.json) {
-      console.log(JSON.stringify(result, null, 2));
+      const payload = warnings.length > 0 ? { ...result, warnings } : result;
+      console.log(JSON.stringify(payload, null, 2));
       if (!result.ok) process.exitCode = 1;
       return;
+    }
+
+    if (warnings.length > 0) {
+      console.log("Warnings:");
+      for (const warning of warnings) {
+        console.log(`  - ${warning}`);
+      }
     }
 
     if (result.ok) {

@@ -272,26 +272,9 @@ describe("cli contract", () => {
     expect(localConfig.mcpServers?.letta).toBeDefined();
   });
 
-  it("writes Viking MCP env when config provider is viking", async () => {
+  it("writes Viking MCP env from environment variables", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-local-viking-");
     const home = await makeWorkspace("repo-expert-cli-home-viking-");
-    const repoDir = path.join(cwd, "repo");
-    await fs.mkdir(repoDir, { recursive: true });
-    await fs.writeFile(
-      path.join(cwd, "config.yaml"),
-      [
-        "provider:",
-        "  type: viking",
-        "  openrouter_model: openai/gpt-4o-mini",
-        "repos:",
-        "  my-app:",
-        `    path: ${repoDir}`,
-        "    description: test repo",
-        "    extensions: [.ts]",
-        "    ignore_dirs: [node_modules, .git]",
-      ].join("\n"),
-      "utf-8",
-    );
 
     const result = runCli(["mcp-install", "--local"], cwd, {
       HOME: home,
@@ -307,6 +290,24 @@ describe("cli contract", () => {
     expect(localConfig.mcpServers?.letta?.env?.PROVIDER_TYPE).toBe("viking");
     expect(localConfig.mcpServers?.letta?.env?.OPENROUTER_API_KEY).toBe("or-test-key");
     expect(localConfig.mcpServers?.letta?.env?.OPENROUTER_MODEL).toBe("openai/gpt-4o-mini");
+  });
+
+  it("writes MCP config and warns when no provider keys are present", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-local-mcp-warn-");
+    const home = await makeWorkspace("repo-expert-cli-home-mcp-warn-");
+
+    const result = runCli(["mcp-install", "--local"], cwd, {
+      HOME: home,
+      LETTA_API_KEY: "",
+      OPENROUTER_API_KEY: "",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Warnings:");
+    expect(result.stdout).toContain("No provider key found");
+    const localRaw = await fs.readFile(path.join(cwd, ".claude.json"), "utf8");
+    const localConfig = JSON.parse(localRaw) as { mcpServers?: { letta?: unknown } };
+    expect(localConfig.mcpServers?.letta).toBeDefined();
   });
 
   it("shows actionable error without stack trace when mcp-check config is malformed", async () => {
