@@ -1,4 +1,4 @@
-import * as path from "node:path";
+import path from "node:path";
 import type { CheckResult } from "../core/doctor.js";
 import { createEmptyState } from "../core/state.js";
 import { saveState } from "./state-store.js";
@@ -24,7 +24,7 @@ async function detectProviderType(configPath: string, fs: FileSystemPort = nodeF
   }
 }
 
-export async function checkApiKey(providerType: ProviderType = "letta"): Promise<CheckResult> {
+export function checkApiKey(providerType: ProviderType = "letta"): CheckResult {
   const envName = expectedApiKeyEnv(providerType);
   if (!process.env[envName]) {
     return { name: "API key", status: "fail", message: `${envName} not set. Add it to .env or your environment.` };
@@ -152,7 +152,7 @@ export async function runAllChecks(provider: AgentProvider | null, configPath: s
   const results: CheckResult[] = [];
   const providerType = await detectProviderType(configPath);
 
-  results.push(await checkApiKey(providerType));
+  results.push(checkApiKey(providerType));
 
   if (provider) {
     try {
@@ -160,14 +160,18 @@ export async function runAllChecks(provider: AgentProvider | null, configPath: s
       const { loadConfig } = await import("./config-loader.js");
       const state = await loadState(".repo-expert-state.json");
       const config = await loadConfig(configPath);
-      const configuredAgent = Object.keys(config.repos)
-        .map((repoName) => state.agents[repoName])
-        .find((agent) => agent !== undefined);
-      const firstAgent = configuredAgent ?? Object.values(state.agents)[0];
-      if (firstAgent) {
-        results.push(await checkApiConnection(provider, firstAgent.agentId, providerType));
-      } else {
+      let configuredAgent: (typeof state.agents)[string] | undefined;
+      for (const repoName of Object.keys(config.repos)) {
+        if (Object.hasOwn(state.agents, repoName)) {
+          configuredAgent = state.agents[repoName];
+          break;
+        }
+      }
+      const firstAgent = configuredAgent ?? Object.values(state.agents).at(0);
+      if (firstAgent === undefined) {
         results.push({ name: "API connection", status: "warn", message: "No agents yet — run setup to verify connection" });
+      } else {
+        results.push(await checkApiConnection(provider, firstAgent.agentId, providerType));
       }
     } catch {
       results.push({ name: "API connection", status: "warn", message: "No state file — run setup to verify connection" });
@@ -178,8 +182,11 @@ export async function runAllChecks(provider: AgentProvider | null, configPath: s
 
   const configExists = results.some((r) => r.name === "Config file" && r.status === "pass");
   if (configExists) {
-    results.push(...(await checkRepoPaths(configPath)));
-    results.push(...(await checkStateConsistency(configPath)));
+    const [repoPathResults, stateConsistencyResults] = await Promise.all([
+      checkRepoPaths(configPath),
+      checkStateConsistency(configPath),
+    ]);
+    results.push(...repoPathResults, ...stateConsistencyResults);
   }
 
   results.push(checkGit());

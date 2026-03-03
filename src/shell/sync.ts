@@ -27,6 +27,32 @@ export interface SyncResult {
   failedFiles: string[];
 }
 
+function getOldPassageIds(passages: PassageMap, filePath: string): string[] {
+  return Object.hasOwn(passages, filePath)
+    ? passages[filePath]
+    : [];
+}
+
+function removeFilePassages(passages: PassageMap, filePath: string): PassageMap {
+  // Avoid dynamic delete while keeping an immutable map update.
+  return Object.fromEntries(
+    Object.entries(passages).filter(([entryPath]) => entryPath !== filePath),
+  );
+}
+
+function getIndexableFileInfo(
+  fileInfo: FileInfo | null,
+  maxFileSizeKb: number | undefined,
+): FileInfo | undefined {
+  if (fileInfo === null) {
+    return undefined;
+  }
+  if (maxFileSizeKb !== undefined && fileInfo.sizeKb > maxFileSizeKb) {
+    return undefined;
+  }
+  return fileInfo;
+}
+
 export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
   const {
     provider,
@@ -44,7 +70,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
 
   const plan = computeSyncPlan(agent.passages, changedFiles, fullReIndexThreshold);
   const limit = pLimit(concurrency);
-  const updatedPassages: PassageMap = { ...agent.passages };
+  let updatedPassages: PassageMap = { ...agent.passages };
   const stalePassageIds: string[] = [];
   const failedFiles: string[] = [];
   let filesReIndexed = 0;
@@ -56,21 +82,14 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
   for (const filePath of plan.filesToReIndex) {
     try {
       const fileInfo = await collectFile(filePath);
-      if (!fileInfo) {
-        // File deleted — mark old passages for cleanup, remove from map
-        const oldIds = agent.passages[filePath];
-        if (oldIds) stalePassageIds.push(...oldIds);
-        delete updatedPassages[filePath];
-        filesRemoved++;
-      } else if (maxFileSizeKb !== undefined && fileInfo.sizeKb > maxFileSizeKb) {
-        // Oversized — mark old passages for cleanup, remove from map
-        const oldIds = agent.passages[filePath];
-        if (oldIds) stalePassageIds.push(...oldIds);
-        delete updatedPassages[filePath];
+      const indexableFileInfo = getIndexableFileInfo(fileInfo, maxFileSizeKb);
+      if (indexableFileInfo === undefined) {
+        stalePassageIds.push(...getOldPassageIds(agent.passages, filePath));
+        updatedPassages = removeFilePassages(updatedPassages, filePath);
         filesRemoved++;
       } else {
-        const chunks = chunkingStrategy(fileInfo);
-        const passageIds: string[] = Array.from({length: chunks.length});
+        const chunks = chunkingStrategy(indexableFileInfo);
+        const passageIds: string[] = Array.from({ length: chunks.length });
 
         await Promise.all(
           chunks.map((chunk, i) =>
@@ -82,8 +101,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
         );
 
         // Upload succeeded — queue old passages for deletion, update map
-        const oldIds = agent.passages[filePath];
-        if (oldIds) stalePassageIds.push(...oldIds);
+        stalePassageIds.push(...getOldPassageIds(agent.passages, filePath));
         updatedPassages[filePath] = passageIds;
         filesReIndexed++;
       }
@@ -100,7 +118,13 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
   // Phase 2: Delete old (now stale) passages — failures here are non-critical
   await Promise.all(
     stalePassageIds.map((passageId) =>
-      limit(() => provider.deletePassage(agent.agentId, passageId).catch(() => {})),
+      limit(async () => {
+        try {
+          await provider.deletePassage(agent.agentId, passageId);
+        } catch {
+          // best effort cleanup; indexing result is still valid
+        }
+      }),
     ),
   );
 

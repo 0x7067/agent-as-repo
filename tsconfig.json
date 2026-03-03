@@ -6,8 +6,15 @@
     "esModuleInterop": true,
     "strict": true,
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": ".",
     "skipLibCheck": true
   },
-  "include": ["src", "spikes"]
+  "include": [
+    "src",
+    "spikes",
+    "scripts",
+    "vitest.config.ts",
+    "vitest.stryker.config.ts",
+    "vitest.stryker.shell.config.ts"
+  ]
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable max-lines -- MCP tool registration requires many schema/description lines in one module for now. */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Letta } from "@letta-ai/letta-client";
@@ -52,7 +53,11 @@ export function createClient(): Letta {
   });
 }
 
-interface ToolResult { content: Array<{ type: "text"; text: string }>; isError?: boolean }
+interface ToolResult {
+  [key: string]: unknown;
+  content: Array<{ type: "text"; text: string }>;
+  isError?: boolean;
+}
 
 async function handleTool(fn: () => Promise<string>): Promise<ToolResult> {
   try {
@@ -189,8 +194,8 @@ export async function withTimeout<T>(label: string, timeoutMs: number, fn: () =>
   try {
     return await Promise.race([
       fn(),
-      new Promise<T>((_, reject) => {
-        timeoutId = setTimeout(() => { reject(new Error(`${label} timed out after ${timeoutMs}ms`)); }, timeoutMs);
+      new Promise<T>((_resolve, reject) => {
+        timeoutId = setTimeout(() => { reject(new Error(`${label} timed out after ${String(timeoutMs)}ms`)); }, timeoutMs);
       }),
     ]);
   } finally {
@@ -201,17 +206,22 @@ export async function withTimeout<T>(label: string, timeoutMs: number, fn: () =>
 
 // Stryker disable StringLiteral,ObjectLiteral -- tool descriptions and schema shapes are not testable via unit tests (handlers are called directly, bypassing MCP input validation)
 export function registerTools(server: McpServer, provider: AgentProvider, admin: AdminPort): void {
-  server.tool("letta_list_agents", "List all Letta agents", {}, () =>
+  server.registerTool("letta_list_agents", {
+    description: "List all Letta agents",
+    inputSchema: {},
+  }, () =>
     handleTool(async () => {
       const agents = await admin.listAgents();
       return JSON.stringify(agents, null, 2);
     }),
   );
 
-  server.tool(
+  server.registerTool(
     "letta_get_agent",
-    "Get full details for a Letta agent",
-    { agent_id: z.string().describe("The agent ID") },
+    {
+      description: "Get full details for a Letta agent",
+      inputSchema: { agent_id: z.string().describe("The agent ID") },
+    },
     ({ agent_id }) =>
       handleTool(async () => {
         const agent = await admin.getAgent(agent_id);
@@ -219,15 +229,17 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
       }),
   );
 
-  server.tool(
+  server.registerTool(
     "letta_send_message",
-    "Send a message to a Letta agent and get the response",
     {
-      agent_id: z.string().describe("The agent ID"),
-      content: z.string().describe("The message content"),
-      override_model: z.string().optional().describe("Optional per-request model override"),
-      timeout_ms: z.number().int().positive().optional().describe("Request timeout in milliseconds"),
-      max_steps: z.number().int().positive().optional().describe("Maximum reasoning/tool steps for this request"),
+      description: "Send a message to a Letta agent and get the response",
+      inputSchema: {
+        agent_id: z.string().describe("The agent ID"),
+        content: z.string().describe("The message content"),
+        override_model: z.string().optional().describe("Optional per-request model override"),
+        timeout_ms: z.number().int().positive().optional().describe("Request timeout in milliseconds"),
+        max_steps: z.number().int().positive().optional().describe("Maximum reasoning/tool steps for this request"),
+      },
     },
     ({ agent_id, content, override_model, timeout_ms, max_steps }) =>
       handleTool(async () => {
@@ -245,10 +257,12 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
       }),
   );
 
-  server.tool(
+  server.registerTool(
     "letta_get_core_memory",
-    "Get all memory blocks for a Letta agent",
-    { agent_id: z.string().describe("The agent ID") },
+    {
+      description: "Get all memory blocks for a Letta agent",
+      inputSchema: { agent_id: z.string().describe("The agent ID") },
+    },
     ({ agent_id }) =>
       handleTool(async () => {
         const blocks = await admin.getCoreMemory(agent_id);
@@ -256,13 +270,15 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
       }),
   );
 
-  server.tool(
+  server.registerTool(
     "letta_search_archival",
-    "Search archival memory (passages) for a Letta agent",
     {
-      agent_id: z.string().describe("The agent ID"),
-      query: z.string().describe("Search query"),
-      top_k: z.number().optional().describe("Max results to return"),
+      description: "Search archival memory (passages) for a Letta agent",
+      inputSchema: {
+        agent_id: z.string().describe("The agent ID"),
+        query: z.string().describe("Search query"),
+        top_k: z.number().optional().describe("Max results to return"),
+      },
     },
     ({ agent_id, query, top_k }) =>
       handleTool(async () => {
@@ -271,12 +287,14 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
       }),
   );
 
-  server.tool(
+  server.registerTool(
     "letta_insert_passage",
-    "Insert a passage into an agent's archival memory",
     {
-      agent_id: z.string().describe("The agent ID"),
-      text: z.string().describe("The passage text to store"),
+      description: "Insert a passage into an agent's archival memory",
+      inputSchema: {
+        agent_id: z.string().describe("The agent ID"),
+        text: z.string().describe("The passage text to store"),
+      },
     },
     ({ agent_id, text }) =>
       handleTool(async () => {
@@ -285,12 +303,14 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
       }),
   );
 
-  server.tool(
+  server.registerTool(
     "letta_delete_passage",
-    "Delete a passage from an agent's archival memory. To update a passage, delete it and insert a new one.",
     {
-      agent_id: z.string().describe("The agent ID"),
-      passage_id: z.string().describe("The passage ID to delete"),
+      description: "Delete a passage from an agent's archival memory. To update a passage, delete it and insert a new one.",
+      inputSchema: {
+        agent_id: z.string().describe("The agent ID"),
+        passage_id: z.string().describe("The passage ID to delete"),
+      },
     },
     ({ agent_id, passage_id }) =>
       handleTool(async () => {
@@ -299,13 +319,15 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
       }),
   );
 
-  server.tool(
+  server.registerTool(
     "letta_update_block",
-    "Update a memory block for a Letta agent",
     {
-      agent_id: z.string().describe("The agent ID"),
-      label: z.string().describe("Block label (e.g. persona, human)"),
-      value: z.string().describe("New block value"),
+      description: "Update a memory block for a Letta agent",
+      inputSchema: {
+        agent_id: z.string().describe("The agent ID"),
+        label: z.string().describe("Block label (e.g. persona, human)"),
+        value: z.string().describe("New block value"),
+      },
     },
     ({ agent_id, label, value }) =>
       handleTool(async () => {
@@ -316,7 +338,10 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
 }
 
 export function registerUnifiedTools(server: McpServer, registry: ProviderRegistry): void {
-  server.tool("agent_list", "List agents from configured Letta and Viking providers", {}, () =>
+  server.registerTool("agent_list", {
+    description: "List agents from configured Letta and Viking providers",
+    inputSchema: {},
+  }, () =>
     handleTool(async () => {
       const agents: NamespacedAgentSummary[] = [];
       const errors: Array<{ provider: ProviderName; error: string }> = [];
@@ -347,15 +372,17 @@ export function registerUnifiedTools(server: McpServer, registry: ProviderRegist
     }),
   );
 
-  server.tool(
+  server.registerTool(
     "agent_call",
-    "Send a message to a namespaced agent_id (letta:<id> or viking:<id>)",
     {
-      agent_id: z.string().describe("Namespaced agent ID, e.g. letta:<id> or viking:<id>"),
-      content: z.string().describe("The message content"),
-      override_model: z.string().optional().describe("Optional per-request model override"),
-      timeout_ms: z.number().int().positive().optional().describe("Request timeout in milliseconds"),
-      max_steps: z.number().int().positive().optional().describe("Maximum reasoning/tool steps for this request"),
+      description: "Send a message to a namespaced agent_id (letta:<id> or viking:<id>)",
+      inputSchema: {
+        agent_id: z.string().describe("Namespaced agent ID, e.g. letta:<id> or viking:<id>"),
+        content: z.string().describe("The message content"),
+        override_model: z.string().optional().describe("Optional per-request model override"),
+        timeout_ms: z.number().int().positive().optional().describe("Request timeout in milliseconds"),
+        max_steps: z.number().int().positive().optional().describe("Maximum reasoning/tool steps for this request"),
+      },
     },
     ({ agent_id, content, override_model, timeout_ms, max_steps }) =>
       handleTool(async () => {
@@ -398,8 +425,11 @@ export async function main(): Promise<void> {
 
 // Stryker disable next-line ConditionalExpression,EqualityOperator -- entry-point guard is untestable in unit tests
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main().catch((error) => {
+  try {
+    await main();
+  } catch (error: unknown) {
     process.stderr.write(`letta-tools MCP server error: ${errorMessage(error)}\n`);
-    process.exit(1);
-  });
+    process.exitCode = 1;
+  }
 }
+/* eslint-enable max-lines */

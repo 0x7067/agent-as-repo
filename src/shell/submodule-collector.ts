@@ -1,4 +1,4 @@
-import * as path from "node:path";
+import path from "node:path";
 import { parseSubmoduleStatus } from "../core/submodule.js";
 import { collectFiles } from "./file-collector.js";
 import { nodeGit } from "./adapters/node-git.js";

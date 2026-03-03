@@ -29,6 +29,6 @@ export class LettaAdminAdapter implements AdminPort {
 
   async searchPassages(agentId: string, query: string, limit?: number): Promise<PassageResult[]> {
     const results = await this.client.agents.passages.search(agentId, { query, top_k: limit });
-    return (results as Array<{ id: string; text: string }>).map((r) => ({ id: r.id, text: r.text }));
+    return (results as unknown as Array<{ id: string; text: string }>).map((r) => ({ id: r.id, text: r.text }));
   }
 }

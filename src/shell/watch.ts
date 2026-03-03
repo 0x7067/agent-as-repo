@@ -1,4 +1,5 @@
-import * as path from "node:path";
+/* eslint-disable max-lines -- watch orchestration intentionally stays in one module to preserve operational flow. */
+import path from "node:path";
 import { loadState, saveState } from "./state-store.js";
 import { collectFiles } from "./file-collector.js";
 import { syncRepo } from "./sync.js";
@@ -48,7 +49,20 @@ async function collectFile(repoPath: string, filePath: string, fs: FileSystemPor
 }
 
 function normalizeRelativePath(filePath: string): string {
-  return filePath.replaceAll('\\', "/").replace(/^\.\//, "");
+  return filePath.replaceAll("\\", "/").replace(/^\.\//, "");
+}
+
+function trimTrailingSlashes(value: string): string {
+  let trimmed = value;
+  while (trimmed.endsWith("/")) {
+    trimmed = trimmed.slice(0, -1);
+  }
+  return trimmed;
+}
+
+function getAgentInfo(state: { agents: Record<string, AgentState> }, repoName: string): AgentState | undefined {
+  if (!Object.hasOwn(state.agents, repoName)) return undefined;
+  return state.agents[repoName];
 }
 
 function toAgentPath(repoConfig: RepoConfig, repoRelativePath: string): string | null {
@@ -56,7 +70,7 @@ function toAgentPath(repoConfig: RepoConfig, repoRelativePath: string): string |
   if (!normalized) return null;
   if (!repoConfig.basePath) return normalized;
 
-  const normalizedBase = normalizeRelativePath(repoConfig.basePath).replace(/\/+$/, "");
+  const normalizedBase = trimTrailingSlashes(normalizeRelativePath(repoConfig.basePath));
   if (normalized === normalizedBase) return null;
   if (!normalized.startsWith(`${normalizedBase}/`)) return null;
   return normalized.slice(normalizedBase.length + 1);
@@ -108,10 +122,64 @@ export async function watchRepos(params: WatchParams): Promise<void> {
 
   function trackTask(task: Promise<void>): Promise<void> {
     runningTasks.add(task);
-    task.finally(() => {
+    void task.finally(() => {
       runningTasks.delete(task);
     });
     return task;
+  }
+
+  function getRepoConfig(repoName: string): RepoConfig | undefined {
+    if (!Object.hasOwn(config.repos, repoName)) return undefined;
+    return config.repos[repoName];
+  }
+
+  async function persistHeadCommitOnly(repoName: string, currentHead: string): Promise<void> {
+    stateWriteChain = stateWriteChain.then(() =>
+      updateAndSaveState(statePath, repoName, { lastSyncCommit: currentHead }),
+    ).catch(() => {});
+    await stateWriteChain;
+  }
+
+  async function persistSyncResult(repoName: string, passages: AgentState["passages"], lastSyncCommit: string): Promise<void> {
+    stateWriteChain = stateWriteChain.then(() =>
+      updateAndSaveState(statePath, repoName, {
+        passages,
+        lastSyncCommit,
+      }),
+    ).catch(() => {});
+    await stateWriteChain;
+  }
+
+  async function resolveChangedFiles(params_: {
+    repoConfig: RepoConfig;
+    agentInfo: AgentState;
+    isEventSync: boolean;
+    eventChangedFiles?: string[];
+    repoName: string;
+  }): Promise<string[] | undefined> {
+    const {
+      repoConfig,
+      agentInfo,
+      isEventSync,
+      eventChangedFiles,
+      repoName,
+    } = params_;
+
+    if (isEventSync) {
+      return (eventChangedFiles ?? []).filter((filePath) => shouldIncludeFile(filePath, 0, repoConfig));
+    }
+
+    if (agentInfo.lastSyncCommit) {
+      const diffResult = git.diffFiles(repoConfig.path, agentInfo.lastSyncCommit);
+      if (diffResult === null) {
+        log(`[${repoName}] git diff failed, skipping`);
+        return undefined;
+      }
+      return filterChangedFiles(repoConfig, diffResult);
+    }
+
+    const files = await collectFiles(repoConfig);
+    return files.map((file) => file.path);
   }
 
   function scheduleDebouncedSync(repoName: string, delayMs = debounceMs): void {
@@ -127,8 +195,8 @@ export async function watchRepos(params: WatchParams): Promise<void> {
   }
 
   function queueFileChange(repoName: string, filePath: string): void {
-    const repoConfig = config.repos[repoName];
-    if (!repoConfig) return;
+    const repoConfig = getRepoConfig(repoName);
+    if (repoConfig === undefined) return;
     if (ignoredEventFilesByRepo.get(repoName)?.has(filePath)) return;
     if (!shouldIncludeFile(filePath, 0, repoConfig)) return;
 
@@ -138,6 +206,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     scheduleDebouncedSync(repoName);
   }
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- central sync control flow intentionally handles backoff, event, and polling branches together
   async function syncRepoNow(repoName: string, eventChangedFiles?: string[]): Promise<void> {
     if (signal.aborted) return;
     if (syncing.has(repoName)) return;
@@ -147,16 +216,16 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     if (Date.now() < until) return;
 
     const state = await loadState(statePath);
-    const agentInfo = state.agents[repoName];
-    if (!agentInfo) return;
+    const agentInfo = getAgentInfo(state, repoName);
+    if (agentInfo === undefined) return;
 
-    const repoConfig = config.repos[repoName];
-    if (!repoConfig) return;
+    const repoConfig = getRepoConfig(repoName);
+    if (repoConfig === undefined) return;
 
     const currentHead = git.headCommit(repoConfig.path);
-    if (!currentHead) return;
+    if (typeof currentHead !== "string" || currentHead.length === 0) return;
 
-    const isEventSync = Boolean(eventChangedFiles && eventChangedFiles.length > 0);
+    const isEventSync = eventChangedFiles !== undefined && eventChangedFiles.length > 0;
     if (!isEventSync && !shouldSync(agentInfo.lastSyncCommit, currentHead)) {
       log(`[${repoName}] no changes (HEAD=${currentHead.slice(0, 7)})`);
       return;
@@ -165,32 +234,24 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     syncing.add(repoName);
     try {
       const start = Date.now();
-      let changedFiles: string[];
+      const changedFilesResult = await resolveChangedFiles({
+        repoConfig,
+        agentInfo,
+        isEventSync,
+        eventChangedFiles,
+        repoName,
+      });
+      if (changedFilesResult === undefined) return;
 
-      if (isEventSync) {
-        changedFiles = (eventChangedFiles ?? []).filter((filePath) => shouldIncludeFile(filePath, 0, repoConfig));
-      } else if (agentInfo.lastSyncCommit) {
-        const diffResult = git.diffFiles(repoConfig.path, agentInfo.lastSyncCommit);
-        if (diffResult === null) {
-          log(`[${repoName}] git diff failed, skipping`);
+      const changedFiles = [...new Set(changedFilesResult)];
+      if (changedFiles.length === 0) {
+        if (isEventSync) {
           return;
         }
-        changedFiles = await filterChangedFiles(repoConfig, diffResult);
-      } else {
-        const files = await collectFiles(repoConfig);
-        changedFiles = files.map((f) => f.path);
-      }
 
-      changedFiles = [...new Set(changedFiles)];
-      if (changedFiles.length === 0) {
-        if (!isEventSync) {
-          // HEAD changed but no indexable file diff (e.g., merge commit) — update state
-          stateWriteChain = stateWriteChain.then(() =>
-            updateAndSaveState(statePath, repoName, { lastSyncCommit: currentHead }),
-          ).catch(() => {});
-          await stateWriteChain;
-          log(formatSyncLog(repoName, agentInfo.lastSyncCommit, currentHead, 0, Date.now() - start));
-        }
+        // HEAD changed but no indexable file diff (e.g., merge commit) — update state
+        await persistHeadCommitOnly(repoName, currentHead);
+        log(formatSyncLog(repoName, agentInfo.lastSyncCommit, currentHead, 0, Date.now() - start));
         return;
       }
 
@@ -208,16 +269,11 @@ export async function watchRepos(params: WatchParams): Promise<void> {
         maxFileSizeKb: repoConfig.maxFileSizeKb,
       });
 
-      stateWriteChain = stateWriteChain.then(() =>
-        updateAndSaveState(statePath, repoName, {
-          passages: result.passages,
-          lastSyncCommit: result.lastSyncCommit,
-        }),
-      ).catch(() => {});
-      await stateWriteChain;
+      await persistSyncResult(repoName, result.passages, result.lastSyncCommit);
 
       const suffix = isEventSync ? " [event]" : "";
-      log(`${formatSyncLog(repoName, agentInfo.lastSyncCommit, currentHead, changedFiles.length, Date.now() - start)}${suffix}`);
+      const elapsedMs = Date.now() - start;
+      log(`${formatSyncLog(repoName, agentInfo.lastSyncCommit, currentHead, changedFiles.length, elapsedMs)}${suffix}`);
 
       // Reset backoff on success
       consecutiveFailures.set(repoName, 0);
@@ -228,7 +284,8 @@ export async function watchRepos(params: WatchParams): Promise<void> {
       consecutiveFailures.set(repoName, failures);
       const delay = computeBackoffDelay(failures, intervalMs);
       backoffUntil.set(repoName, Date.now() + delay);
-      log(`[${repoName}] sync error (attempt ${failures}, backoff ${Math.round(delay / 1000)}s): ${msg}`);
+      const backoffSeconds = Math.round(delay / 1000);
+      log(`[${repoName}] sync error (attempt ${String(failures)}, backoff ${String(backoffSeconds)}s): ${msg}`);
     } finally {
       syncing.delete(repoName);
       if ((pendingFilesByRepo.get(repoName)?.size ?? 0) > 0) {
@@ -257,8 +314,8 @@ export async function watchRepos(params: WatchParams): Promise<void> {
   }
 
   for (const repoName of repoNames) {
-    const repoConfig = config.repos[repoName];
-    if (!repoConfig) continue;
+    const repoConfig = getRepoConfig(repoName);
+    if (repoConfig === undefined) continue;
 
     const ignoredFiles = new Set<string>();
     const ignoredAbsoluteFiles = new Set<string>();
@@ -321,7 +378,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
       activeTick = trackTask(tick());
     }, intervalMs);
 
-    signal.addEventListener("abort", async () => {
+    const shutdown = async (): Promise<void> => {
       clearInterval(timer);
       for (const debounceTimer of debounceTimers.values()) {
         clearTimeout(debounceTimer);
@@ -333,6 +390,11 @@ export async function watchRepos(params: WatchParams): Promise<void> {
       await activeTick;
       await Promise.allSettled(runningTasks);
       resolve();
+    };
+
+    signal.addEventListener("abort", () => {
+      void shutdown();
     }, { once: true });
   });
 }
+/* eslint-enable max-lines */

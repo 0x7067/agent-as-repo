@@ -1,8 +1,8 @@
 export interface McpServerEntry {
   command: string;
-  args: string[];
-  timeout: number;
-  env: Record<string, string>;
+  args?: string[];
+  timeout?: number;
+  env: Record<string, string | undefined>;
 }
 
 export interface McpProviderConfig {
@@ -63,6 +63,98 @@ export interface McpCheckResult {
   issues: string[];
 }
 
+function checkCommandAndArgs(
+  entry: McpServerEntry,
+  mcpServerPath: string,
+  binaryPath: string | undefined,
+  issues: string[],
+): void {
+  if (binaryPath !== undefined) {
+    if (entry.command !== binaryPath) {
+      issues.push(`Command should be "${binaryPath}", got "${entry.command}".`);
+    }
+    return;
+  }
+
+  if (entry.command !== "npx") {
+    issues.push(`Command should be "npx", got "${entry.command}".`);
+  }
+
+  const args = entry.args ?? [];
+  if (args[0] !== "tsx") {
+    const got = args[0] ?? "(missing)";
+    issues.push(`First arg should be "tsx", got "${got}". Use "npx tsx" to avoid PATH issues.`);
+  }
+
+  const configuredPath = args[1] ?? "";
+  if (configuredPath !== mcpServerPath) {
+    issues.push(`Server path mismatch: config has "${configuredPath}", expected "${mcpServerPath}".`);
+  }
+}
+
+function checkProviderType(providerType: string | undefined, issues: string[]): void {
+  if (providerType && providerType !== "letta" && providerType !== "viking") {
+    issues.push(`PROVIDER_TYPE should be "letta" or "viking", got "${providerType}".`);
+  }
+}
+
+function checkLettaConfig(
+  env: Record<string, string | undefined>,
+  provider: McpProviderConfig,
+  issues: string[],
+): boolean {
+  const hasLettaKey = isNonEmpty(env.LETTA_API_KEY) || isNonEmpty(env.LETTA_PASSWORD);
+  const expectedLettaKey = isNonEmpty(provider.letta?.apiKey);
+
+  if (expectedLettaKey && !hasLettaKey) {
+    issues.push("LETTA_API_KEY (or LETTA_PASSWORD) is missing from env.");
+  }
+
+  if (hasLettaKey || expectedLettaKey) {
+    const baseUrl = env.LETTA_BASE_URL ?? "";
+    if (!baseUrl) {
+      issues.push("LETTA_BASE_URL is missing.");
+    } else if (baseUrl.endsWith("/v1")) {
+      issues.push(`LETTA_BASE_URL ends with "/v1" — the SDK adds this automatically. Use "${DEFAULT_LETTA_BASE_URL}".`);
+    }
+  }
+
+  return hasLettaKey;
+}
+
+function checkVikingConfig(
+  env: Record<string, string | undefined>,
+  provider: McpProviderConfig,
+  issues: string[],
+): boolean {
+  const hasVikingKey = isNonEmpty(env.OPENROUTER_API_KEY);
+  const expectedVikingKey = isNonEmpty(provider.viking?.openrouterApiKey);
+
+  if (expectedVikingKey && !hasVikingKey) {
+    issues.push("OPENROUTER_API_KEY is missing from env.");
+  }
+
+  if (hasVikingKey || expectedVikingKey) {
+    const openrouterModel = env.OPENROUTER_MODEL ?? "";
+    if (openrouterModel) {
+      const expectedModel = provider.viking?.openrouterModel;
+      if (isNonEmpty(expectedModel) && openrouterModel !== expectedModel) {
+        issues.push(`OPENROUTER_MODEL mismatch: config has "${openrouterModel}", expected "${expectedModel}".`);
+      }
+    } else {
+      issues.push("OPENROUTER_MODEL is missing from env.");
+    }
+
+    const configuredVikingUrl = env.VIKING_URL ?? "";
+    const expectedVikingUrl = provider.viking?.vikingUrl;
+    if (isNonEmpty(expectedVikingUrl) && configuredVikingUrl !== expectedVikingUrl) {
+      issues.push(`VIKING_URL mismatch: config has "${configuredVikingUrl}", expected "${expectedVikingUrl}".`);
+    }
+  }
+
+  return hasVikingKey;
+}
+
 export function checkMcpEntry(
   entry: McpServerEntry | undefined,
   mcpServerPath: string,
@@ -76,74 +168,22 @@ export function checkMcpEntry(
     return { ok: false, issues };
   }
 
-  if (binaryPath) {
-    if (entry.command !== binaryPath) {
-      issues.push(`Command should be "${binaryPath}", got "${entry.command}".`);
-    }
+  checkCommandAndArgs(entry, mcpServerPath, binaryPath, issues);
+
+  const env = entry.env;
+  checkProviderType(env.PROVIDER_TYPE, issues);
+  const hasLettaKey = checkLettaConfig(env, provider, issues);
+  const hasVikingKey = checkVikingConfig(env, provider, issues);
+
+  if (hasLettaKey || hasVikingKey) {
+    // At least one provider key is present.
   } else {
-    if (entry.command !== "npx") {
-      issues.push(`Command should be "npx", got "${entry.command}".`);
-    }
-
-    const args = entry.args ?? [];
-    if (args[0] !== "tsx") {
-      const got = args[0] ?? "(missing)";
-      issues.push(`First arg should be "tsx", got "${got}". Use "npx tsx" to avoid PATH issues.`);
-    }
-
-    const configuredPath = args[1] ?? "";
-    if (configuredPath !== mcpServerPath) {
-      issues.push(`Server path mismatch: config has "${configuredPath}", expected "${mcpServerPath}".`);
-    }
-  }
-
-  const providerType = entry.env?.PROVIDER_TYPE;
-  if (providerType && providerType !== "letta" && providerType !== "viking") {
-    issues.push(`PROVIDER_TYPE should be "letta" or "viking", got "${providerType}".`);
-  }
-
-  const hasLettaKey = isNonEmpty(entry.env?.LETTA_API_KEY) || isNonEmpty(entry.env?.LETTA_PASSWORD);
-  const expectedLettaKey = isNonEmpty(provider.letta?.apiKey);
-  if (expectedLettaKey && !hasLettaKey) {
-    issues.push("LETTA_API_KEY (or LETTA_PASSWORD) is missing from env.");
-  }
-  if (hasLettaKey || expectedLettaKey) {
-    const baseUrl = entry.env?.LETTA_BASE_URL ?? "";
-    if (!baseUrl) {
-      issues.push("LETTA_BASE_URL is missing.");
-    } else if (baseUrl.endsWith("/v1")) {
-      issues.push(`LETTA_BASE_URL ends with "/v1" — the SDK adds this automatically. Use "${DEFAULT_LETTA_BASE_URL}".`);
-    }
-  }
-
-  const hasVikingKey = isNonEmpty(entry.env?.OPENROUTER_API_KEY);
-  const expectedVikingKey = isNonEmpty(provider.viking?.openrouterApiKey);
-  if (expectedVikingKey && !hasVikingKey) {
-    issues.push("OPENROUTER_API_KEY is missing from env.");
-  }
-  if (hasVikingKey || expectedVikingKey) {
-    const openrouterModel = entry.env?.OPENROUTER_MODEL ?? "";
-    if (!openrouterModel) {
-      issues.push("OPENROUTER_MODEL is missing from env.");
-    } else {
-      const expectedModel = provider.viking?.openrouterModel;
-      if (isNonEmpty(expectedModel) && openrouterModel !== expectedModel) {
-        issues.push(`OPENROUTER_MODEL mismatch: config has "${openrouterModel}", expected "${expectedModel}".`);
-      }
-    }
-
-    const expectedVikingUrl = provider.viking?.vikingUrl;
-    if (isNonEmpty(expectedVikingUrl) && (entry.env?.VIKING_URL ?? "") !== expectedVikingUrl) {
-      issues.push(`VIKING_URL mismatch: config has "${entry.env?.VIKING_URL ?? ""}", expected "${expectedVikingUrl}".`);
-    }
-  }
-
-  if (!hasLettaKey && !hasVikingKey) {
     issues.push("At least one provider key is required: LETTA_API_KEY (or LETTA_PASSWORD) and/or OPENROUTER_API_KEY.");
   }
 
-  if ((entry.timeout ?? 0) < 60) {
-    issues.push(`Timeout is ${entry.timeout ?? 0}s — Letta calls can take 30s+. Recommend at least 300.`);
+  const timeout = entry.timeout ?? 0;
+  if (timeout < 60) {
+    issues.push(`Timeout is ${String(timeout)}s — Letta calls can take 30s+. Recommend at least 300.`);
   }
 
   return { ok: issues.length === 0, issues };

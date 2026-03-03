@@ -47,13 +47,14 @@ const rawConfigSchema = z.object({
 
 export class ConfigError extends Error {
   constructor(public readonly issues: string[]) {
-    super(`Config validation failed:\n${issues.map((i) => `  - ${i}`).join("\n")}`);
+    const formattedIssues = issues.map((issue) => "  - " + issue).join("\n");
+    super("Config validation failed:\n" + formattedIssues);
     this.name = "ConfigError";
   }
 }
 
 export function formatConfigError(err: ConfigError): string {
-  return `Config validation failed:\n${err.issues.map((i) => `  - ${i}`).join("\n")}`;
+  return "Config validation failed:\n" + err.issues.map((issue) => "  - " + issue).join("\n");
 }
 
 function zodIssuesToStrings(err: z.core.$ZodError): string[] {
@@ -117,7 +118,11 @@ export function parseConfig(raw: unknown): Config {
     }
   } else {
     // migrate old letta: format
-    providerConfig = { type: "letta", model: parsed.letta!.model, embedding: parsed.letta!.embedding, fastModel: parsed.letta!.fast_model };
+    const legacyLetta = parsed.letta;
+    if (!legacyLetta) {
+      throw new ConfigError(["Missing legacy letta provider settings"]);
+    }
+    providerConfig = { type: "letta", model: legacyLetta.model, embedding: legacyLetta.embedding, fastModel: legacyLetta.fast_model };
   }
 
   const userDefaults = parsed.defaults ?? {};

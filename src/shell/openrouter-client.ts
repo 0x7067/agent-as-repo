@@ -45,7 +45,9 @@ function composeAbortSignal(signal: AbortSignal | undefined, timeoutMs: number):
   cleanup: () => void;
 } {
   const controller = new AbortController();
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutId = setTimeout(() => {
+    controller.abort(new Error(`OpenRouter request timed out after ${String(timeoutMs)}ms`));
+  }, timeoutMs);
   let onAbort: (() => void) | undefined;
 
   if (signal) {
@@ -59,14 +61,10 @@ function composeAbortSignal(signal: AbortSignal | undefined, timeoutMs: number):
     }
   }
 
-  timeoutId = setTimeout(() => {
-    controller.abort(new Error(`OpenRouter request timed out after ${timeoutMs}ms`));
-  }, timeoutMs);
-
   return {
     signal: controller.signal,
     cleanup: () => {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
       if (signal && onAbort) signal.removeEventListener("abort", onAbort);
     },
   };
@@ -119,7 +117,7 @@ export async function callOpenRouter(
   request.cleanup();
 
   if (!res.ok) {
-    throw new Error(`HTTP ${res.status} from ${url}`);
+    throw new Error(`HTTP ${String(res.status)} from ${url}`);
   }
 
   return res.json() as Promise<ChatCompletionResponse>;
@@ -127,11 +125,98 @@ export async function callOpenRouter(
 
 export type ToolHandler = (args: Record<string, unknown>) => Promise<string>;
 
+function disabledDebug(_message: string): void {
+  // intentionally empty
+}
+
+function writeDebug(message: string): void {
+  process.stderr.write(`[openrouter] ${message}\n`);
+}
+
+function getMessageContentText(content: string | null): string {
+  return (content ?? "").trim();
+}
+
+function getToolCalls(choice: ChatCompletionResponse["choices"][number]): ToolCall[] {
+  return choice.message.tool_calls ?? [];
+}
+
+function readTerminalAssistantMessage(choice: ChatCompletionResponse["choices"][number]): string {
+  const directContent = getMessageContentText(choice.message.content);
+  if (directContent.length > 0) {
+    return choice.message.content ?? "";
+  }
+  throw new Error("Model returned an empty response without tool calls");
+}
+
+async function executeToolCalls(params: {
+  toolCalls: ToolCall[];
+  toolHandlers: Partial<Record<string, ToolHandler>>;
+  messages: Message[];
+}): Promise<void> {
+  const { toolCalls, toolHandlers, messages } = params;
+
+  for (const toolCall of toolCalls) {
+    const handler = toolHandlers[toolCall.function.name];
+    let result: string;
+
+    if (handler) {
+      try {
+        const args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
+        result = await handler(args);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        result = `Error: invalid arguments for tool ${toolCall.function.name}: ${message}`;
+      }
+    } else {
+      result = `Error: unknown tool ${toolCall.function.name}`;
+    }
+
+    messages.push({ role: "tool", tool_call_id: toolCall.id, content: result });
+  }
+}
+
+async function requestFinalAssistantMessage(params: {
+  messages: Message[];
+  model: string;
+  apiKey: string;
+  baseUrl?: string;
+  signal?: AbortSignal;
+  requestTimeoutMs?: number;
+  maxSteps: number;
+  debug: (message: string) => void;
+}): Promise<string> {
+  const {
+    messages,
+    model,
+    apiKey,
+    baseUrl,
+    signal,
+    requestTimeoutMs,
+    maxSteps,
+    debug,
+  } = params;
+
+  debug("max_steps reached with pending tool flow; requesting final completion without tools");
+  const finalResponse = await callOpenRouter(messages, [], model, apiKey, baseUrl, {
+    signal,
+    timeoutMs: requestTimeoutMs,
+  });
+  const finalChoice = finalResponse.choices[0];
+  const finalContent = getMessageContentText(finalChoice.message.content);
+  debug(`finalization finish_reason=${finalChoice.finish_reason} content_length=${String(finalContent.length)}`);
+  if (finalContent.length > 0) {
+    return finalChoice.message.content ?? "";
+  }
+
+  throw new Error(`Tool loop exhausted after ${String(maxSteps)} steps without a final assistant response`);
+}
+
 export async function toolCallingLoop(params: {
   systemPrompt: string;
   userMessage: string;
   tools: ToolDefinition[];
-  toolHandlers: Record<string, ToolHandler>;
+  toolHandlers: Partial<Record<string, ToolHandler>>;
   model: string;
   apiKey: string;
   baseUrl?: string;
@@ -160,11 +245,7 @@ export async function toolCallingLoop(params: {
   let steps = 0;
 
   const debugEnabled = process.env["REPO_EXPERT_DEBUG_OPENROUTER"] === "1";
-  const debug = (message: string) => {
-    if (debugEnabled) {
-      process.stderr.write(`[openrouter] ${message}\n`);
-    }
-  };
+  const debug = debugEnabled ? writeDebug : disabledDebug;
 
   while (steps < maxSteps) {
     const startedAt = Date.now();
@@ -174,62 +255,42 @@ export async function toolCallingLoop(params: {
     });
     steps++;
     const choice = response.choices[0];
-    const toolCallsCount = choice.message.tool_calls?.length ?? 0;
-    debug(`step=${steps} model=${model} finish_reason=${choice.finish_reason} tool_calls=${toolCallsCount} elapsed_ms=${Date.now() - startedAt}`);
+    const toolCalls = getToolCalls(choice);
+    const elapsedMs = Date.now() - startedAt;
+    debug(`step=${String(steps)} model=${model} finish_reason=${choice.finish_reason} tool_calls=${String(toolCalls.length)} elapsed_ms=${String(elapsedMs)}`);
 
-    if (!choice.message.tool_calls || choice.message.tool_calls.length === 0) {
-      const directContent = (choice.message.content ?? "").trim();
-      if (directContent.length > 0) {
-        return choice.message.content ?? "";
-      }
-      throw new Error("Model returned an empty response without tool calls");
+    if (toolCalls.length === 0) {
+      return readTerminalAssistantMessage(choice);
     }
 
     // Append assistant message with tool_calls
     messages.push({
       role: "assistant",
       content: choice.message.content,
-      tool_calls: choice.message.tool_calls,
+      tool_calls: toolCalls,
     });
 
     // Execute each tool call and append results
-    for (const tc of choice.message.tool_calls) {
-      const handler = toolHandlers[tc.function.name];
-      let result: string;
-      if (!handler) {
-        result = `Error: unknown tool ${tc.function.name}`;
-      } else {
-        try {
-          const args = JSON.parse(tc.function.arguments) as Record<string, unknown>;
-          result = await handler(args);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          result = `Error: invalid arguments for tool ${tc.function.name}: ${message}`;
-        }
-      }
-      messages.push({ role: "tool", tool_call_id: tc.id, content: result });
-    }
+    await executeToolCalls({ toolCalls, toolHandlers, messages });
 
     if (steps >= maxSteps) {
-      if ((choice.message.content ?? "").trim().length > 0) {
+      const directContent = getMessageContentText(choice.message.content);
+      if (directContent.length > 0) {
         return choice.message.content ?? "";
       }
 
-      debug("max_steps reached with pending tool flow; requesting final completion without tools");
-      const finalResponse = await callOpenRouter(messages, [], model, apiKey, baseUrl, {
+      return requestFinalAssistantMessage({
+        messages,
+        model,
+        apiKey,
+        baseUrl,
         signal,
-        timeoutMs: requestTimeoutMs,
+        requestTimeoutMs,
+        maxSteps,
+        debug,
       });
-      const finalChoice = finalResponse.choices[0];
-      const finalContent = (finalChoice.message.content ?? "").trim();
-      debug(`finalization finish_reason=${finalChoice.finish_reason} content_length=${finalContent.length}`);
-      if (finalContent.length > 0) {
-        return finalChoice.message.content ?? "";
-      }
-
-      throw new Error(`Tool loop exhausted after ${maxSteps} steps without a final assistant response`);
     }
   }
 
-  throw new Error(`Tool loop exited unexpectedly after ${maxSteps} steps`);
+  throw new Error(`Tool loop exited unexpectedly after ${String(maxSteps)} steps`);
 }

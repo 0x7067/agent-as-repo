@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import path from "node:path";
 
 export interface OpenVikingPathOptions {
   cwd?: string;
@@ -9,9 +9,11 @@ export interface OpenVikingPathOptions {
 }
 
 function ensureWritableDirectory(directory: string): void {
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- path is constrained to app-controlled candidate directories
   mkdirSync(directory, { recursive: true });
-  const probePath = join(directory, `.probe-${process.pid}-${Date.now()}`);
-  writeFileSync(probePath, "ok", "utf-8");
+  const probePath = path.join(directory, `.probe-${String(process.pid)}-${String(Date.now())}`);
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- probe path is under the vetted directory above
+  writeFileSync(probePath, "ok", "utf8");
   rmSync(probePath, { force: true });
 }
 
@@ -20,13 +22,12 @@ export function resolveOpenVikingBlocksDir(options: OpenVikingPathOptions = {}):
   const homeDir = options.homeDir ?? homedir();
   const env = options.env ?? process.env;
 
-  const candidates: string[] = [];
   const envValue = env["OPENVIKING_BLOCKS_DIR"]?.trim();
-  if (envValue) {
-    candidates.push(isAbsolute(envValue) ? envValue : resolve(cwd, envValue));
-  }
-  candidates.push(join(homeDir, ".openviking", "blocks"));
-  candidates.push(join(cwd, ".openviking", "blocks"));
+  const candidates: string[] = [
+    ...(envValue ? [path.isAbsolute(envValue) ? envValue : path.resolve(cwd, envValue)] : []),
+    path.join(homeDir, ".openviking", "blocks"),
+    path.join(cwd, ".openviking", "blocks"),
+  ];
 
   const errors: string[] = [];
   for (const candidate of candidates) {

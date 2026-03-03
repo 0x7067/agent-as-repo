@@ -421,5 +421,23 @@ describe("syncRepo", () => {
       expect(result.passages["src/a.ts"]).toBeDefined();
       expect(result.failedFiles).toEqual([]);
     });
+
+    it("ignores synchronous delete throws in cleanup phase", async () => {
+      const provider = makeMockProvider();
+      provider.deletePassage = vi.fn().mockImplementation(() => {
+        throw new Error("sync throw from cleanup");
+      });
+
+      const result = await syncRepo({
+        provider,
+        agent: testAgent,
+        changedFiles: ["src/a.ts"],
+        collectFile: async (path) => ({ path, content: "new content", sizeKb: 1 }),
+        headCommit: "def456",
+      });
+
+      expect(result.passages["src/a.ts"]).toBeDefined();
+      expect(result.failedFiles).toEqual([]);
+    });
   });
 });

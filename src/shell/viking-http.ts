@@ -8,7 +8,7 @@ const RETRYABLE_HTTP_STATUS = new Set([429, 500, 502, 503, 504]);
 const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_BREAKER_FAILURE_THRESHOLD = 4;
 const DEFAULT_BREAKER_WINDOW_MS = 10_000;
-const DEFAULT_BREAKER_COOLDOWN_MS = 2_500;
+const DEFAULT_BREAKER_COOLDOWN_MS = 2500;
 
 type CircuitDomain = "fs" | "content";
 
@@ -82,9 +82,23 @@ export class VikingHttpClient {
     return headers;
   }
 
-  private async checkOk(res: Response, url: string): Promise<void> {
+  private checkOk(res: Response, url: string): void {
     if (!res.ok) {
-      throw new Error(`HTTP ${res.status} from ${url}`);
+      throw new Error(`HTTP ${String(res.status)} from ${url}`);
+    }
+  }
+
+  private canRetry(attempt: number, retryable: boolean): boolean {
+    return retryable && attempt < this.maxRetries;
+  }
+
+  private isAllowedResponse(res: Response, allow404: boolean): boolean {
+    return res.ok || (allow404 && res.status === 404);
+  }
+
+  private recordRetryableFailure(domain: CircuitDomain | undefined, retryable: boolean): void {
+    if (domain && retryable) {
+      this.circuitBreaker.recordFailure(domain);
     }
   }
 
@@ -105,6 +119,7 @@ export class VikingHttpClient {
     init: RequestInit,
     options?: { allow404?: boolean; circuitDomain?: CircuitDomain },
   ): Promise<Response> {
+    const allow404 = options?.allow404 === true;
     const domain = options?.circuitDomain;
     if (domain) {
       this.circuitBreaker.assertCanRequest(domain);
@@ -113,7 +128,7 @@ export class VikingHttpClient {
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       try {
         const res = await fetch(url, init);
-        if (res.ok || (options?.allow404 && res.status === 404)) {
+        if (this.isAllowedResponse(res, allow404)) {
           if (domain) {
             this.circuitBreaker.recordSuccess(domain);
           }
@@ -121,26 +136,20 @@ export class VikingHttpClient {
         }
 
         const retryableHttp = RETRYABLE_HTTP_STATUS.has(res.status);
-        if (attempt < this.maxRetries && retryableHttp) {
+        if (this.canRetry(attempt, retryableHttp)) {
           continue;
         }
 
-        if (domain && retryableHttp) {
-          this.circuitBreaker.recordFailure(domain);
-        }
-
-        await this.checkOk(res, url);
+        this.recordRetryableFailure(domain, retryableHttp);
+        this.checkOk(res, url);
         return res;
       } catch (error) {
         const retryableNetwork = this.isRetryableNetworkError(error);
-        if (attempt < this.maxRetries && retryableNetwork) {
+        if (this.canRetry(attempt, retryableNetwork)) {
           continue;
         }
 
-        if (domain && retryableNetwork) {
-          this.circuitBreaker.recordFailure(domain);
-        }
-
+        this.recordRetryableFailure(domain, retryableNetwork);
         throw error;
       }
     }
@@ -155,7 +164,7 @@ export class VikingHttpClient {
       headers: this.headers({ "Content-Type": "application/json" }),
       body: JSON.stringify({ uri }),
     }, { circuitDomain: "fs" });
-    await this.checkOk(res, url);
+    this.checkOk(res, url);
   }
 
   async writeFile(uri: string, content: string): Promise<void> {
@@ -168,7 +177,7 @@ export class VikingHttpClient {
       headers: this.headers(),
       body: formData,
     });
-    await this.checkOk(uploadRes, uploadUrl);
+    this.checkOk(uploadRes, uploadUrl);
     const uploadData = await uploadRes.json() as { status: string; result: { temp_path: string } };
     const tempPath = uploadData.result.temp_path;
 
@@ -179,7 +188,7 @@ export class VikingHttpClient {
       headers: this.headers({ "Content-Type": "application/json" }),
       body: JSON.stringify({ temp_path: tempPath, target: uri, wait: true, strict: false }),
     });
-    await this.checkOk(res, addUrl);
+    this.checkOk(res, addUrl);
   }
 
   async readFile(uri: string): Promise<string> {
@@ -188,7 +197,7 @@ export class VikingHttpClient {
       method: "GET",
       headers: this.headers(),
     }, { circuitDomain: "content" });
-    await this.checkOk(res, url);
+    this.checkOk(res, url);
     const data = await res.json() as { status: string; result: string };
     return data.result;
   }
@@ -200,7 +209,7 @@ export class VikingHttpClient {
       headers: this.headers(),
     }, { allow404: true, circuitDomain: "fs" });
     if (res.status === 404) return;
-    await this.checkOk(res, url);
+    this.checkOk(res, url);
   }
 
   async listDirectory(uri: string): Promise<string[]> {
@@ -209,7 +218,7 @@ export class VikingHttpClient {
       method: "GET",
       headers: this.headers(),
     }, { circuitDomain: "fs" });
-    await this.checkOk(res, url);
+    this.checkOk(res, url);
     const data = await res.json() as { status: string; result: string[] };
     return data.result;
   }
@@ -221,7 +230,7 @@ export class VikingHttpClient {
       headers: this.headers(),
     }, { allow404: true, circuitDomain: "fs" });
     if (res.status === 404) return;
-    await this.checkOk(res, url);
+    this.checkOk(res, url);
   }
 
   async semanticSearch(
@@ -235,12 +244,12 @@ export class VikingHttpClient {
       headers: this.headers({ "Content-Type": "application/json" }),
       body: JSON.stringify({ query, target_uri: targetUri, limit: topK ?? 10 }),
     });
-    await this.checkOk(res, url);
+    this.checkOk(res, url);
     const data = await res.json() as {
       status: string;
       result: { resources: Array<{ uri: string; abstract: string; score: number }> };
     };
-    const resources = data.result.resources ?? [];
+    const resources = data.result.resources;
     return Promise.all(
       resources.map(async (r) => ({
         uri: r.uri,

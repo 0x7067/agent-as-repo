@@ -1,3 +1,4 @@
+/* eslint-disable security/detect-non-literal-fs-filename -- Filesystem adapter methods intentionally accept runtime paths from higher-level validated call sites. */
 import * as fs from "node:fs/promises";
 import { watch as fsWatch } from "node:fs";
 import fg from "fast-glob";
@@ -18,3 +19,4 @@ export const nodeFileSystem: FileSystemPort = {
     return fsWatch(path, options, listener);
   },
 };
+/* eslint-enable security/detect-non-literal-fs-filename */

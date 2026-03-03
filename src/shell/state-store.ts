@@ -1,4 +1,4 @@
-import * as path from "node:path";
+import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod/v4";
 import { STATE_SCHEMA_VERSION, createEmptyState } from "../core/state.js";
@@ -54,7 +54,7 @@ function migrateLegacyState(raw: unknown): unknown {
 }
 
 async function backupInvalidState(filePath: string, fs: FileSystemPort): Promise<string | null> {
-  const backupPath = `${filePath}.bak.${Date.now()}`;
+  const backupPath = `${filePath}.bak.${String(Date.now())}`;
   try {
     await fs.copyFile(filePath, backupPath);
     return backupPath;
@@ -68,6 +68,31 @@ function isTransientRenameError(err: unknown): boolean {
   if (!("code" in err)) return false;
   const code = String(err.code);
   return code === "EBUSY" || code === "EPERM" || code === "EACCES";
+}
+
+function isErrno(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
+function formatStateSchemaError(error: z.ZodError): string {
+  const issue = error.issues[0];
+  const location = issue.path.length > 0 ? issue.path.join(".") : "root";
+  return `schema error at "${location}": ${issue.message}`;
+}
+
+function getRecoverableStateErrorDetails(error: unknown): string | null {
+  if (error instanceof SyntaxError) {
+    return error.message;
+  }
+  if (error instanceof z.ZodError) {
+    return formatStateSchemaError(error);
+  }
+  return null;
+}
+
+async function throwStateFileError(filePath: string, details: string, fs: FileSystemPort): Promise<never> {
+  const backupPath = await backupInvalidState(filePath, fs);
+  throw new StateFileError(filePath, details, backupPath);
 }
 
 async function renameWithRetry(tempPath: string, filePath: string, fs: FileSystemPort, retries = 3): Promise<void> {
@@ -92,27 +117,22 @@ export async function loadState(filePath: string, fs: FileSystemPort = nodeFileS
     const migrated = migrateLegacyState(raw);
     const parsed = appStateSchema.parse(migrated);
     if (parsed.stateVersion !== STATE_SCHEMA_VERSION) {
-      const backupPath = await backupInvalidState(filePath, fs);
-      throw new StateFileError(filePath, `unsupported state version "${parsed.stateVersion}"`, backupPath);
+      await throwStateFileError(filePath, `unsupported state version "${String(parsed.stateVersion)}"`, fs);
     }
     return parsed;
   } catch (error: unknown) {
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+    if (isErrno(error, "ENOENT")) {
       return createEmptyState();
     }
     if (error instanceof StateFileError) {
       throw error;
     }
-    if (error instanceof SyntaxError) {
-      const backupPath = await backupInvalidState(filePath, fs);
-      throw new StateFileError(filePath, error.message, backupPath);
+
+    const details = getRecoverableStateErrorDetails(error);
+    if (details !== null) {
+      await throwStateFileError(filePath, details, fs);
     }
-    if (error instanceof z.ZodError) {
-      const issue = error.issues[0];
-      const location = issue?.path?.join(".") || "root";
-      const backupPath = await backupInvalidState(filePath, fs);
-      throw new StateFileError(filePath, `schema error at "${location}": ${issue?.message ?? "invalid value"}`, backupPath);
-    }
+
     throw error;
   }
 }
@@ -120,7 +140,10 @@ export async function loadState(filePath: string, fs: FileSystemPort = nodeFileS
 export async function saveState(filePath: string, state: AppState, fs: FileSystemPort = nodeFileSystem): Promise<void> {
   const dir = path.dirname(filePath);
   const base = path.basename(filePath);
-  const tempPath = path.join(dir, `.${base}.tmp.${process.pid}.${Date.now()}.${randomUUID()}`);
+  const tempPath = path.join(
+    dir,
+    `.${base}.tmp.${String(process.pid)}.${String(Date.now())}.${randomUUID()}`,
+  );
   const toPersist: AppState = {
     ...state,
     stateVersion: STATE_SCHEMA_VERSION,

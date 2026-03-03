@@ -59,7 +59,9 @@ export default tseslint.config(
 				projectService: {
 					allowDefaultProject: [
 						"eslint.config.mjs",
-						"vitest.config.*",
+						"stryker.config.mjs",
+						"stryker.mcp.config.mjs",
+						"stryker.shell.config.mjs",
 					],
 				},
 				tsconfigRootDir: import.meta.dirname,
