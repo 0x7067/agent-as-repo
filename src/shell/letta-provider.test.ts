@@ -90,11 +90,16 @@ function getCreateAgentCall(client: MockLettaClient): CreateAgentCallArg {
   return firstCall[0];
 }
 
+const REPO_EXPERT_TAG = "repo-expert";
+const RATE_LIMITED_MESSAGE = "Rate limited";
+const STRING_ERROR = "string error";
+const NO_VALID_PASSAGE_ID = "no valid passage ID";
+
 const defaultCreateParams = {
   name: "repo-expert-my-app",
   repoName: "my-app",
   description: "Test repo",
-  tags: ["repo-expert"],
+  tags: [REPO_EXPERT_TAG],
   model: "openai/gpt-4.1",
   embedding: "openai/text-embedding-3-small",
   memoryBlockLimit: 5000,
@@ -106,7 +111,7 @@ describe("LettaProvider", () => {
       const client = makeMockClient();
       const provider = new LettaProvider(mockClientAs(client));
 
-      const result = await provider.createAgent({ ...defaultCreateParams, tags: ["repo-expert", "frontend"] });
+      const result = await provider.createAgent({ ...defaultCreateParams, tags: [REPO_EXPERT_TAG, "frontend"] });
 
       expect(result.agentId).toBe("agent-abc");
     });
@@ -165,13 +170,13 @@ describe("LettaProvider", () => {
       const client = makeMockClient();
       const provider = new LettaProvider(mockClientAs(client));
 
-      await provider.createAgent({ ...defaultCreateParams, tags: ["repo-expert", "mobile"] });
+      await provider.createAgent({ ...defaultCreateParams, tags: [REPO_EXPERT_TAG, "mobile"] });
 
       const call = getCreateAgentCall(client);
       expect(call.name).toBe("repo-expert-my-app");
       expect(call.model).toBe("openai/gpt-4.1");
       expect(call.embedding).toBe("openai/text-embedding-3-small");
-      expect(call.tags).toEqual(["repo-expert", "mobile"]);
+      expect(call.tags).toEqual([REPO_EXPERT_TAG, "mobile"]);
     });
 
     it("enables sleep-time by default", async () => {
@@ -366,7 +371,7 @@ describe("LettaProvider", () => {
   describe("retry on transient errors", () => {
     it("retries on 429 and succeeds", async () => {
       const client = makeMockClient();
-      const rateLimitError = Object.assign(new Error("Rate limited"), { statusCode: 429 });
+      const rateLimitError = Object.assign(new Error(RATE_LIMITED_MESSAGE), { statusCode: 429 });
       client.agents.passages.create
         .mockRejectedValueOnce(rateLimitError)
         .mockResolvedValueOnce([{ id: "passage-1", text: "", embedding: null, embedding_config: null }]);
@@ -436,12 +441,12 @@ describe("LettaProvider", () => {
 
     it("throws after max retries", async () => {
       const client = makeMockClient();
-      const rateLimitError = Object.assign(new Error("Rate limited"), { statusCode: 429 });
+      const rateLimitError = Object.assign(new Error(RATE_LIMITED_MESSAGE), { statusCode: 429 });
       client.agents.passages.create.mockImplementation(() => Promise.reject(rateLimitError));
 
       const provider = new LettaProvider(mockClientAs(client), 1);
 
-      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("Rate limited");
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow(RATE_LIMITED_MESSAGE);
       expect(client.agents.passages.create).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
     });
 
@@ -479,9 +484,9 @@ describe("LettaProvider", () => {
 
     it("returns false for string error", async () => {
       const client = makeMockClient();
-      client.agents.passages.create.mockRejectedValue("string error");
+      client.agents.passages.create.mockRejectedValue(STRING_ERROR);
       const provider = new LettaProvider(mockClientAs(client), 1);
-      await expect(provider.storePassage("agent-abc", "text")).rejects.toBe("string error");
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toBe(STRING_ERROR);
       expect(client.agents.passages.create).toHaveBeenCalledTimes(1); // no retry
     });
 
@@ -536,7 +541,7 @@ describe("LettaProvider", () => {
   describe("getRetryAfterMs via retry behavior", () => {
     it("uses Retry-After header (string seconds) when present on 429", async () => {
       const client = makeMockClient();
-      const rateLimitError = Object.assign(new Error("Rate limited"), {
+      const rateLimitError = Object.assign(new Error(RATE_LIMITED_MESSAGE), {
         statusCode: 429,
         headers: { "Retry-After": "1" }, // 1 second
       });
@@ -550,7 +555,7 @@ describe("LettaProvider", () => {
 
     it("uses retry-after header (lowercase) when present", async () => {
       const client = makeMockClient();
-      const rateLimitError = Object.assign(new Error("Rate limited"), {
+      const rateLimitError = Object.assign(new Error(RATE_LIMITED_MESSAGE), {
         statusCode: 429,
         headers: { "retry-after": "1" },
       });
@@ -564,7 +569,7 @@ describe("LettaProvider", () => {
 
     it("handles numeric Retry-After header value (not just strings)", async () => {
       const client = makeMockClient();
-      const rateLimitError = Object.assign(new Error("Rate limited"), {
+      const rateLimitError = Object.assign(new Error(RATE_LIMITED_MESSAGE), {
         statusCode: 429,
         headers: { "Retry-After": 1 }, // numeric 1 (not string)
       });
@@ -578,7 +583,7 @@ describe("LettaProvider", () => {
 
     it("ignores numeric Retry-After of 0 (boundary: must be > 0)", async () => {
       const client = makeMockClient();
-      const rateLimitError = Object.assign(new Error("Rate limited"), {
+      const rateLimitError = Object.assign(new Error(RATE_LIMITED_MESSAGE), {
         statusCode: 429,
         headers: { "Retry-After": 0 }, // 0 is not > 0 → ignored
       });
@@ -592,7 +597,7 @@ describe("LettaProvider", () => {
 
     it("ignores numeric Retry-After of 300 (boundary: must be < 300)", async () => {
       const client = makeMockClient();
-      const rateLimitError = Object.assign(new Error("Rate limited"), {
+      const rateLimitError = Object.assign(new Error(RATE_LIMITED_MESSAGE), {
         statusCode: 429,
         headers: { "Retry-After": 300 }, // 300 is not < 300 → ignored
       });
@@ -606,7 +611,7 @@ describe("LettaProvider", () => {
 
     it("ignores string Retry-After of '0' (boundary: seconds must be > 0)", async () => {
       const client = makeMockClient();
-      const rateLimitError = Object.assign(new Error("Rate limited"), {
+      const rateLimitError = Object.assign(new Error(RATE_LIMITED_MESSAGE), {
         statusCode: 429,
         headers: { "Retry-After": "0" }, // "0" → 0 seconds, not > 0 → ignored
       });
@@ -620,7 +625,7 @@ describe("LettaProvider", () => {
 
     it("prefers lowercase 'retry-after' over 'Retry-After' when both present", async () => {
       const client = makeMockClient();
-      const rateLimitError = Object.assign(new Error("Rate limited"), {
+      const rateLimitError = Object.assign(new Error(RATE_LIMITED_MESSAGE), {
         statusCode: 429,
         headers: { "retry-after": "0.001", "Retry-After": "300" }, // lowercase wins
       });
@@ -663,7 +668,7 @@ describe("LettaProvider", () => {
 
       const provider = new LettaProvider(mockClientAs(client));
 
-      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("no valid passage ID");
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow(NO_VALID_PASSAGE_ID);
     });
 
     it("throws on null ID in result", async () => {
@@ -672,7 +677,7 @@ describe("LettaProvider", () => {
 
       const provider = new LettaProvider(mockClientAs(client));
 
-      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("no valid passage ID");
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow(NO_VALID_PASSAGE_ID);
     });
 
     it("throws on empty string ID in result", async () => {
@@ -681,7 +686,7 @@ describe("LettaProvider", () => {
 
       const provider = new LettaProvider(mockClientAs(client));
 
-      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow("no valid passage ID");
+      await expect(provider.storePassage("agent-abc", "text")).rejects.toThrow(NO_VALID_PASSAGE_ID);
     });
   });
 
@@ -853,17 +858,17 @@ describe("LettaProvider", () => {
 
     it("rethrows primitive string error from deletePassage (not treating string as 404)", async () => {
       const client = makeMockClient();
-      client.agents.passages.delete.mockRejectedValue("string error");
+      client.agents.passages.delete.mockRejectedValue(STRING_ERROR);
       const provider = new LettaProvider(mockClientAs(client), 1);
       // string is not an object, isHttpStatus returns false → should rethrow
-      await expect(provider.deletePassage("agent-abc", "p-1")).rejects.toBe("string error");
+      await expect(provider.deletePassage("agent-abc", "p-1")).rejects.toBe(STRING_ERROR);
     });
   });
 
   describe("getRetryAfterMs detailed behavior", () => {
     it("does not use Retry-After of 0 seconds (must be > 0)", async () => {
       const client = makeMockClient();
-      const rateLimitError = Object.assign(new Error("Rate limited"), {
+      const rateLimitError = Object.assign(new Error(RATE_LIMITED_MESSAGE), {
         statusCode: 429,
         headers: { "Retry-After": "0" }, // 0 is not > 0 → should fall back to base delay
       });
@@ -878,7 +883,7 @@ describe("LettaProvider", () => {
 
     it("does not use Retry-After of 300+ seconds (must be < 300)", async () => {
       const client = makeMockClient();
-      const rateLimitError = Object.assign(new Error("Rate limited"), {
+      const rateLimitError = Object.assign(new Error(RATE_LIMITED_MESSAGE), {
         statusCode: 429,
         headers: { "Retry-After": "300" }, // 300 is not < 300 → should fall back to base delay
       });
@@ -895,7 +900,7 @@ describe("LettaProvider", () => {
       // We can't directly measure delay, but we can verify the retry succeeds and
       // the delay was small (1s Retry-After → 1000ms should complete in test time)
       const client = makeMockClient();
-      const rateLimitError = Object.assign(new Error("Rate limited"), {
+      const rateLimitError = Object.assign(new Error(RATE_LIMITED_MESSAGE), {
         statusCode: 429,
         headers: { "Retry-After": "0.001" }, // very small Retry-After in seconds
       });

@@ -236,7 +236,6 @@ export default tseslint.config(
 			"src/cli.test.ts",
 			"src/mcp-server.test.ts",
 			"src/shell/doctor.test.ts",
-			"src/shell/letta-provider.test.ts",
 			"src/shell/self-check.test.ts",
 			"src/shell/state-store.test.ts",
 			"src/shell/viking-provider.test.ts",
