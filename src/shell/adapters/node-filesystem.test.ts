@@ -14,6 +14,24 @@ async function withTmpDir(fn: (dir: string) => Promise<void>) {
   }
 }
 
+async function writeTmpFile(filePath: string, content: string): Promise<void> {
+  // Path is constrained under the mkdtemp-created temp directory used in each test.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  await fs.writeFile(filePath, content, "utf8");
+}
+
+async function readTmpFile(filePath: string): Promise<string> {
+  // Path is constrained under the mkdtemp-created temp directory used in each test.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  return fs.readFile(filePath, "utf8");
+}
+
+async function mkdirTmpDirectory(directoryPath: string): Promise<void> {
+  // Path is constrained under the mkdtemp-created temp directory used in each test.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  await fs.mkdir(directoryPath, { recursive: true });
+}
+
 describe("nodeFileSystem adapter", () => {
   it("satisfies FileSystemPort interface", () => {
     const adapter: FileSystemPort = nodeFileSystem;
@@ -23,7 +41,7 @@ describe("nodeFileSystem adapter", () => {
   it("readFile reads utf8 content", async () => {
     await withTmpDir(async (dir) => {
       const filePath = path.join(dir, "test.txt");
-      await fs.writeFile(filePath, "hello world", "utf8");
+      await writeTmpFile(filePath, "hello world");
 
       const content = await nodeFileSystem.readFile(filePath, "utf8");
       expect(content).toBe("hello world");
@@ -35,7 +53,7 @@ describe("nodeFileSystem adapter", () => {
       const filePath = path.join(dir, "out.txt");
       await nodeFileSystem.writeFile(filePath, "written");
 
-      const content = await fs.readFile(filePath, "utf8");
+      const content = await readTmpFile(filePath);
       expect(content).toBe("written");
     });
   });
@@ -43,7 +61,7 @@ describe("nodeFileSystem adapter", () => {
   it("stat returns size and isDirectory", async () => {
     await withTmpDir(async (dir) => {
       const filePath = path.join(dir, "data.txt");
-      await fs.writeFile(filePath, "abc", "utf8");
+      await writeTmpFile(filePath, "abc");
 
       const fileStat = await nodeFileSystem.stat(filePath);
       expect(fileStat.size).toBe(3);
@@ -57,7 +75,7 @@ describe("nodeFileSystem adapter", () => {
   it("access resolves for existing file and rejects for missing", async () => {
     await withTmpDir(async (dir) => {
       const filePath = path.join(dir, "exists.txt");
-      await fs.writeFile(filePath, "", "utf8");
+      await writeTmpFile(filePath, "");
 
       await expect(nodeFileSystem.access(filePath)).resolves.toBeUndefined();
       await expect(nodeFileSystem.access(path.join(dir, "nope.txt"))).rejects.toThrow();
@@ -68,12 +86,12 @@ describe("nodeFileSystem adapter", () => {
     await withTmpDir(async (dir) => {
       const from = path.join(dir, "a.txt");
       const to = path.join(dir, "b.txt");
-      await fs.writeFile(from, "data", "utf8");
+      await writeTmpFile(from, "data");
 
       await nodeFileSystem.rename(from, to);
 
       await expect(fs.access(from)).rejects.toThrow();
-      const content = await fs.readFile(to, "utf8");
+      const content = await readTmpFile(to);
       expect(content).toBe("data");
     });
   });
@@ -82,11 +100,11 @@ describe("nodeFileSystem adapter", () => {
     await withTmpDir(async (dir) => {
       const src = path.join(dir, "src.txt");
       const dest = path.join(dir, "dest.txt");
-      await fs.writeFile(src, "copy me", "utf8");
+      await writeTmpFile(src, "copy me");
 
       await nodeFileSystem.copyFile(src, dest);
 
-      const content = await fs.readFile(dest, "utf8");
+      const content = await readTmpFile(dest);
       expect(content).toBe("copy me");
       // Source still exists
       await expect(fs.access(src)).resolves.toBeUndefined();
@@ -100,17 +118,17 @@ describe("nodeFileSystem adapter", () => {
       await nodeFileSystem.writeFile(filePath, content);
 
       // Read back as utf8 to verify encoding was applied correctly
-      const read = await fs.readFile(filePath, "utf8");
+      const read = await readTmpFile(filePath);
       expect(read).toBe(content);
     });
   });
 
   it("glob finds files matching patterns", async () => {
     await withTmpDir(async (dir) => {
-      await fs.mkdir(path.join(dir, "src"), { recursive: true });
-      await fs.writeFile(path.join(dir, "src/a.ts"), "x", "utf8");
-      await fs.writeFile(path.join(dir, "src/b.js"), "y", "utf8");
-      await fs.writeFile(path.join(dir, "readme.md"), "z", "utf8");
+      await mkdirTmpDirectory(path.join(dir, "src"));
+      await writeTmpFile(path.join(dir, "src/a.ts"), "x");
+      await writeTmpFile(path.join(dir, "src/b.js"), "y");
+      await writeTmpFile(path.join(dir, "readme.md"), "z");
 
       const results = await nodeFileSystem.glob(["**/*.ts"], {
         cwd: dir,
@@ -126,8 +144,8 @@ describe("nodeFileSystem adapter", () => {
 
   it("glob respects onlyFiles option via fast-glob", async () => {
     await withTmpDir(async (dir) => {
-      await fs.mkdir(path.join(dir, "sub"), { recursive: true });
-      await fs.writeFile(path.join(dir, "sub/file.ts"), "x", "utf8");
+      await mkdirTmpDirectory(path.join(dir, "sub"));
+      await writeTmpFile(path.join(dir, "sub/file.ts"), "x");
 
       const results = await nodeFileSystem.glob(["**/*"], {
         cwd: dir,
