@@ -228,7 +228,9 @@ describe("toolCallingLoop", () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
 
     // Second call should include the tool result message
-    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body as string);
+    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body as string) as {
+      messages: Array<{ role: string; tool_call_id?: string; content?: string }>;
+    };
     const toolMsg = secondBody.messages.find((m: { role: string }) => m.role === "tool");
     expect(toolMsg).toBeDefined();
     expect(toolMsg.tool_call_id).toBe("tc1");
@@ -319,7 +321,9 @@ describe("toolCallingLoop", () => {
 
     expect(result).toBe("Done.");
 
-    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body as string);
+    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body as string) as {
+      messages: Array<{ role: string; tool_call_id?: string; content?: string }>;
+    };
     const toolMsg = secondBody.messages.find((m: { role: string }) => m.role === "tool");
     expect(toolMsg.content).toBe("Error: unknown tool unknown_tool");
   });
@@ -341,7 +345,9 @@ describe("toolCallingLoop", () => {
     });
 
     expect(result).toBe("Done despite malformed args.");
-    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body as string);
+    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body as string) as {
+      messages: Array<{ role: string; tool_call_id?: string; content?: string }>;
+    };
     const toolMsg = secondBody.messages.find((m: { role: string }) => m.role === "tool");
     expect(toolMsg.content).toContain("Error: invalid arguments for tool get_weather");
   });

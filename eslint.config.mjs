@@ -213,7 +213,6 @@ export default tseslint.config(
 			// Mocking patterns trigger unsafe type errors
 				"@typescript-eslint/no-unsafe-assignment": "off",
 				"@typescript-eslint/no-unsafe-member-access": "off",
-				"@typescript-eslint/no-unsafe-call": "off",
 				"unicorn/prefer-module": "off",
 			// Tests often have long setup/assertion blocks
 			"max-lines": "off",
