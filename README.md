@@ -63,6 +63,8 @@ pnpm repo-expert mcp-install  # writes entry to ~/.claude.json
 Copy `config.example.yaml` to `config.yaml` and set provider-specific credentials in `.env`:
 - Letta mode: `LETTA_API_KEY`
 - Viking mode: `OPENROUTER_API_KEY` (optional `VIKING_URL`, `VIKING_API_KEY`)
+  - Requires a running [OpenViking](https://github.com/volcengine/OpenViking) server (default: `localhost:1933`)
+  - OpenViking needs an embedding backend configured in `~/.openviking/ov.conf` (e.g., Ollama with `nomic-embed-text`)
 
 ```yaml
 provider:

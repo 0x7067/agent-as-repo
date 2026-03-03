@@ -14,6 +14,9 @@ provider:
 #   type: viking
 #   openrouter_model: openai/gpt-4o-mini
 #   viking_url: http://localhost:1933
+#   # Note: Embedding model is configured in OpenViking's ov.conf, not here.
+#   # OpenViking typically delegates to Ollama (e.g., nomic-embed-text).
+#   # See: https://github.com/volcengine/OpenViking
 
 # Optional global defaults (all can be overridden per-repo)
 defaults:
