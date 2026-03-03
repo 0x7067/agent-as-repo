@@ -14,6 +14,24 @@ async function withTempDir(prefix: string, fn: (dir: string) => Promise<void>): 
   }
 }
 
+async function writeTempFile(filePath: string, content: string): Promise<void> {
+  // Path is constrained under the mkdtemp-created temp directory for this test run.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  await fs.writeFile(filePath, content, "utf8");
+}
+
+async function mkdirTempDirectory(directoryPath: string): Promise<void> {
+  // Path is constrained under the mkdtemp-created temp directory for this test run.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  await fs.mkdir(directoryPath, { recursive: true });
+}
+
+async function chmodTempFile(filePath: string, mode: number): Promise<void> {
+  // Path is constrained under the mkdtemp-created temp directory for this test run.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  await fs.chmod(filePath, mode);
+}
+
 describe("self-check", () => {
   it("reports warnings when package.json is missing", async () => {
     await withTempDir("repo-expert-self-check-empty-", async (dir) => {
@@ -32,7 +50,7 @@ describe("self-check", () => {
 
   it("fails on invalid package manager declaration and missing installs", async () => {
     await withTempDir("repo-expert-self-check-invalid-", async (dir) => {
-      await fs.writeFile(
+      await writeTempFile(
         path.join(dir, "package.json"),
         JSON.stringify({
           name: "x",
@@ -40,7 +58,6 @@ describe("self-check", () => {
           packageManager: "npm@10.0.0",
           dependencies: { commander: "^14.0.0" },
         }),
-        "utf8",
       );
 
       const results = await runSelfChecks(dir);
@@ -105,10 +122,9 @@ describe("self-check", () => {
 
   it("packageManager check warns when field is missing", async () => {
     await withTempDir("repo-expert-self-check-pm-", async (dir) => {
-      await fs.writeFile(
+      await writeTempFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", version: "1.0.0" }),
-        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const pmResult = results.find((r) => r.name === "packageManager");
@@ -120,10 +136,9 @@ describe("self-check", () => {
 
   it("packageManager check passes when pnpm@ prefix is used", async () => {
     await withTempDir("repo-expert-self-check-pm-pass-", async (dir) => {
-      await fs.writeFile(
+      await writeTempFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", version: "1.0.0", packageManager: "pnpm@9.0.0" }),
-        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const pmResult = results.find((r) => r.name === "packageManager");
@@ -134,10 +149,9 @@ describe("self-check", () => {
 
   it("packageManager check fails when not pnpm", async () => {
     await withTempDir("repo-expert-self-check-pm-fail-", async (dir) => {
-      await fs.writeFile(
+      await writeTempFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", version: "1.0.0", packageManager: "npm@10.0.0" }),
-        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const pmResult = results.find((r) => r.name === "packageManager");
@@ -149,10 +163,9 @@ describe("self-check", () => {
 
   it("packageManager check fails on 'pnpm' without @ (must be startsWith pnpm@)", async () => {
     await withTempDir("repo-expert-self-check-pm-no-at-", async (dir) => {
-      await fs.writeFile(
+      await writeTempFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", packageManager: "pnpm" }),
-        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const pmResult = results.find((r) => r.name === "packageManager");
@@ -163,10 +176,9 @@ describe("self-check", () => {
 
   it("dependencies warns when no deps declared", async () => {
     await withTempDir("repo-expert-self-check-nodeps-", async (dir) => {
-      await fs.writeFile(
+      await writeTempFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", version: "1.0.0", packageManager: "pnpm@9.0.0" }),
-        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const depsResult = results.find((r) => r.name === "dependencies");
@@ -178,10 +190,9 @@ describe("self-check", () => {
 
   it("dependencies check reports missing node_modules", async () => {
     await withTempDir("repo-expert-self-check-missing-nm-", async (dir) => {
-      await fs.writeFile(
+      await writeTempFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", dependencies: { vitest: "^1.0.0" } }),
-        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const depsResult = results.find((r) => r.name === "dependencies");
@@ -205,11 +216,10 @@ describe("self-check", () => {
   it("dependencies check reports missing packages with message", async () => {
     await withTempDir("repo-expert-self-check-missing-deps-", async (dir) => {
       // Create node_modules dir but with no packages installed
-      await fs.mkdir(path.join(dir, "node_modules"), { recursive: true });
-      await fs.writeFile(
+      await mkdirTempDirectory(path.join(dir, "node_modules"));
+      await writeTempFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", dependencies: { "nonexistent-pkg": "^1.0.0" } }),
-        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const depsResult = results.find((r) => r.name === "dependencies");
@@ -221,13 +231,12 @@ describe("self-check", () => {
 
   it("dependencies reports suffix when more than 5 missing deps", async () => {
     await withTempDir("repo-expert-self-check-many-missing-", async (dir) => {
-      await fs.mkdir(path.join(dir, "node_modules"), { recursive: true });
+      await mkdirTempDirectory(path.join(dir, "node_modules"));
       const deps: Record<string, string> = {};
       for (let i = 0; i < 7; i++) deps[`pkg-${String(i)}`] = "^1.0.0";
-      await fs.writeFile(
+      await writeTempFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", dependencies: deps }),
-        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const depsResult = results.find((r) => r.name === "dependencies");
@@ -270,11 +279,10 @@ describe("self-check", () => {
 
   it("missing deps separated by ', ' not empty string", async () => {
     await withTempDir("repo-expert-self-check-sep-", async (dir) => {
-      await fs.mkdir(path.join(dir, "node_modules"), { recursive: true });
-      await fs.writeFile(
+      await mkdirTempDirectory(path.join(dir, "node_modules"));
+      await writeTempFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", dependencies: { "pkg-a": "^1.0.0", "pkg-b": "^1.0.0" } }),
-        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const depsResult = results.find((r) => r.name === "dependencies");
@@ -286,13 +294,12 @@ describe("self-check", () => {
 
   it("missing deps suffix only appears when count > 5 (not >= 5)", async () => {
     await withTempDir("repo-expert-self-check-exactly5-", async (dir) => {
-      await fs.mkdir(path.join(dir, "node_modules"), { recursive: true });
+      await mkdirTempDirectory(path.join(dir, "node_modules"));
       const deps: Record<string, string> = {};
       for (let i = 0; i < 5; i++) deps[`pkg-${String(i)}`] = "^1.0.0";
-      await fs.writeFile(
+      await writeTempFile(
         path.join(dir, "package.json"),
         JSON.stringify({ name: "x", dependencies: deps }),
-        "utf8",
       );
       const results = await runSelfChecks(dir, 1);
       const depsResult = results.find((r) => r.name === "dependencies");
@@ -317,15 +324,14 @@ describe("self-check", () => {
     await withTempDir("repo-expert-self-check-eacces-", async (dir) => {
       // Write a package.json then make it unreadable
       const pkgPath = path.join(dir, "package.json");
-      await fs.writeFile(pkgPath, JSON.stringify({ name: "x" }), "utf8");
-      await fs.chmod(pkgPath, 0o000);
+      await writeTempFile(pkgPath, JSON.stringify({ name: "x" }));
+      await chmodTempFile(pkgPath, 0o000);
       try {
         // runSelfChecks calls readPackageJson internally; non-ENOENT errors should propagate
         await expect(runSelfChecks(dir, 1)).rejects.toThrow();
       } finally {
         // Restore permissions so cleanup works
-        // eslint-disable-next-line sonarjs/file-permissions
-        await fs.chmod(pkgPath, 0o644);
+        await chmodTempFile(pkgPath, 0o644);
       }
     });
   });
