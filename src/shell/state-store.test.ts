@@ -200,7 +200,9 @@ describe("state store", () => {
 
       await Promise.all(saves);
       const raw = await fs.readFile(filePath, "utf8");
-      expect(() => JSON.parse(raw)).not.toThrow();
+      expect(() => {
+        JSON.parse(raw);
+      }).not.toThrow();
       const loaded = await loadState(filePath);
       expect(Object.keys(loaded.agents).length).toBe(1);
     });

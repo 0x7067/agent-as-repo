@@ -257,7 +257,9 @@ describe("runDoctorFixes (port-injected, stryker)", () => {
     const stateContent = fakeFs.store.get("/project/.repo-expert-state.json");
     expect(stateContent).toBeDefined();
     if (typeof stateContent !== "string") throw new Error("Expected state file to be written");
-    expect(() => JSON.parse(stateContent)).not.toThrow();
+    expect(() => {
+      JSON.parse(stateContent);
+    }).not.toThrow();
   });
 
   it("does not overwrite existing state file", async () => {

@@ -211,12 +211,11 @@ export default tseslint.config(
 			// eslint-disable-next-line sonarjs/no-hardcoded-passwords
 			"sonarjs/no-hardcoded-passwords": "off",
 			// Mocking patterns trigger unsafe type errors
-			"@typescript-eslint/no-unsafe-assignment": "off",
-			"@typescript-eslint/no-unsafe-member-access": "off",
-			"@typescript-eslint/no-unsafe-call": "off",
-			"@typescript-eslint/no-unsafe-argument": "off",
-			"@typescript-eslint/no-unsafe-return": "off",
-			"unicorn/prefer-module": "off",
+				"@typescript-eslint/no-unsafe-assignment": "off",
+				"@typescript-eslint/no-unsafe-member-access": "off",
+				"@typescript-eslint/no-unsafe-call": "off",
+				"@typescript-eslint/no-unsafe-argument": "off",
+				"unicorn/prefer-module": "off",
 			// Tests often have long setup/assertion blocks
 			"max-lines": "off",
 			// Tests use dynamic paths for temp dirs and fixtures
