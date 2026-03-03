@@ -238,7 +238,6 @@ export default tseslint.config(
 			"src/shell/doctor.test.ts",
 			"src/shell/state-store.test.ts",
 			"src/shell/viking-provider.test.ts",
-			"src/shell/watch.test.ts",
 		],
 		rules: {
 			// Narrow temporary override while we deduplicate repeated test literals.

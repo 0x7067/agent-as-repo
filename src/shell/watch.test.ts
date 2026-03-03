@@ -32,6 +32,17 @@ const mockedSyncRepo = vi.mocked(syncRepo);
 const mockedListSubmodules = vi.mocked(listSubmodules);
 const mockedExpandSubmoduleFiles = vi.mocked(expandSubmoduleFiles);
 
+const WATCH_REPO_NAME = "my-app";
+const WATCH_REPO_PATH = `/repo/${WATCH_REPO_NAME}`;
+const WATCH_STATE_PATH = `${WATCH_REPO_PATH}/state.json`;
+const WATCH_SYNC_LOG_FRAGMENT = `[${WATCH_REPO_NAME}]`;
+const WATCH_SYNC_ERROR_TEXT = "sync error";
+const WATCH_PASSAGE_FILE = "src/a.ts";
+const WATCH_STATE_FILE = "state.json";
+const WATCH_STORE_PATH = `${WATCH_REPO_PATH}/.repo-expert-state.json`;
+const WATCH_SUBMODULE_PATH = "libs/my-lib";
+const WATCH_SUBMODULE_FILES = ["libs/my-lib/src/index.ts", "libs/my-lib/src/util.ts"];
+
 // Import shared mock after vi.mock calls
 import { makeMockProvider } from "./__test__/mock-provider.js";
 
@@ -66,8 +77,8 @@ const testConfig: Config = {
   letta: { model: "letta-free", embedding: "letta-free" },
   defaults: { maxFileSizeKb: 50, memoryBlockLimit: 5000, bootstrapOnCreate: false, chunking: "raw" },
   repos: {
-    "my-app": {
-      path: "/repo/my-app",
+    [WATCH_REPO_NAME]: {
+      path: WATCH_REPO_PATH,
       description: "Test",
       extensions: [".ts"],
       ignoreDirs: ["node_modules"],
@@ -83,10 +94,10 @@ function makeState(lastSyncCommit: string | null = "abc123"): AppState {
   return {
     stateVersion: 2,
     agents: {
-      "my-app": {
+      [WATCH_REPO_NAME]: {
         agentId: "agent-abc",
-        repoName: "my-app",
-        passages: { "src/a.ts": ["p-1"] },
+        repoName: WATCH_REPO_NAME,
+        passages: { [WATCH_PASSAGE_FILE]: ["p-1"] },
         lastBootstrap: null,
         lastSyncCommit,
         lastSyncAt: null,
@@ -114,7 +125,7 @@ describe("watchRepos", () => {
       diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
     });
     mockedSyncRepo.mockResolvedValue({
-      passages: { "src/a.ts": ["p-2"] },
+      passages: { [WATCH_PASSAGE_FILE]: ["p-2"] },
       lastSyncCommit: "def456",
       filesRemoved: 0,
       filesReIndexed: 1,
@@ -129,8 +140,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log,
@@ -163,8 +174,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log,
@@ -178,7 +189,7 @@ describe("watchRepos", () => {
     await watchPromise;
 
     expect(mockedSyncRepo).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith("[my-app] no changes (HEAD=abc123)");
+    expect(log).toHaveBeenCalledWith(`${WATCH_SYNC_LOG_FRAGMENT} no changes (HEAD=abc123)`);
   });
 
   it("triggers sync from file events even when HEAD is unchanged", async () => {
@@ -187,7 +198,7 @@ describe("watchRepos", () => {
     const fakeGit = makeFakeGit({ headCommit: vi.fn().mockReturnValue("abc123") });
     const fakeFs = makeFakeFs();
     mockedSyncRepo.mockResolvedValue({
-      passages: { "src/a.ts": ["p-2"] },
+      passages: { [WATCH_PASSAGE_FILE]: ["p-2"] },
       lastSyncCommit: "abc123",
       filesRemoved: 0,
       filesReIndexed: 1,
@@ -201,8 +212,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       debounceMs: 100,
       signal: ac.signal,
@@ -240,8 +251,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "/repo/my-app/state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_PATH,
       intervalMs: 5000,
       debounceMs: 100,
       signal: ac.signal,
@@ -254,7 +265,7 @@ describe("watchRepos", () => {
     const watchCallback = vi.mocked(fakeFs.watch).mock.calls[0]?.[2];
     expect(typeof watchCallback).toBe("function");
     (watchCallback as (eventType: string, fileName: string) => void)("change", "state.json");
-    (watchCallback as (eventType: string, fileName: string) => void)("change", "/repo/my-app/state.json");
+    (watchCallback as (eventType: string, fileName: string) => void)("change", WATCH_STATE_PATH);
 
     await vi.advanceTimersByTimeAsync(120);
     expect(mockedSyncRepo).not.toHaveBeenCalled();
@@ -279,8 +290,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log,
@@ -293,7 +304,7 @@ describe("watchRepos", () => {
     await vi.advanceTimersByTimeAsync(200);
     await watchPromise;
 
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("sync error"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining(WATCH_SYNC_ERROR_TEXT));
     expect(log).toHaveBeenCalledWith(expect.stringContaining("Letta API down"));
   });
 
@@ -311,8 +322,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log,
@@ -338,7 +349,7 @@ describe("watchRepos", () => {
       diffFiles: vi.fn().mockReturnValue(["src/a.ts", "README.md", "node_modules/pkg/index.js"]),
     });
     mockedSyncRepo.mockResolvedValue({
-      passages: { "src/a.ts": ["p-2"] },
+      passages: { [WATCH_PASSAGE_FILE]: ["p-2"] },
       lastSyncCommit: "def456",
       filesRemoved: 0,
       filesReIndexed: 1,
@@ -352,8 +363,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log,
@@ -383,8 +394,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log: vi.fn(),
@@ -413,7 +424,7 @@ describe("watchRepos", () => {
       diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
     });
     mockedSyncRepo.mockResolvedValue({
-      passages: { "src/a.ts": ["p-2"] },
+      passages: { [WATCH_PASSAGE_FILE]: ["p-2"] },
       lastSyncCommit: "def456",
       filesRemoved: 0,
       filesReIndexed: 1,
@@ -427,8 +438,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log,
@@ -458,8 +469,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log: vi.fn(),
@@ -484,8 +495,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log: vi.fn(),
@@ -512,8 +523,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log,
@@ -527,7 +538,7 @@ describe("watchRepos", () => {
     await watchPromise;
 
     // Should show truncated hash (7 chars: "abc123d"), not full hash
-    expect(log).toHaveBeenCalledWith("[my-app] no changes (HEAD=abc123d)");
+    expect(log).toHaveBeenCalledWith(`${WATCH_SYNC_LOG_FRAGMENT} no changes (HEAD=abc123d)`);
   });
 
   it("sync log does NOT include [event] suffix for poll-based syncs", async () => {
@@ -538,7 +549,7 @@ describe("watchRepos", () => {
       diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
     });
     mockedSyncRepo.mockResolvedValue({
-      passages: { "src/a.ts": ["p-2"] },
+      passages: { [WATCH_PASSAGE_FILE]: ["p-2"] },
       lastSyncCommit: "def456",
       filesRemoved: 0,
       filesReIndexed: 1,
@@ -552,8 +563,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log,
@@ -591,8 +602,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig, // only .ts extensions
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       debounceMs: 50,
       signal: ac.signal,
@@ -639,8 +650,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 1000,
       signal: ac.signal,
       log,
@@ -659,7 +670,7 @@ describe("watchRepos", () => {
     await watchPromise;
 
     // First failure logged
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("sync error"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining(WATCH_SYNC_ERROR_TEXT));
     // syncRepo called only once (first tick); second tick skipped due to backoff
     expect(mockedSyncRepo).toHaveBeenCalledTimes(1);
   });
@@ -672,7 +683,7 @@ describe("watchRepos", () => {
       diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
     });
     mockedSyncRepo.mockResolvedValue({
-      passages: { "src/a.ts": ["p-2"] },
+      passages: { [WATCH_PASSAGE_FILE]: ["p-2"] },
       lastSyncCommit: "def456",
       filesRemoved: 0,
       filesReIndexed: 1,
@@ -684,8 +695,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log: vi.fn(),
@@ -701,8 +712,8 @@ describe("watchRepos", () => {
     // saveState should be called with state containing lastSyncAt
     expect(mockedSaveState).toHaveBeenCalled();
     const savedState = mockedSaveState.mock.calls[0][1];
-    expect(savedState.agents["my-app"].lastSyncAt).not.toBeNull();
-    expect(savedState.agents["my-app"].lastSyncCommit).toBe("def456");
+    expect(savedState.agents[WATCH_REPO_NAME].lastSyncAt).not.toBeNull();
+    expect(savedState.agents[WATCH_REPO_NAME].lastSyncCommit).toBe("def456");
   });
 
   it("git commands use correct args for HEAD", async () => {
@@ -722,8 +733,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log: vi.fn(),
@@ -737,7 +748,7 @@ describe("watchRepos", () => {
     await watchPromise;
 
     // headCommit called with the repo path
-    expect(fakeGit.headCommit).toHaveBeenCalledWith("/repo/my-app");
+    expect(fakeGit.headCommit).toHaveBeenCalledWith(WATCH_REPO_PATH);
   });
 
   it("normalizes backslashes in file paths to forward slashes", async () => {
@@ -758,8 +769,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       debounceMs: 50,
       signal: ac.signal,
@@ -804,8 +815,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       debounceMs: 50,
       signal: ac.signal,
@@ -847,8 +858,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log,
@@ -868,7 +879,7 @@ describe("watchRepos", () => {
     // Should save state with updated lastSyncCommit
     expect(mockedSaveState).toHaveBeenCalled();
     const savedState = mockedSaveState.mock.calls[0][1];
-    expect(savedState.agents["my-app"].lastSyncCommit).toBe("def456");
+    expect(savedState.agents[WATCH_REPO_NAME].lastSyncCommit).toBe("def456");
   });
 
   it("backoff delay uses failure count (not increments -1)", async () => {
@@ -889,8 +900,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 1000,
       signal: ac.signal,
       log,
@@ -925,8 +936,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 1000,
       signal: ac.signal,
       log,
@@ -940,7 +951,7 @@ describe("watchRepos", () => {
     await watchPromise;
 
     // Log should include "backoff Xs" (delay / 1000, not * 1000)
-    const errorLog = log.mock.calls.find(([msg]) => (msg as string).includes("sync error"));
+    const errorLog = log.mock.calls.find(([msg]) => (msg as string).includes(WATCH_SYNC_ERROR_TEXT));
     expect(errorLog).toBeDefined();
     if (!errorLog) return;
     const msg = errorLog[0] as string;
@@ -973,8 +984,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       debounceMs: 50,
       signal: ac.signal,
@@ -1009,8 +1020,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       debounceMs: 50,
       signal: ac.signal,
@@ -1041,8 +1052,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       debounceMs: 50,
       signal: ac.signal,
@@ -1079,8 +1090,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log: vi.fn(),
@@ -1108,7 +1119,7 @@ describe("watchRepos", () => {
       syncCount++;
       if (syncCount === 1) return Promise.reject(new Error("First sync fails"));
       return Promise.resolve({
-        passages: { "src/a.ts": ["p-2"] },
+        passages: { [WATCH_PASSAGE_FILE]: ["p-2"] },
         lastSyncCommit: "def456",
         filesRemoved: 0,
         filesReIndexed: 1,
@@ -1123,8 +1134,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 1000,
       signal: ac.signal,
       log,
@@ -1142,7 +1153,7 @@ describe("watchRepos", () => {
     await watchPromise;
 
     // First failure should be logged as "attempt 1"
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("sync error"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining(WATCH_SYNC_ERROR_TEXT));
     expect(log).toHaveBeenCalledWith(expect.stringContaining("attempt 1"));
   });
 
@@ -1158,8 +1169,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       log,
@@ -1194,9 +1205,9 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: testConfig,
-      repoNames: ["my-app"],
+      repoNames: [WATCH_REPO_NAME],
       // state file is INSIDE the repo path — should be ignored
-      statePath: "/repo/my-app/.repo-expert-state.json",
+      statePath: WATCH_STORE_PATH,
       intervalMs: 5000,
       debounceMs: 50,
       signal: ac.signal,
@@ -1233,7 +1244,7 @@ describe("watchRepos", () => {
       ...testConfig,
       repos: {
         "my-app": {
-          ...testConfig.repos["my-app"],
+          ...testConfig.repos[WATCH_REPO_NAME],
           basePath: "packages/frontend",
         },
       },
@@ -1242,8 +1253,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: configWithBase,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       debounceMs: 50,
       signal: ac.signal,
@@ -1273,7 +1284,7 @@ describe("watchRepos", () => {
       ...testConfig,
       repos: {
         "my-app": {
-          ...testConfig.repos["my-app"],
+          ...testConfig.repos[WATCH_REPO_NAME],
           includeSubmodules: true,
         },
       },
@@ -1282,15 +1293,12 @@ describe("watchRepos", () => {
     mockedLoadState.mockResolvedValue(state);
     const fakeGit = makeFakeGit({
       headCommit: vi.fn().mockReturnValue("def456"),
-      diffFiles: vi.fn().mockReturnValue(["libs/my-lib"]),
+      diffFiles: vi.fn().mockReturnValue([WATCH_SUBMODULE_PATH]),
     });
     mockedListSubmodules.mockReturnValue([
-      { path: "libs/my-lib", commit: "abc123", initialized: true },
+      { path: WATCH_SUBMODULE_PATH, commit: "abc123", initialized: true },
     ]);
-    mockedExpandSubmoduleFiles.mockResolvedValue([
-      "libs/my-lib/src/index.ts",
-      "libs/my-lib/src/util.ts",
-    ]);
+    mockedExpandSubmoduleFiles.mockResolvedValue(WATCH_SUBMODULE_FILES);
     mockedSyncRepo.mockResolvedValue({
       passages: {},
       lastSyncCommit: "def456",
@@ -1304,8 +1312,8 @@ describe("watchRepos", () => {
     const watchPromise = watchRepos({
       provider: makeMockProvider(),
       config: subConfig,
-      repoNames: ["my-app"],
-      statePath: "state.json",
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
       intervalMs: 5000,
       signal: ac.signal,
       git: fakeGit,
@@ -1318,15 +1326,15 @@ describe("watchRepos", () => {
     await watchPromise;
 
     expect(mockedExpandSubmoduleFiles).toHaveBeenCalledWith(
-      expect.objectContaining({ path: "/repo/my-app" }),
-      expect.objectContaining({ path: "libs/my-lib" }),
+      expect.objectContaining({ path: WATCH_REPO_PATH }),
+      expect.objectContaining({ path: WATCH_SUBMODULE_PATH }),
     );
     const syncCall = mockedSyncRepo.mock.calls[0] as [{ changedFiles: string[] }] | undefined;
     if (syncCall === undefined) {
       throw new Error("Expected syncRepo to be called");
     }
     expect(syncCall[0].changedFiles).toEqual(
-      expect.arrayContaining(["libs/my-lib/src/index.ts", "libs/my-lib/src/util.ts"]),
+      expect.arrayContaining(WATCH_SUBMODULE_FILES),
     );
   });
 });
