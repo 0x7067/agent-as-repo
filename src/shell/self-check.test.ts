@@ -32,11 +32,18 @@ async function chmodTempFile(filePath: string, mode: number): Promise<void> {
   await fs.chmod(filePath, mode);
 }
 
+const PACKAGE_JSON_CHECK = "package.json";
+const NPM_PACKAGE_MANAGER = "npm@10.0.0";
+const PNPM_PACKAGE_MANAGER = "pnpm@9.0.0";
+const PNPM_PACKAGE_MANAGER_8 = "pnpm@8.0.0";
+const PROJECT_DIR = "/project";
+const PROJECT_PACKAGE_JSON_PATH = `${PROJECT_DIR}/${PACKAGE_JSON_CHECK}`;
+
 describe("self-check", () => {
   it("reports warnings when package.json is missing", async () => {
     await withTempDir("repo-expert-self-check-empty-", async (dir) => {
       const results = await runSelfChecks(dir, 99);
-      const packageResult = results.find((r) => r.name === "package.json");
+      const packageResult = results.find((r) => r.name === PACKAGE_JSON_CHECK);
       const depsResult = results.find((r) => r.name === "dependencies");
       const nodeResult = results.find((r) => r.name === "Node.js");
       expect(packageResult?.status).toBe("warn");
@@ -51,11 +58,11 @@ describe("self-check", () => {
   it("fails on invalid package manager declaration and missing installs", async () => {
     await withTempDir("repo-expert-self-check-invalid-", async (dir) => {
       await writeTempFile(
-        path.join(dir, "package.json"),
+        path.join(dir, PACKAGE_JSON_CHECK),
         JSON.stringify({
           name: "x",
           version: "1.0.0",
-          packageManager: "npm@10.0.0",
+          packageManager: NPM_PACKAGE_MANAGER,
           dependencies: { commander: "^14.0.0" },
         }),
       );
@@ -123,7 +130,7 @@ describe("self-check", () => {
   it("packageManager check warns when field is missing", async () => {
     await withTempDir("repo-expert-self-check-pm-", async (dir) => {
       await writeTempFile(
-        path.join(dir, "package.json"),
+        path.join(dir, PACKAGE_JSON_CHECK),
         JSON.stringify({ name: "x", version: "1.0.0" }),
       );
       const results = await runSelfChecks(dir, 1);
@@ -137,21 +144,21 @@ describe("self-check", () => {
   it("packageManager check passes when pnpm@ prefix is used", async () => {
     await withTempDir("repo-expert-self-check-pm-pass-", async (dir) => {
       await writeTempFile(
-        path.join(dir, "package.json"),
-        JSON.stringify({ name: "x", version: "1.0.0", packageManager: "pnpm@9.0.0" }),
+        path.join(dir, PACKAGE_JSON_CHECK),
+        JSON.stringify({ name: "x", version: "1.0.0", packageManager: PNPM_PACKAGE_MANAGER }),
       );
       const results = await runSelfChecks(dir, 1);
       const pmResult = results.find((r) => r.name === "packageManager");
       expect(pmResult?.status).toBe("pass");
-      expect(pmResult?.message).toBe("pnpm@9.0.0");
+      expect(pmResult?.message).toBe(PNPM_PACKAGE_MANAGER);
     });
   });
 
   it("packageManager check fails when not pnpm", async () => {
     await withTempDir("repo-expert-self-check-pm-fail-", async (dir) => {
       await writeTempFile(
-        path.join(dir, "package.json"),
-        JSON.stringify({ name: "x", version: "1.0.0", packageManager: "npm@10.0.0" }),
+        path.join(dir, PACKAGE_JSON_CHECK),
+        JSON.stringify({ name: "x", version: "1.0.0", packageManager: NPM_PACKAGE_MANAGER }),
       );
       const results = await runSelfChecks(dir, 1);
       const pmResult = results.find((r) => r.name === "packageManager");
@@ -164,7 +171,7 @@ describe("self-check", () => {
   it("packageManager check fails on 'pnpm' without @ (must be startsWith pnpm@)", async () => {
     await withTempDir("repo-expert-self-check-pm-no-at-", async (dir) => {
       await writeTempFile(
-        path.join(dir, "package.json"),
+        path.join(dir, PACKAGE_JSON_CHECK),
         JSON.stringify({ name: "x", packageManager: "pnpm" }),
       );
       const results = await runSelfChecks(dir, 1);
@@ -177,7 +184,7 @@ describe("self-check", () => {
   it("dependencies warns when no deps declared", async () => {
     await withTempDir("repo-expert-self-check-nodeps-", async (dir) => {
       await writeTempFile(
-        path.join(dir, "package.json"),
+        path.join(dir, PACKAGE_JSON_CHECK),
         JSON.stringify({ name: "x", version: "1.0.0", packageManager: "pnpm@9.0.0" }),
       );
       const results = await runSelfChecks(dir, 1);
@@ -191,7 +198,7 @@ describe("self-check", () => {
   it("dependencies check reports missing node_modules", async () => {
     await withTempDir("repo-expert-self-check-missing-nm-", async (dir) => {
       await writeTempFile(
-        path.join(dir, "package.json"),
+        path.join(dir, PACKAGE_JSON_CHECK),
         JSON.stringify({ name: "x", dependencies: { vitest: "^1.0.0" } }),
       );
       const results = await runSelfChecks(dir, 1);
@@ -218,7 +225,7 @@ describe("self-check", () => {
       // Create node_modules dir but with no packages installed
       await mkdirTempDirectory(path.join(dir, "node_modules"));
       await writeTempFile(
-        path.join(dir, "package.json"),
+        path.join(dir, PACKAGE_JSON_CHECK),
         JSON.stringify({ name: "x", dependencies: { "nonexistent-pkg": "^1.0.0" } }),
       );
       const results = await runSelfChecks(dir, 1);
@@ -235,7 +242,7 @@ describe("self-check", () => {
       const deps: Record<string, string> = {};
       for (let i = 0; i < 7; i++) deps[`pkg-${String(i)}`] = "^1.0.0";
       await writeTempFile(
-        path.join(dir, "package.json"),
+        path.join(dir, PACKAGE_JSON_CHECK),
         JSON.stringify({ name: "x", dependencies: deps }),
       );
       const results = await runSelfChecks(dir, 1);
@@ -281,7 +288,7 @@ describe("self-check", () => {
     await withTempDir("repo-expert-self-check-sep-", async (dir) => {
       await mkdirTempDirectory(path.join(dir, "node_modules"));
       await writeTempFile(
-        path.join(dir, "package.json"),
+        path.join(dir, PACKAGE_JSON_CHECK),
         JSON.stringify({ name: "x", dependencies: { "pkg-a": "^1.0.0", "pkg-b": "^1.0.0" } }),
       );
       const results = await runSelfChecks(dir, 1);
@@ -298,7 +305,7 @@ describe("self-check", () => {
       const deps: Record<string, string> = {};
       for (let i = 0; i < 5; i++) deps[`pkg-${String(i)}`] = "^1.0.0";
       await writeTempFile(
-        path.join(dir, "package.json"),
+        path.join(dir, PACKAGE_JSON_CHECK),
         JSON.stringify({ name: "x", dependencies: deps }),
       );
       const results = await runSelfChecks(dir, 1);
@@ -323,7 +330,7 @@ describe("self-check", () => {
   it("readPackageJson rethrows non-ENOENT errors (e.g. EACCES)", async () => {
     await withTempDir("repo-expert-self-check-eacces-", async (dir) => {
       // Write a package.json then make it unreadable
-      const pkgPath = path.join(dir, "package.json");
+      const pkgPath = path.join(dir, PACKAGE_JSON_CHECK);
       await writeTempFile(pkgPath, JSON.stringify({ name: "x" }));
       await chmodTempFile(pkgPath, 0o000);
       try {
@@ -340,7 +347,7 @@ describe("self-check", () => {
     await withTempDir("repo-expert-self-check-enoent-", async (dir) => {
       // No package.json → ENOENT → returns null → warns, does not throw
       const results = await runSelfChecks(dir, 1);
-      const pkgResult = results.find((r) => r.name === "package.json");
+      const pkgResult = results.find((r) => r.name === PACKAGE_JSON_CHECK);
       expect(pkgResult?.status).toBe("warn");
     });
   });
@@ -376,36 +383,36 @@ function makeFakeFs(files: Record<string, string> = {}): FileSystemPort {
 describe("runSelfChecks (port-injected)", () => {
   it("reports pnpm pass when runCommand returns a version", async () => {
     const fakeFs = makeFakeFs({
-      "/project/package.json": JSON.stringify({ packageManager: "pnpm@8.0.0", dependencies: {} }),
+      [PROJECT_PACKAGE_JSON_PATH]: JSON.stringify({ packageManager: PNPM_PACKAGE_MANAGER_8, dependencies: {} }),
       "/project/node_modules": "",
       "/project/node_modules/.bin": "",
     });
     const fakeRunCommand = vi.fn().mockReturnValue("8.0.0");
 
-    const results = await runSelfChecks("/project", 18, fakeFs, fakeRunCommand);
+    const results = await runSelfChecks(PROJECT_DIR, 18, fakeFs, fakeRunCommand);
     const pnpm = results.find((r) => r.name === "pnpm");
     expect(pnpm?.status).toBe("pass");
-    expect(fakeRunCommand).toHaveBeenCalledWith("pnpm", ["--version"], "/project");
+    expect(fakeRunCommand).toHaveBeenCalledWith("pnpm", ["--version"], PROJECT_DIR);
   });
 
   it("reports pnpm fail when runCommand throws", async () => {
     const fakeFs = makeFakeFs({
-      "/project/package.json": JSON.stringify({ packageManager: "pnpm@8.0.0" }),
+      [PROJECT_PACKAGE_JSON_PATH]: JSON.stringify({ packageManager: PNPM_PACKAGE_MANAGER_8 }),
     });
     const fakeRunCommand = vi.fn().mockImplementation(() => { throw new Error("not found"); });
 
-    const results = await runSelfChecks("/project", 18, fakeFs, fakeRunCommand);
+    const results = await runSelfChecks(PROJECT_DIR, 18, fakeFs, fakeRunCommand);
     const pnpm = results.find((r) => r.name === "pnpm");
     expect(pnpm?.status).toBe("fail");
   });
 
   it("reports dependencies fail when node_modules missing", async () => {
     const fakeFs = makeFakeFs({
-      "/project/package.json": JSON.stringify({ packageManager: "pnpm@8.0.0", dependencies: { vitest: "^1.0.0" } }),
+      [PROJECT_PACKAGE_JSON_PATH]: JSON.stringify({ packageManager: PNPM_PACKAGE_MANAGER_8, dependencies: { vitest: "^1.0.0" } }),
     });
     const fakeRunCommand = vi.fn().mockReturnValue("8.0.0");
 
-    const results = await runSelfChecks("/project", 18, fakeFs, fakeRunCommand);
+    const results = await runSelfChecks(PROJECT_DIR, 18, fakeFs, fakeRunCommand);
     const deps = results.find((r) => r.name === "dependencies");
     expect(deps?.status).toBe("fail");
     expect(deps?.message).toContain("node_modules");
@@ -415,8 +422,8 @@ describe("runSelfChecks (port-injected)", () => {
     const fakeFs = makeFakeFs({});
     const fakeRunCommand = vi.fn().mockReturnValue("8.0.0");
 
-    const results = await runSelfChecks("/project", 18, fakeFs, fakeRunCommand);
-    const pkg = results.find((r) => r.name === "package.json");
+    const results = await runSelfChecks(PROJECT_DIR, 18, fakeFs, fakeRunCommand);
+    const pkg = results.find((r) => r.name === PACKAGE_JSON_CHECK);
     expect(pkg?.status).toBe("warn");
   });
 });
