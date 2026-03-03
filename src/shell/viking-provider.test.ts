@@ -11,12 +11,12 @@ import { toolCallingLoop } from "./openrouter-client.js";
 
 function makeMockViking() {
   return {
-    mkdir: vi.fn().mockResolvedValue(undefined),
-    writeFile: vi.fn().mockResolvedValue(undefined),
+    mkdir: vi.fn().mockResolvedValue(),
+    writeFile: vi.fn().mockResolvedValue(),
     readFile: vi.fn().mockResolvedValue(""),
-    deleteFile: vi.fn().mockResolvedValue(undefined),
+    deleteFile: vi.fn().mockResolvedValue(),
     listDirectory: vi.fn().mockResolvedValue([]),
-    deleteResource: vi.fn().mockResolvedValue(undefined),
+    deleteResource: vi.fn().mockResolvedValue(),
     semanticSearch: vi.fn().mockResolvedValue([]),
   } as unknown as VikingHttpClient;
 }
@@ -167,7 +167,7 @@ describe("VikingProvider", () => {
     it("retries delete once when ambiguous 500 and target still exists", async () => {
       (mockViking.deleteFile as ReturnType<typeof vi.fn>)
         .mockRejectedValueOnce(new Error("HTTP 500 from http://localhost:1933/api/v1/fs?uri=viking%3A%2F%2Fresources%2Fmyrepo%2Fpassages%2Fabc-123.txt"))
-        .mockResolvedValueOnce(undefined);
+        .mockResolvedValueOnce();
       (mockViking.listDirectory as ReturnType<typeof vi.fn>).mockResolvedValue([
         "viking://resources/myrepo/passages/abc-123.txt",
       ]);

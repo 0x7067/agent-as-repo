@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import path from "node:path";
 import { FilesystemBlockStorage } from "./block-storage.js";
 
 describe("FilesystemBlockStorage", () => {
@@ -9,7 +9,7 @@ describe("FilesystemBlockStorage", () => {
   let storage: FilesystemBlockStorage;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "block-storage-test-"));
+    tmpDir = mkdtempSync(path.join(tmpdir(), "block-storage-test-"));
     storage = new FilesystemBlockStorage(tmpDir);
   });
 
@@ -75,7 +75,9 @@ describe("FilesystemBlockStorage", () => {
     });
 
     it("does not throw when agent does not exist", () => {
-      expect(() => storage.delete("nonexistent")).not.toThrow();
+      expect(() => {
+        storage.delete("nonexistent");
+      }).not.toThrow();
     });
   });
 });

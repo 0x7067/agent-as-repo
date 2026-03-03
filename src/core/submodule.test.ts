@@ -5,6 +5,8 @@ import {
   partitionDiffPaths,
 } from "./submodule.js";
 
+const isTypeScriptPath = (filePath: string): boolean => filePath.endsWith(".ts");
+
 describe("parseSubmoduleStatus", () => {
   it("parses an initialized submodule with description", () => {
     const output = " abc1234def5678 libs/my-lib (v1.0.0)";
@@ -156,13 +158,11 @@ describe("partitionDiffPaths", () => {
     { path: "libs/my-lib", commit: "abc", initialized: true },
     { path: "vendor/third", commit: "000", initialized: false },
   ];
-  const filterFn = (p: string) => p.endsWith(".ts");
-
   it("separates submodule paths from regular files", () => {
     const { changedSubmodules, regularFiles } = partitionDiffPaths(
       ["libs/my-lib", "src/index.ts", "readme.md"],
       submodules,
-      filterFn,
+      isTypeScriptPath,
     );
     expect(changedSubmodules).toEqual([submodules[0]]);
     expect(regularFiles).toEqual(["src/index.ts"]);
@@ -172,7 +172,7 @@ describe("partitionDiffPaths", () => {
     const { changedSubmodules } = partitionDiffPaths(
       ["vendor/third"],
       submodules,
-      filterFn,
+      isTypeScriptPath,
     );
     expect(changedSubmodules).toEqual([submodules[1]]);
   });
@@ -181,7 +181,7 @@ describe("partitionDiffPaths", () => {
     const { changedSubmodules, regularFiles } = partitionDiffPaths(
       ["src/index.ts"],
       submodules,
-      filterFn,
+      isTypeScriptPath,
     );
     expect(changedSubmodules).toHaveLength(0);
     expect(regularFiles).toEqual(["src/index.ts"]);
@@ -191,7 +191,7 @@ describe("partitionDiffPaths", () => {
     const { changedSubmodules } = partitionDiffPaths(
       ["libs/my-lib", "libs/my-lib"],
       submodules,
-      filterFn,
+      isTypeScriptPath,
     );
     expect(changedSubmodules).toHaveLength(1);
   });

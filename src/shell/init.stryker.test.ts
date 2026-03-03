@@ -5,7 +5,10 @@
 import { describe, it, expect, vi } from "vitest";
 import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
 import { runInit } from "./init.js";
-import type * as readline from "node:readline/promises";
+
+interface MockRl {
+  question(prompt: string): Promise<string>;
+}
 
 function makeFakeFs(files: Record<string, string> = {}): FileSystemPort & { store: Map<string, string> } {
   const store = new Map(Object.entries(files));
@@ -41,7 +44,7 @@ function makeFakeFs(files: Record<string, string> = {}): FileSystemPort & { stor
   };
 }
 
-const mockRl = { question: vi.fn().mockResolvedValue("") } as unknown as readline.Interface;
+const mockRl: MockRl = { question: vi.fn().mockResolvedValue("") };
 
 describe("runInit (port-injected, stryker)", () => {
   it("writes .env when API key provided via flag", async () => {

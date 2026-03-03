@@ -48,11 +48,11 @@ function makeFakeGit(overrides: Partial<GitPort> = {}): GitPort {
 function makeFakeFs(overrides: Partial<FileSystemPort> = {}): FileSystemPort {
   return {
     readFile: vi.fn().mockResolvedValue(""),
-    writeFile: vi.fn().mockResolvedValue(undefined),
+    writeFile: vi.fn().mockResolvedValue(),
     stat: vi.fn().mockResolvedValue({ size: 0, isDirectory: () => false }),
-    access: vi.fn().mockResolvedValue(undefined),
-    rename: vi.fn().mockResolvedValue(undefined),
-    copyFile: vi.fn().mockResolvedValue(undefined),
+    access: vi.fn().mockResolvedValue(),
+    rename: vi.fn().mockResolvedValue(),
+    copyFile: vi.fn().mockResolvedValue(),
     glob: vi.fn().mockResolvedValue([]),
     watch: vi.fn().mockReturnValue({
       on: vi.fn().mockReturnThis(),

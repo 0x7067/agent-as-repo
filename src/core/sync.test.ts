@@ -35,13 +35,13 @@ describe("computeSyncPlan", () => {
   });
 
   it("flags full re-index when changes exceed threshold", () => {
-    const manyFiles = Array.from({ length: 501 }, (_, i) => `src/file${i}.ts`);
+    const manyFiles = Array.from({ length: 501 }, (_, i) => `src/file${String(i)}.ts`);
     const plan = computeSyncPlan(passages, manyFiles, 500);
     expect(plan.isFullReIndex).toBe(true);
   });
 
   it("does not flag full re-index at exactly the threshold", () => {
-    const files = Array.from({ length: 500 }, (_, i) => `src/file${i}.ts`);
+    const files = Array.from({ length: 500 }, (_, i) => `src/file${String(i)}.ts`);
     const plan = computeSyncPlan(passages, files, 500);
     expect(plan.isFullReIndex).toBe(false);
   });

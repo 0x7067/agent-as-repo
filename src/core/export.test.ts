@@ -113,7 +113,7 @@ describe("formatExport", () => {
     const md = formatExport(data);
     const lines = md.split("\n");
     // Find line indices with "## arch" and the value
-    const headerIdx = lines.findIndex((l) => l === "## arch");
+    const headerIdx = lines.indexOf("## arch");
     expect(headerIdx).toBeGreaterThan(-1);
     // Line after "## arch" should be empty (blank separator)
     expect(lines[headerIdx + 1]).toBe("");

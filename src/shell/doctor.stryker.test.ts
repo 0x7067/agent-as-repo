@@ -8,9 +8,12 @@ import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
 import type { GitPort } from "../ports/git.js";
 import type { AgentProvider } from "./provider.js";
 
+function createWatcherHandle(): WatcherHandle {
+  return { close: () => {}, on: () => ({}) } as unknown as WatcherHandle;
+}
+
 function makeFakeFs(files: Record<string, string> = {}): FileSystemPort & { store: Map<string, string> } {
   const store = new Map(Object.entries(files));
-  const vi_fn = () => ({ close: () => {}, on: () => ({}) }) as unknown as WatcherHandle;
   return {
     store,
     readFile: async (p) => {
@@ -20,7 +23,11 @@ function makeFakeFs(files: Record<string, string> = {}): FileSystemPort & { stor
     },
     writeFile: async (p, d) => { store.set(p, d); },
     stat: async (p) => {
-      if (store.has(p)) return { size: store.get(p)!.length, isDirectory: () => false };
+      if (store.has(p)) {
+        const value = store.get(p);
+        if (value === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+        return { size: value.length, isDirectory: () => false };
+      }
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     },
     access: async (p) => {
@@ -38,7 +45,7 @@ function makeFakeFs(files: Record<string, string> = {}): FileSystemPort & { stor
       store.set(dest, v);
     },
     glob: async () => [],
-    watch: vi_fn,
+    watch: createWatcherHandle,
   };
 }
 
@@ -58,30 +65,30 @@ afterEach(() => {
 });
 
 describe("checkApiKey (port-injected, stryker)", () => {
-  it("returns fail when LETTA_API_KEY is missing", async () => {
+  it("returns fail when LETTA_API_KEY is missing", () => {
     delete process.env.LETTA_API_KEY;
-    const result = await checkApiKey();
+    const result = checkApiKey();
     expect(result.status).toBe("fail");
     expect(result.name).toBe("API key");
     expect(result.message).toContain("LETTA_API_KEY");
   });
 
-  it("returns pass when LETTA_API_KEY is set", async () => {
+  it("returns pass when LETTA_API_KEY is set", () => {
     process.env.LETTA_API_KEY = "test-key";
-    const result = await checkApiKey();
+    const result = checkApiKey();
     expect(result.status).toBe("pass");
     expect(result.name).toBe("API key");
   });
 
-  it("pass message is 'Set in environment'", async () => {
+  it("pass message is 'Set in environment'", () => {
     process.env.LETTA_API_KEY = "any-key";
-    const result = await checkApiKey();
+    const result = checkApiKey();
     expect(result.message).toBe("Set in environment");
   });
 
-  it("fail message contains 'not set'", async () => {
+  it("fail message contains 'not set'", () => {
     delete process.env.LETTA_API_KEY;
-    const result = await checkApiKey();
+    const result = checkApiKey();
     expect(result.message).toContain("not set");
   });
 });
@@ -107,9 +114,9 @@ describe("checkApiConnection (port-injected, stryker)", () => {
     expect(result.message).toContain("Network error");
   });
 
-  it("fail message includes error string for non-Error throws", async () => {
+  it("fail message includes provider error string", async () => {
     const mockProvider = {
-      listPassages: async () => { throw "string-error"; },
+      listPassages: async () => { throw new Error("string-error"); },
     } as unknown as AgentProvider;
     const result = await checkApiConnection(mockProvider, "agent-1");
     expect(result.status).toBe("fail");
@@ -249,7 +256,8 @@ describe("runDoctorFixes (port-injected, stryker)", () => {
     await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
     const stateContent = fakeFs.store.get("/project/.repo-expert-state.json");
     expect(stateContent).toBeDefined();
-    expect(() => JSON.parse(stateContent!)).not.toThrow();
+    if (typeof stateContent !== "string") throw new Error("Expected state file to be written");
+    expect(() => JSON.parse(stateContent)).not.toThrow();
   });
 
   it("does not overwrite existing state file", async () => {

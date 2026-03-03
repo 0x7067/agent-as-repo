@@ -10,7 +10,7 @@ function makeMockProvider(): AgentProvider & { _passageIds: string[] } {
   return {
     ...makeBase(),
     storePassage: vi.fn().mockImplementation(async () => {
-      const id = `passage-${++passageCounter}`;
+      const id = `passage-${String(++passageCounter)}`;
       passageIds.push(id);
       return id;
     }),
@@ -78,10 +78,10 @@ describe("loadPassages", () => {
   it("counts failed chunks without throwing", async () => {
     const provider = makeMockProvider();
     let callCount = 0;
-    (provider.storePassage as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+    (provider.storePassage as ReturnType<typeof vi.fn>).mockImplementation(() => {
       callCount++;
       if (callCount === 2) throw new Error("server error");
-      return `passage-${callCount}`;
+      return `passage-${String(callCount)}`;
     });
 
     const chunks = [

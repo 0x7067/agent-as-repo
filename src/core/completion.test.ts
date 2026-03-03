@@ -24,7 +24,7 @@ describe("completion", () => {
       expect(script).toContain(cmd);
     }
     // Verify no empty entries from mutated "" strings (would cause double spaces)
-    expect(script).not.toMatch(/\b  \b/);
+    expect(script).not.toMatch(/\b {2}\b/u);
   });
 
   it("bash script includes all global flags", () => {
@@ -41,9 +41,12 @@ describe("completion", () => {
     // Flags are space-separated
     expect(script).toContain("--help --version");
     // Verify setup, config, sync, install-daemon, completion all appear in the COMPREPLY line
-    const compreplyMatch = script.match(/compgen -W "([^"]+)"/);
+    const compreplyMatch = /compgen -W "([^"]+)"/u.exec(script);
     expect(compreplyMatch).not.toBeNull();
-    const compreplyLine = compreplyMatch![1];
+    const compreplyLine = compreplyMatch?.[1];
+    if (!compreplyLine) {
+      throw new Error("Expected COMPREPLY command list in completion script");
+    }
     for (const cmd of ALL_COMMANDS) {
       expect(compreplyLine).toContain(cmd);
     }

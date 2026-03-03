@@ -41,6 +41,11 @@ function makeChoice(content: string | null, toolCalls?: Array<{ id: string; name
   };
 }
 
+function formatCityArg(args: unknown): string {
+  const city = (args as { city?: unknown }).city;
+  return typeof city === "string" ? city : JSON.stringify(city);
+}
+
 const TOOLS: ToolDefinition[] = [
   {
     type: "function",
@@ -138,14 +143,14 @@ describe("callOpenRouter", () => {
 
   it("aborts request when signal is aborted", async () => {
     const controller = new AbortController();
-    mockFetch.mockImplementation((_url: string, init?: RequestInit) =>
+    const abortingFetch: typeof fetch = (_url: string | URL | Request, init?: RequestInit) =>
       new Promise((_resolve, reject) => {
         const signal = init?.signal as AbortSignal;
         signal.addEventListener("abort", () => {
           reject(Object.assign(new Error("AbortError"), { name: "AbortError" }));
         }, { once: true });
-      })
-    );
+      });
+    vi.stubGlobal("fetch", abortingFetch);
 
     const promise = callOpenRouter(
       [{ role: "user", content: "Hi" }],
@@ -165,7 +170,7 @@ describe("toolCallingLoop", () => {
   let mockFetch: ReturnType<typeof vi.fn>;
 
   const toolHandlers: Record<string, ToolHandler> = {
-    get_weather: async (args) => `Weather in ${args.city}: sunny, 25°C`,
+    get_weather: async (args) => `Weather in ${formatCityArg(args)}: sunny, 25°C`,
   };
 
   beforeEach(() => {

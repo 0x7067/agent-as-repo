@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import path from "node:path";
 import { resolveOpenVikingBlocksDir } from "./openviking-paths.js";
 
 const tempDirs: string[] = [];
 
 function makeTempDir(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const dir = mkdtempSync(path.join(tmpdir(), prefix));
   tempDirs.push(dir);
   return dir;
 }
@@ -21,7 +21,7 @@ afterEach(() => {
 describe("resolveOpenVikingBlocksDir", () => {
   it("uses OPENVIKING_BLOCKS_DIR when writable", () => {
     const cwd = makeTempDir("openviking-paths-");
-    const blocksDir = join(cwd, "custom-blocks");
+    const blocksDir = path.join(cwd, "custom-blocks");
 
     const result = resolveOpenVikingBlocksDir({
       cwd,
@@ -34,7 +34,7 @@ describe("resolveOpenVikingBlocksDir", () => {
 
   it("falls back to project-local directory when env and home candidates are not writable", () => {
     const cwd = makeTempDir("openviking-paths-");
-    const expected = join(cwd, ".openviking", "blocks");
+    const expected = path.join(cwd, ".openviking", "blocks");
 
     const result = resolveOpenVikingBlocksDir({
       cwd,

@@ -351,7 +351,7 @@ describe("VikingHttpClient", () => {
         maxRetries: 0,
         breakerFailureThreshold: 2,
         breakerWindowMs: 10_000,
-        breakerCooldownMs: 5_000,
+        breakerCooldownMs: 5000,
       });
 
       mockFetch
@@ -375,7 +375,7 @@ describe("VikingHttpClient", () => {
         maxRetries: 0,
         breakerFailureThreshold: 1,
         breakerWindowMs: 10_000,
-        breakerCooldownMs: 1_000,
+        breakerCooldownMs: 1000,
       });
 
       mockFetch.mockResolvedValueOnce(makeResponse(500));
@@ -385,7 +385,7 @@ describe("VikingHttpClient", () => {
         /Circuit open for Viking fs operations/,
       );
 
-      vi.advanceTimersByTime(1_001);
+      vi.advanceTimersByTime(1001);
       mockFetch.mockResolvedValueOnce(makeResponse(200, { status: "ok", result: [] }));
       await expect(clientWithBreaker.listDirectory("viking://resources/myrepo")).resolves.toEqual([]);
 
@@ -397,7 +397,7 @@ describe("VikingHttpClient", () => {
         maxRetries: 0,
         breakerFailureThreshold: 1,
         breakerWindowMs: 10_000,
-        breakerCooldownMs: 5_000,
+        breakerCooldownMs: 5000,
       });
 
       mockFetch
