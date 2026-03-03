@@ -234,10 +234,7 @@ export default tseslint.config(
 	{
 		files: [
 			"src/cli.test.ts",
-			"src/core/config.test.ts",
-			"src/core/init.test.ts",
 			"src/core/mcp-config.test.ts",
-			"src/core/prompts.test.ts",
 			"src/core/submodule.test.ts",
 			"src/mcp-server.test.ts",
 			"src/shell/adapters/letta-admin-adapter.test.ts",

@@ -1,10 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { parseConfig, ConfigError, formatConfigError } from "./config.js";
 
+const LETTA_MODEL = "openai/gpt-4.1";
+const LETTA_EMBEDDING = "openai/text-embedding-3-small";
+const VIKING_OPENROUTER_MODEL = "openai/gpt-4o-mini";
+
 const validRaw = {
   letta: {
-    model: "openai/gpt-4.1",
-    embedding: "openai/text-embedding-3-small",
+    model: LETTA_MODEL,
+    embedding: LETTA_EMBEDDING,
   },
   repos: {
     "my-app": {
@@ -32,7 +36,7 @@ describe("parseConfig", () => {
     const config = parseConfig(validRaw);
     expect(config.provider.type).toBe("letta");
     const provider = config.provider as Extract<typeof config.provider, { type: "letta" }>;
-    expect(provider.model).toBe("openai/gpt-4.1");
+    expect(provider.model).toBe(LETTA_MODEL);
     expect(config.repos["my-app"].maxFileSizeKb).toBe(50);
     expect(config.repos["my-app"].memoryBlockLimit).toBe(5000);
     expect(config.repos["my-app"].bootstrapOnCreate).toBe(true);
@@ -270,36 +274,36 @@ describe("parseConfig", () => {
     const config = parseConfig(validRaw);
     expect(config.provider.type).toBe("letta");
     const provider = config.provider as Extract<typeof config.provider, { type: "letta" }>;
-    expect(provider.model).toBe("openai/gpt-4.1");
-    expect(provider.embedding).toBe("openai/text-embedding-3-small");
+    expect(provider.model).toBe(LETTA_MODEL);
+    expect(provider.embedding).toBe(LETTA_EMBEDDING);
   });
 
   it("parses new provider: { type: 'letta' } format", () => {
     const raw = {
-      provider: { type: "letta", model: "openai/gpt-4.1", embedding: "openai/text-embedding-3-small" },
+      provider: { type: "letta", model: LETTA_MODEL, embedding: LETTA_EMBEDDING },
       repos: validRaw.repos,
     };
     const config = parseConfig(raw);
     expect(config.provider.type).toBe("letta");
     const provider = config.provider as Extract<typeof config.provider, { type: "letta" }>;
-    expect(provider.model).toBe("openai/gpt-4.1");
+    expect(provider.model).toBe(LETTA_MODEL);
   });
 
   it("parses viking provider config", () => {
     const raw = {
-      provider: { type: "viking", openrouter_model: "openai/gpt-4o-mini" },
+      provider: { type: "viking", openrouter_model: VIKING_OPENROUTER_MODEL },
       repos: validRaw.repos,
     };
     const config = parseConfig(raw);
     expect(config.provider.type).toBe("viking");
     const provider = config.provider as Extract<typeof config.provider, { type: "viking" }>;
-    expect(provider.openrouterModel).toBe("openai/gpt-4o-mini");
+    expect(provider.openrouterModel).toBe(VIKING_OPENROUTER_MODEL);
     expect(provider.vikingUrl).toBeUndefined();
   });
 
   it("parses viking provider config with optional viking_url", () => {
     const raw = {
-      provider: { type: "viking", openrouter_model: "openai/gpt-4o-mini", viking_url: "http://localhost:1933" },
+      provider: { type: "viking", openrouter_model: VIKING_OPENROUTER_MODEL, viking_url: "http://localhost:1933" },
       repos: validRaw.repos,
     };
     const config = parseConfig(raw);

@@ -5,12 +5,17 @@ import {
   conventionsBootstrapPrompt,
 } from "./prompts.js";
 
+const REPO_NAME = "my-app";
+const MOBILE_APP_DESCRIPTION = "A mobile app";
+const ARCHIVAL_MEMORY = "archival memory";
+const CROSS_REPO_QUERY = "query other repo-expert agents";
+
 describe("buildPersona", () => {
   it("generates persona from repo name and description", () => {
-    const persona = buildPersona("my-app", "A React Native mobile app");
-    expect(persona).toContain("my-app");
+    const persona = buildPersona(REPO_NAME, "A React Native mobile app");
+    expect(persona).toContain(REPO_NAME);
     expect(persona).toContain("A React Native mobile app");
-    expect(persona).toContain("archival memory");
+    expect(persona).toContain(ARCHIVAL_MEMORY);
     expect(persona).toContain("architecture and conventions memory blocks");
     expect(persona).toContain("Be specific");
     expect(persona).toContain("do NOT pass tags");
@@ -18,57 +23,57 @@ describe("buildPersona", () => {
 
   it("uses custom persona instead of default when provided", () => {
     const custom = "I am the ultimate expert.";
-    const persona = buildPersona("my-app", "desc", custom);
+    const persona = buildPersona(REPO_NAME, "desc", custom);
     expect(persona).toContain(custom);
     // Should NOT contain the default template
-    expect(persona).not.toContain('codebase expert for the "my-app"');
+    expect(persona).not.toContain(`codebase expert for the "${REPO_NAME}"`);
     expect(persona).toContain("do NOT pass tags");
   });
 
   it("joins lines with newline separator", () => {
-    const persona = buildPersona("my-app", "desc");
+    const persona = buildPersona(REPO_NAME, "desc");
     expect(persona).toContain("\n");
     const lines = persona.split("\n");
     expect(lines.length).toBeGreaterThan(1);
   });
 
   it("includes cross-repo instruction when cross-agent tools are configured", () => {
-    const persona = buildPersona("my-app", "A mobile app", undefined, [
+    const persona = buildPersona(REPO_NAME, MOBILE_APP_DESCRIPTION, undefined, [
       "send_message_to_agents_matching_tags",
     ]);
-    expect(persona).toContain("query other repo-expert agents");
+    expect(persona).toContain(CROSS_REPO_QUERY);
     expect(persona).toContain("send_message_to_agents_matching_tags");
   });
 
   it("includes cross-repo instruction for wait_for_reply tool", () => {
-    const persona = buildPersona("my-app", "A mobile app", undefined, [
+    const persona = buildPersona(REPO_NAME, MOBILE_APP_DESCRIPTION, undefined, [
       "send_message_to_agent_and_wait_for_reply",
     ]);
-    expect(persona).toContain("query other repo-expert agents");
+    expect(persona).toContain(CROSS_REPO_QUERY);
   });
 
   it("omits cross-repo instruction when no cross-agent tools configured", () => {
-    const persona = buildPersona("my-app", "A mobile app");
-    expect(persona).not.toContain("query other repo-expert agents");
+    const persona = buildPersona(REPO_NAME, MOBILE_APP_DESCRIPTION);
+    expect(persona).not.toContain(CROSS_REPO_QUERY);
   });
 
   it("omits cross-repo instruction when tools is empty", () => {
-    const persona = buildPersona("my-app", "A mobile app", undefined, []);
-    expect(persona).not.toContain("query other repo-expert agents");
+    const persona = buildPersona(REPO_NAME, MOBILE_APP_DESCRIPTION, undefined, []);
+    expect(persona).not.toContain(CROSS_REPO_QUERY);
   });
 
   it("omits cross-repo instruction when tools has no messaging tools", () => {
-    const persona = buildPersona("my-app", "A mobile app", undefined, ["some_other_tool"]);
-    expect(persona).not.toContain("query other repo-expert agents");
+    const persona = buildPersona(REPO_NAME, MOBILE_APP_DESCRIPTION, undefined, ["some_other_tool"]);
+    expect(persona).not.toContain(CROSS_REPO_QUERY);
   });
 
   it("includes naming tools and frameworks instruction", () => {
-    const persona = buildPersona("my-app", "desc");
+    const persona = buildPersona(REPO_NAME, "desc");
     expect(persona).toContain("exact tools, frameworks, and versions");
   });
 
   it("contains all required instruction lines", () => {
-    const persona = buildPersona("my-app", "desc");
+    const persona = buildPersona(REPO_NAME, "desc");
     expect(persona).toContain("All project source files are stored in my archival memory");
     expect(persona).toContain("first consult my architecture and conventions memory blocks");
     expect(persona).toContain("then search archival memory");
@@ -78,7 +83,7 @@ describe("buildPersona", () => {
 describe("bootstrap prompts", () => {
   it("architecture prompt mentions archival memory search", () => {
     const prompt = architectureBootstrapPrompt();
-    expect(prompt).toContain("archival memory");
+    expect(prompt).toContain(ARCHIVAL_MEMORY);
     expect(prompt).toContain("architecture");
     expect(prompt).toContain("memory_replace");
   });
@@ -105,7 +110,7 @@ describe("bootstrap prompts", () => {
 
   it("conventions prompt mentions archival memory search", () => {
     const prompt = conventionsBootstrapPrompt();
-    expect(prompt).toContain("archival memory");
+    expect(prompt).toContain(ARCHIVAL_MEMORY);
     expect(prompt).toContain("conventions");
     expect(prompt).toContain("memory_replace");
   });

@@ -7,11 +7,15 @@ import {
   generateConfigYaml,
 } from "./init.js";
 
+const INDEX_TS_PATH = "src/index.ts";
+const APP_TS_PATH = "src/app.ts";
+const APP_REPO_PATH = "~/projects/app";
+
 describe("detectExtensions", () => {
   it("returns top extensions sorted by frequency descending", () => {
     const files = [
-      "src/index.ts",
-      "src/app.ts",
+      INDEX_TS_PATH,
+      APP_TS_PATH,
       "src/utils.ts",
       "src/app.test.ts",
       "src/style.css",
@@ -87,13 +91,13 @@ describe("detectExtensions", () => {
       "doc.pdf", "doc.doc", "doc.docx", "sheet.xls", "sheet.xlsx",
       "pkg.lock", "build.map",
     ];
-    const files = [...excluded, "src/app.ts"];
+    const files = [...excluded, APP_TS_PATH];
     const result = detectExtensions(files);
     expect(result).toEqual([".ts"]);
   });
 
   it("is case-insensitive for excluded extensions", () => {
-    const files = ["IMAGE.PNG", "PHOTO.JPG", "src/app.ts"];
+    const files = ["IMAGE.PNG", "PHOTO.JPG", APP_TS_PATH];
     const result = detectExtensions(files);
     expect(result).toEqual([".ts"]);
   });
@@ -103,7 +107,7 @@ describe("suggestIgnoreDirs", () => {
   it("returns common dirs found in file paths", () => {
     const files = [
       "node_modules/foo/index.js",
-      "src/index.ts",
+      INDEX_TS_PATH,
       ".git/HEAD",
       "dist/bundle.js",
     ];
@@ -129,7 +133,7 @@ describe("suggestIgnoreDirs", () => {
   });
 
   it("returns empty when no known dirs found", () => {
-    const files = ["src/index.ts", "lib/utils.ts"];
+    const files = [INDEX_TS_PATH, "lib/utils.ts"];
     expect(suggestIgnoreDirs(files)).toEqual([]);
   });
 });
@@ -180,7 +184,7 @@ describe("generateConfigYaml", () => {
   it("produces parseable YAML", () => {
     const output = generateConfigYaml({
       repoName: "app",
-      repoPath: "~/projects/app",
+      repoPath: APP_REPO_PATH,
       description: "test",
       extensions: [".ts"],
       ignoreDirs: [],
@@ -198,7 +202,7 @@ describe("generateConfigYaml", () => {
     const longDescription = "A".repeat(100); // 100 chars, > 80 default
     const output = generateConfigYaml({
       repoName: "app",
-      repoPath: "~/projects/app",
+      repoPath: APP_REPO_PATH,
       description: longDescription,
       extensions: [".ts"],
       ignoreDirs: [],
@@ -219,7 +223,7 @@ describe("generateConfigYaml", () => {
     // A string with special chars like `:` or `#` will be quoted
     const output = generateConfigYaml({
       repoName: "app",
-      repoPath: "~/projects/app",
+      repoPath: APP_REPO_PATH,
       description: "App: a test # with special chars",
       extensions: [".ts"],
       ignoreDirs: [],
@@ -242,13 +246,13 @@ describe("generateConfigYaml", () => {
       ignoreDirs: [],
       providerType: "letta",
     });
-    expect(output).toContain("path: ~/projects/app");
+    expect(output).toContain(`path: ${APP_REPO_PATH}`);
   });
 
   it("emits viking provider config when providerType is viking", () => {
     const output = generateConfigYaml({
       repoName: "app",
-      repoPath: "~/projects/app",
+      repoPath: APP_REPO_PATH,
       description: "test",
       extensions: [".ts"],
       ignoreDirs: [],
