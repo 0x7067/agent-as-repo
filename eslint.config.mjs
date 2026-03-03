@@ -216,15 +216,6 @@ export default tseslint.config(
 			},
 		},
 	},
-	{
-		files: [
-			"src/cli.test.ts",
-		],
-		rules: {
-			// Narrow temporary override while we migrate remaining temp-path-heavy tests.
-			"security/detect-non-literal-fs-filename": "off",
-		},
-	},
 	// ============================================================
 	// 📄 SPIKES: Exploratory scripts — relax strict rules
 	// ============================================================

@@ -64,6 +64,30 @@ async function makeWorkspace(prefix: string): Promise<string> {
   return dir;
 }
 
+async function writeWorkspaceFile(filePath: string, content: string, encoding: BufferEncoding = "utf8"): Promise<void> {
+  // Path is constrained to test-owned temporary workspaces created in this file.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  await fs.writeFile(filePath, content, encoding);
+}
+
+async function readWorkspaceFile(filePath: string, encoding: BufferEncoding = "utf8"): Promise<string> {
+  // Path is constrained to test-owned temporary workspaces created in this file.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  return fs.readFile(filePath, encoding);
+}
+
+async function mkdirWorkspaceDir(directoryPath: string, options?: Parameters<typeof fs.mkdir>[1]): Promise<void> {
+  // Path is constrained to test-owned temporary workspaces created in this file.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  await fs.mkdir(directoryPath, options);
+}
+
+async function chmodWorkspaceFile(filePath: string, mode: number): Promise<void> {
+  // Path is constrained to test-owned temporary workspaces created in this file.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  await fs.chmod(filePath, mode);
+}
+
 async function writeConfig(cwd: string, repoName: string, repoPath: string): Promise<void> {
   const config = [
     "letta:",
@@ -77,7 +101,7 @@ async function writeConfig(cwd: string, repoName: string, repoPath: string): Pro
     "    ignore_dirs: [node_modules, .git]",
     "    bootstrap_on_create: false",
   ].join("\n");
-  await fs.writeFile(path.join(cwd, "config.yaml"), config, "utf8");
+  await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
 }
 
 afterEach(async () => {
@@ -168,7 +192,7 @@ describe("cli contract", () => {
 
   it("enforces non-interactive command contract matrix", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-no-input-matrix-");
-    await fs.writeFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify({ stateVersion: 2, agents: {} }), "utf8");
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify({ stateVersion: 2, agents: {} }), "utf8");
 
     const cases = [
       {
@@ -206,7 +230,7 @@ describe("cli contract", () => {
         },
       },
     };
-    await fs.writeFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
 
     const result = runCli(["list", "--json"], cwd);
 
@@ -246,7 +270,7 @@ describe("cli contract", () => {
         },
       },
     };
-    await fs.writeFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
 
     const result = runCli(["--no-input", "destroy", "--repo", "my-app"], cwd);
 
@@ -269,7 +293,7 @@ describe("cli contract", () => {
 
     const localConfigPath = path.join(cwd, ".claude.json");
     const homeConfigPath = path.join(home, ".claude.json");
-    const localRaw = await fs.readFile(localConfigPath, "utf8");
+    const localRaw = await readWorkspaceFile(localConfigPath, "utf8");
     const localConfig = JSON.parse(localRaw) as { mcpServers?: { letta?: unknown } };
 
     await expect(fs.access(homeConfigPath)).rejects.toThrow();
@@ -287,7 +311,7 @@ describe("cli contract", () => {
     });
 
     expect(result.status).toBe(0);
-    const localRaw = await fs.readFile(path.join(cwd, ".claude.json"), "utf8");
+    const localRaw = await readWorkspaceFile(path.join(cwd, ".claude.json"), "utf8");
     const localConfig = JSON.parse(localRaw) as {
       mcpServers?: { letta?: { env?: Record<string, string> } };
     };
@@ -309,7 +333,7 @@ describe("cli contract", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Warnings:");
     expect(result.stdout).toContain("No provider key found");
-    const localRaw = await fs.readFile(path.join(cwd, ".claude.json"), "utf8");
+    const localRaw = await readWorkspaceFile(path.join(cwd, ".claude.json"), "utf8");
     const localConfig = JSON.parse(localRaw) as { mcpServers?: { letta?: unknown } };
     expect(localConfig.mcpServers?.letta).toBeDefined();
   });
@@ -317,7 +341,7 @@ describe("cli contract", () => {
   it("shows actionable error without stack trace when mcp-check config is malformed", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-malformed-");
     const home = await makeWorkspace("repo-expert-cli-home-malformed-");
-    await fs.writeFile(path.join(home, ".claude.json"), "{ invalid json", "utf8");
+    await writeWorkspaceFile(path.join(home, ".claude.json"), "{ invalid json", "utf8");
 
     const result = runCli(["mcp-check"], cwd, { HOME: home });
 
@@ -330,7 +354,7 @@ describe("cli contract", () => {
 
   it("shows actionable error when state file is malformed", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-state-malformed-");
-    await fs.writeFile(path.join(cwd, ".repo-expert-state.json"), "{ invalid json", "utf8");
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), "{ invalid json", "utf8");
 
     const result = runCli(["list"], cwd);
 
@@ -344,8 +368,8 @@ describe("cli contract", () => {
   it("supports non-interactive init with flags", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-init-flags-");
     const repoDir = path.join(cwd, "repo");
-    await fs.mkdir(path.join(repoDir, ".git"), { recursive: true });
-    await fs.writeFile(path.join(repoDir, "index.ts"), "export const ok = true;\n", "utf8");
+    await mkdirWorkspaceDir(path.join(repoDir, ".git"), { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "index.ts"), "export const ok = true;\n", "utf8");
 
     const result = runCli(
       ["--no-input", "init", "--api-key", "test-key", "--repo-path", repoDir, "--yes"],
@@ -374,7 +398,7 @@ describe("cli contract", () => {
         },
       },
     };
-    await fs.writeFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
 
     const result = runCli(["destroy", "--dry-run", "--repo", "my-app"], cwd);
 
@@ -385,8 +409,8 @@ describe("cli contract", () => {
   it("supports sync --dry-run --json", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-sync-dry-run-");
     const repoDir = path.join(cwd, "repo");
-    await fs.mkdir(repoDir, { recursive: true });
-    await fs.writeFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
     await writeConfig(cwd, "my-app", repoDir);
     const state = {
       stateVersion: 2,
@@ -402,7 +426,7 @@ describe("cli contract", () => {
         },
       },
     };
-    await fs.writeFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
 
     const result = runCli(["sync", "--config", "config.yaml", "--full", "--dry-run", "--json"], cwd);
     expect(result.status).toBe(0);
@@ -427,7 +451,7 @@ describe("cli contract", () => {
         },
       },
     };
-    await fs.writeFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
 
     const result = runCli(["status", "--json"], cwd, {
       REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
@@ -440,7 +464,7 @@ describe("cli contract", () => {
 
   it("supports doctor --fix", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-doctor-fix-");
-    await fs.writeFile(path.join(cwd, "config.example.yaml"), "letta:\n  model: m\n  embedding: e\nrepos: {}\n", "utf8");
+    await writeWorkspaceFile(path.join(cwd, "config.example.yaml"), "letta:\n  model: m\n  embedding: e\nrepos: {}\n", "utf8");
 
     const result = runCli(["doctor", "--fix", "--json"], cwd, {
       LETTA_API_KEY: "test-key",
@@ -456,7 +480,7 @@ describe("cli contract", () => {
 
   it("supports self-check --json", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-self-check-");
-    await fs.writeFile(
+    await writeWorkspaceFile(
       path.join(cwd, "package.json"),
       JSON.stringify({
         name: "self-check-fixture",
@@ -466,20 +490,19 @@ describe("cli contract", () => {
       }),
       "utf8",
     );
-    await fs.mkdir(path.join(cwd, "node_modules", "commander"), { recursive: true });
+    await mkdirWorkspaceDir(path.join(cwd, "node_modules", "commander"), { recursive: true });
 
     const binDir = path.join(cwd, "bin");
-    await fs.mkdir(binDir, { recursive: true });
+    await mkdirWorkspaceDir(binDir, { recursive: true });
     const pnpmStubPath = process.platform === "win32"
       ? path.join(binDir, "pnpm.cmd")
       : path.join(binDir, "pnpm");
     const pnpmStub = process.platform === "win32"
       ? "@echo off\r\necho 10.20.0\r\n"
       : "#!/usr/bin/env sh\necho 10.20.0\n";
-    await fs.writeFile(pnpmStubPath, pnpmStub, "utf8");
+    await writeWorkspaceFile(pnpmStubPath, pnpmStub, "utf8");
     if (process.platform !== "win32") {
-      // eslint-disable-next-line sonarjs/file-permissions -- executable bit is required for this test stub
-      await fs.chmod(pnpmStubPath, 0o755);
+      await chmodWorkspaceFile(pnpmStubPath, 0o755);
     }
 
     const result = runCli(["self-check", "--json"], cwd, {
@@ -497,7 +520,7 @@ describe("cli contract", () => {
   it("supports config lint --json for valid config", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-config-lint-ok-");
     const repoDir = path.join(cwd, "repo");
-    await fs.mkdir(repoDir, { recursive: true });
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
     await writeConfig(cwd, "my-app", repoDir);
 
     const result = runCli(["config", "lint", "--config", "config.yaml", "--json"], cwd);
@@ -525,7 +548,7 @@ describe("cli contract", () => {
       "    extensions: [ts]",
       "    ignore_dirs: [node_modules]",
     ].join("\n");
-    await fs.writeFile(path.join(cwd, "config.yaml"), invalidConfig, "utf8");
+    await writeWorkspaceFile(path.join(cwd, "config.yaml"), invalidConfig, "utf8");
 
     const result = runCli(["config", "lint", "--config", "config.yaml", "--json"], cwd);
     expect(result.status).toBe(1);
@@ -548,15 +571,15 @@ describe("cli contract", () => {
     const result = runCli(["completion", "fish", "--install-dir", installDir], cwd);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Completion script written");
-    const script = await fs.readFile(path.join(installDir, "repo-expert.fish"), "utf8");
+    const script = await readWorkspaceFile(path.join(installDir, "repo-expert.fish"), "utf8");
     expect(script).toContain("fish completion for repo-expert");
   });
 
   it("supports setup --reindex and emits JSON timings", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-setup-reindex-");
     const repoDir = path.join(cwd, "repo");
-    await fs.mkdir(repoDir, { recursive: true });
-    await fs.writeFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
     await writeConfig(cwd, "my-app", repoDir);
     const state = {
       stateVersion: 2,
@@ -572,7 +595,7 @@ describe("cli contract", () => {
         },
       },
     };
-    await fs.writeFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
 
     const result = runCli(
       ["setup", "--config", "config.yaml", "--reindex", "--json"],
@@ -589,8 +612,8 @@ describe("cli contract", () => {
   it("recovers setup after partial failure and resumes on next run", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-setup-resume-");
     const repoDir = path.join(cwd, "repo");
-    await fs.mkdir(repoDir, { recursive: true });
-    await fs.writeFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
     await writeConfig(cwd, "my-app", repoDir);
 
     const first = runCli(
@@ -605,7 +628,7 @@ describe("cli contract", () => {
     const firstPayload = JSON.parse(first.stdout) as { results: Array<{ status: string }> };
     expect(firstPayload.results[0].status).toBe("error");
 
-    const stateRaw = await fs.readFile(path.join(cwd, ".repo-expert-state.json"), "utf8");
+    const stateRaw = await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), "utf8");
     const state = JSON.parse(stateRaw) as { agents: Record<string, unknown> };
     expect(state.agents["my-app"]).toBeDefined();
 
@@ -623,10 +646,10 @@ describe("cli contract", () => {
   it("handles SIGINT during setup without corrupting state", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-chaos-sigint-");
     const repoDir = path.join(cwd, "repo");
-    await fs.mkdir(repoDir, { recursive: true });
-    await fs.mkdir(path.join(repoDir, ".git"), { recursive: true });
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await mkdirWorkspaceDir(path.join(repoDir, ".git"), { recursive: true });
     for (let i = 0; i < 100; i++) {
-      await fs.writeFile(path.join(repoDir, `file-${String(i)}.ts`), `export const n${String(i)} = ${String(i)};\n`, "utf8");
+      await writeWorkspaceFile(path.join(repoDir, `file-${String(i)}.ts`), `export const n${String(i)} = ${String(i)};\n`, "utf8");
     }
     await writeConfig(cwd, "my-app", repoDir);
 
@@ -653,7 +676,7 @@ describe("cli contract", () => {
     expect(exit.code === 130 || exit.signal === "SIGINT").toBe(true);
 
     const statePath = path.join(cwd, ".repo-expert-state.json");
-    const raw = await fs.readFile(statePath, "utf8");
+    const raw = await readWorkspaceFile(statePath, "utf8");
     const parsed = JSON.parse(raw) as { agents: Record<string, unknown> };
     expect(parsed.agents["my-app"]).toBeDefined();
   });
@@ -661,10 +684,10 @@ describe("cli contract", () => {
   it("meets setup performance budget on fixture repo", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-perf-setup-");
     const repoDir = path.join(cwd, "repo");
-    await fs.mkdir(repoDir, { recursive: true });
-    await fs.mkdir(path.join(repoDir, ".git"), { recursive: true });
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await mkdirWorkspaceDir(path.join(repoDir, ".git"), { recursive: true });
     for (let i = 0; i < 120; i++) {
-      await fs.writeFile(
+      await writeWorkspaceFile(
         path.join(repoDir, `feature-${String(i)}.ts`),
         `export const feature${String(i)} = ${String(i)};\n`,
         "utf8",
