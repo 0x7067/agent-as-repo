@@ -103,7 +103,7 @@ describe("parsePositiveInt", () => {
 
 describe("withTimeout", () => {
   it("resolves with the function result when it completes in time", async () => {
-    const result = await withTimeout("test", 1000, async () => "ok");
+    const result = await withTimeout("test", 1000, () => Promise.resolve("ok"));
     expect(result).toBe("ok");
   });
 
@@ -116,13 +116,13 @@ describe("withTimeout", () => {
   it("clears timeout after function resolves (no timer leak)", async () => {
     // If timeout is not cleared, the test would run indefinitely after resolving
     const start = Date.now();
-    await withTimeout("fast", 500, async () => "done");
+    await withTimeout("fast", 500, () => Promise.resolve("done"));
     expect(Date.now() - start).toBeLessThan(500);
   });
 
   it("calls clearTimeout with the actual timer ID when function resolves", async () => {
     const spy = vi.spyOn(globalThis, "clearTimeout");
-    await withTimeout("test", 5000, async () => "done");
+    await withTimeout("test", 5000, () => Promise.resolve("done"));
     expect(spy).toHaveBeenCalledOnce();
     expect(spy.mock.calls[0][0]).toBeDefined();
     spy.mockRestore();

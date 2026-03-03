@@ -437,9 +437,7 @@ describe("LettaProvider", () => {
     it("throws after max retries", async () => {
       const client = makeMockClient();
       const rateLimitError = Object.assign(new Error("Rate limited"), { statusCode: 429 });
-      client.agents.passages.create.mockImplementation(async () => {
-        throw rateLimitError;
-      });
+      client.agents.passages.create.mockImplementation(() => Promise.reject(rateLimitError));
 
       const provider = new LettaProvider(mockClientAs(client), 1);
 

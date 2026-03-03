@@ -9,13 +9,13 @@ function makeStatusProvider() {
       { id: "p-1", text: "file content" },
       { id: "p-2", text: "file content" },
     ]),
-    getBlock: vi.fn().mockImplementation(async (_agentId: string, label: string) => {
+    getBlock: vi.fn().mockImplementation((_agentId: string, label: string) => {
       const blocks: Record<string, { value: string; limit: number }> = {
         persona: { value: "I am a repo expert.", limit: 5000 },
         architecture: { value: "Uses React.", limit: 5000 },
         conventions: { value: "ESLint.", limit: 5000 },
       };
-      return blocks[label] ?? { value: "", limit: 5000 };
+      return Promise.resolve(blocks[label] ?? { value: "", limit: 5000 });
     }),
   });
 }

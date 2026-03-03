@@ -179,7 +179,7 @@ describe("toolCallingLoop", () => {
   let mockFetch: ReturnType<typeof vi.fn>;
 
   const toolHandlers: Record<string, ToolHandler> = {
-    get_weather: async (args) => `Weather in ${formatCityArg(args)}: sunny, 25°C`,
+    get_weather: (args) => Promise.resolve(`Weather in ${formatCityArg(args)}: sunny, 25°C`),
   };
 
   beforeEach(() => {

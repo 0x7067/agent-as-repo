@@ -60,15 +60,15 @@ describe("VikingAdminAdapter", () => {
   describe("getCoreMemory", () => {
     it("returns existing blocks and skips missing labels", async () => {
       const { adapter, provider } = makeAdapter();
-      provider.getBlock.mockImplementation(async (_agentId: string, label: string) => {
+      provider.getBlock.mockImplementation((_agentId: string, label: string) => {
         if (label === "architecture") {
-          throw new Error("not found");
+          return Promise.reject(new Error("not found"));
         }
 
-        return {
+        return Promise.resolve({
           value: `${label} value`,
           limit: 5000,
-        };
+        });
       });
 
       const blocks = await adapter.getCoreMemory("repo-x");

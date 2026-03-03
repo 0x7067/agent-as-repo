@@ -9,10 +9,10 @@ function makeMockProvider(): AgentProvider & { _passageIds: string[] } {
   let passageCounter = 0;
   return {
     ...makeBase(),
-    storePassage: vi.fn().mockImplementation(async () => {
+    storePassage: vi.fn().mockImplementation(() => {
       const id = `passage-${String(++passageCounter)}`;
       passageIds.push(id);
-      return id;
+      return Promise.resolve(id);
     }),
     _passageIds: passageIds,
   };

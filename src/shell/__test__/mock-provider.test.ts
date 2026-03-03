@@ -29,7 +29,7 @@ describe("makeMockProvider", () => {
 
   it("overrides are applied over defaults", async () => {
     const provider = makeMockProvider({
-      storePassage: async () => "custom-id",
+      storePassage: () => Promise.resolve("custom-id"),
     });
     const id = await provider.storePassage("agent-1", "text");
     expect(id).toBe("custom-id");
