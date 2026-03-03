@@ -17,6 +17,9 @@ function makeResponse(status: number, body: unknown): Response {
 const MODEL = "openai/gpt-4o-mini";
 const API_KEY = "test-api-key";
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
+const HELPFUL_SYSTEM_PROMPT = "You are helpful.";
+const WEATHER_SYSTEM_PROMPT = "You are a weather assistant.";
+const PARIS_WEATHER_QUESTION = "What is the weather in Paris?";
 
 function makeChoice(content: string | null, toolCalls?: Array<{ id: string; name: string; args: string }>) {
   return {
@@ -191,7 +194,7 @@ describe("toolCallingLoop", () => {
     mockFetch.mockResolvedValue(makeResponse(200, makeChoice("The sky is blue.")));
 
     const result = await toolCallingLoop({
-      systemPrompt: "You are helpful.",
+      systemPrompt: HELPFUL_SYSTEM_PROMPT,
       userMessage: "Why is the sky blue?",
       tools: [],
       toolHandlers: {},
@@ -207,7 +210,7 @@ describe("toolCallingLoop", () => {
 
     await expect(
       toolCallingLoop({
-        systemPrompt: "You are helpful.",
+        systemPrompt: HELPFUL_SYSTEM_PROMPT,
         userMessage: "Answer briefly.",
         tools: [],
         toolHandlers: {},
@@ -225,8 +228,8 @@ describe("toolCallingLoop", () => {
       .mockResolvedValueOnce(makeResponse(200, makeChoice("It is sunny in Paris.")));
 
     const result = await toolCallingLoop({
-      systemPrompt: "You are a weather assistant.",
-      userMessage: "What is the weather in Paris?",
+      systemPrompt: WEATHER_SYSTEM_PROMPT,
+      userMessage: PARIS_WEATHER_QUESTION,
       tools: TOOLS,
       toolHandlers,
       model: MODEL,
@@ -257,7 +260,7 @@ describe("toolCallingLoop", () => {
       .mockResolvedValueOnce(makeResponse(200, makeChoice("Both cities have nice weather.")));
 
     const result = await toolCallingLoop({
-      systemPrompt: "You are a weather assistant.",
+      systemPrompt: WEATHER_SYSTEM_PROMPT,
       userMessage: "Compare weather in London and Tokyo.",
       tools: TOOLS,
       toolHandlers,
@@ -277,8 +280,8 @@ describe("toolCallingLoop", () => {
     );
 
     const result = await toolCallingLoop({
-      systemPrompt: "You are a weather assistant.",
-      userMessage: "What is the weather in Paris?",
+      systemPrompt: WEATHER_SYSTEM_PROMPT,
+      userMessage: PARIS_WEATHER_QUESTION,
       tools: TOOLS,
       toolHandlers,
       model: MODEL,
@@ -301,8 +304,8 @@ describe("toolCallingLoop", () => {
 
     await expect(
       toolCallingLoop({
-        systemPrompt: "You are a weather assistant.",
-        userMessage: "What is the weather in Paris?",
+        systemPrompt: WEATHER_SYSTEM_PROMPT,
+        userMessage: PARIS_WEATHER_QUESTION,
         tools: TOOLS,
         toolHandlers,
         model: MODEL,
@@ -320,7 +323,7 @@ describe("toolCallingLoop", () => {
       .mockResolvedValueOnce(makeResponse(200, makeChoice("Done.")));
 
     const result = await toolCallingLoop({
-      systemPrompt: "You are helpful.",
+      systemPrompt: HELPFUL_SYSTEM_PROMPT,
       userMessage: "Do something.",
       tools: [],
       toolHandlers: {},
@@ -345,7 +348,7 @@ describe("toolCallingLoop", () => {
       .mockResolvedValueOnce(makeResponse(200, makeChoice("Done despite malformed args.")));
 
     const result = await toolCallingLoop({
-      systemPrompt: "You are helpful.",
+      systemPrompt: HELPFUL_SYSTEM_PROMPT,
       userMessage: "Do something.",
       tools: TOOLS,
       toolHandlers,

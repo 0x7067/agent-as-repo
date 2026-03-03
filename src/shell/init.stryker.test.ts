@@ -51,6 +51,9 @@ function makeFakeFs(files: Record<string, string> = {}): FileSystemPort & { stor
 }
 
 const mockRl: MockRl = { question: vi.fn().mockResolvedValue("") };
+const TEST_API_KEY = "sk-test-key";
+const PROJECT_ENV_PATH = "/project/.env";
+const PROJECT_CONFIG_PATH = "/project/config.yaml";
 
 describe("runInit (port-injected, stryker)", () => {
   it("writes .env when API key provided via flag", async () => {
@@ -61,7 +64,7 @@ describe("runInit (port-injected, stryker)", () => {
     });
 
     await runInit(mockRl, {
-      apiKey: "sk-test-key",
+      apiKey: TEST_API_KEY,
       repoPath: "/repo",
       assumeYes: true,
       allowPrompts: false,
@@ -69,7 +72,7 @@ describe("runInit (port-injected, stryker)", () => {
       fs: fakeFs,
     });
 
-    expect(fakeFs.store.get("/project/.env")).toContain("sk-test-key");
+    expect(fakeFs.store.get(PROJECT_ENV_PATH)).toContain(TEST_API_KEY);
   });
 
   it("writes config.yaml with detected repo name", async () => {
@@ -80,7 +83,7 @@ describe("runInit (port-injected, stryker)", () => {
     });
 
     const result = await runInit(mockRl, {
-      apiKey: "sk-test-key",
+      apiKey: TEST_API_KEY,
       repoPath: "/repo",
       assumeYes: true,
       allowPrompts: false,
@@ -89,7 +92,7 @@ describe("runInit (port-injected, stryker)", () => {
     });
 
     expect(result.repoName).toBe("repo");
-    expect(fakeFs.store.has("/project/config.yaml")).toBe(true);
+    expect(fakeFs.store.has(PROJECT_CONFIG_PATH)).toBe(true);
   });
 
   it("throws when repo path is not a directory", async () => {
@@ -134,7 +137,7 @@ describe("runInit (port-injected, stryker)", () => {
     });
 
     expect(result.envPath).toBeNull();
-    expect(fakeFs.store.has("/project/.env")).toBe(false);
+    expect(fakeFs.store.has(PROJECT_ENV_PATH)).toBe(false);
     process.env.LETTA_API_KEY = undefined;
   });
 
@@ -205,7 +208,7 @@ describe("runInit (port-injected, stryker)", () => {
       fs: fakeFs,
     });
 
-    const config = fakeFs.store.get("/project/config.yaml");
+    const config = fakeFs.store.get(PROJECT_CONFIG_PATH);
     expect(config).toContain("My cool library");
     expect(result.repoName).toBe("repo");
   });
@@ -250,7 +253,7 @@ describe("runInit (port-injected, stryker)", () => {
       fs: fakeFs,
     });
 
-    expect(result.configPath).toBe("/project/config.yaml");
+    expect(result.configPath).toBe(PROJECT_CONFIG_PATH);
   });
 
   it("uses .env from flag when .env file has placeholder value", async () => {
@@ -270,6 +273,6 @@ describe("runInit (port-injected, stryker)", () => {
       fs: fakeFs,
     });
 
-    expect(fakeFs.store.get("/project/.env")).toContain("sk-real-key");
+    expect(fakeFs.store.get(PROJECT_ENV_PATH)).toContain("sk-real-key");
   });
 });
