@@ -276,6 +276,22 @@ describe("state store", () => {
     });
   });
 
+  it("StateFileError backupPath stays null when backup copy fails", async () => {
+    await withTempDir(async (dir) => {
+      const filePath = path.join(dir, "state.json");
+      await writeStateTestFile(filePath, "bad json {{");
+      const mockFs: FileSystemPort = {
+        ...nodeFileSystem,
+        copyFile: () => Promise.reject(new Error("copy disabled")),
+      };
+
+      await expect(loadState(filePath, mockFs)).rejects.toMatchObject({
+        name: "StateFileError",
+        backupPath: null,
+      });
+    });
+  });
+
   it("retries rename on EPERM error", async () => {
     await withTempDir(async (dir) => {
       const filePath = path.join(dir, "state.json");
