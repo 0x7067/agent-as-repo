@@ -1,9 +1,7 @@
 import { main } from "../src/mcp-server.js";
 
-try {
-  await main();
-} catch (error: unknown) {
+main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`letta-tools MCP server error: ${message}\n`);
   process.exitCode = 1;
-}
+});

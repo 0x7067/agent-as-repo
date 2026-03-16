@@ -425,11 +425,9 @@ export async function main(): Promise<void> {
 
 // Stryker disable next-line ConditionalExpression,EqualityOperator -- entry-point guard is untestable in unit tests
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  try {
-    await main();
-  } catch (error: unknown) {
+  main().catch((error: unknown) => {
     process.stderr.write(`letta-tools MCP server error: ${errorMessage(error)}\n`);
     process.exitCode = 1;
-  }
+  });
 }
 /* eslint-enable max-lines */
