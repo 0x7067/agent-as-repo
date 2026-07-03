@@ -20,18 +20,22 @@ interface PromptReader {
 }
 
 export interface RunInitOptions {
+  /** Optional Bearer key for the LLM endpoint (written to .env as LLM_API_KEY). */
   apiKey?: string;
   repoPath?: string;
-  provider?: "letta" | "viking";
+  /** Chat model id as the LLM endpoint knows it. */
+  model?: string;
+  /** OpenAI-compatible base URL. */
+  baseUrl?: string;
   assumeYes?: boolean;
   allowPrompts?: boolean;
   cwd?: string;
   fs?: FileSystemPort;
 }
 
-function isProviderType(value: string): value is "letta" | "viking" {
-  return value === "letta" || value === "viking";
-}
+const DEFAULT_MODEL = "qwen3-coder:30b";
+const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
+const LLM_API_KEY_ENV = "LLM_API_KEY";
 
 /**
  * Scan a directory for file paths (no content). Used for extension/ignore detection.
@@ -56,14 +60,15 @@ function tildeify(absPath: string): string {
 }
 
 /**
- * Interactive init flow. Prompts for API key, repo path, confirms settings, writes files.
+ * Interactive init flow. Prompts for model + base URL, scans a repo, writes files.
  */
 // eslint-disable-next-line sonarjs/cognitive-complexity
 export async function runInit(rl: PromptReader, options: RunInitOptions = {}): Promise<InitResult> {
   const {
     apiKey: apiKeyFromFlag,
     repoPath: repoPathFromFlag,
-    provider: providerFromFlag,
+    model: modelFromFlag,
+    baseUrl: baseUrlFromFlag,
     assumeYes = false,
     allowPrompts = true,
     cwd = process.cwd(),
@@ -71,69 +76,28 @@ export async function runInit(rl: PromptReader, options: RunInitOptions = {}): P
   } = options;
   console.log("repo-expert init — set up your first agent\n");
 
-  let providerTypeCandidate: string | undefined = providerFromFlag;
-  if (providerTypeCandidate === undefined) {
-    if (allowPrompts && !assumeYes) {
-      const providerInput = await rl.question("Provider [letta/viking] (default: letta): ");
-      providerTypeCandidate = providerInput.trim().toLowerCase() || "letta";
-    } else {
-      providerTypeCandidate = "letta";
-    }
-  }
-  if (!isProviderType(providerTypeCandidate)) {
-    console.error(`Invalid provider "${providerTypeCandidate}". Expected "letta" or "viking".`);
-    process.exitCode = 1;
-    throw new Error("Invalid provider");
-  }
-  const providerType = providerTypeCandidate;
+  // 1. Model + base URL
+  const askWithDefault = async (prompt: string, fallback: string): Promise<string> => {
+    if (!allowPrompts || assumeYes) return fallback;
+    const response = await rl.question(prompt);
+    const answer = response.trim();
+    return answer || fallback;
+  };
+  const model = modelFromFlag ?? (await askWithDefault(`Chat model [${DEFAULT_MODEL}]: `, DEFAULT_MODEL));
+  const baseUrl = baseUrlFromFlag ?? (await askWithDefault(`LLM base URL [${DEFAULT_LLM_BASE_URL}]: `, DEFAULT_LLM_BASE_URL));
 
-  const providerApiKeyEnv = providerType === "viking" ? "OPENROUTER_API_KEY" : "LETTA_API_KEY";
-  const providerApiKeyPrompt = providerType === "viking"
-    ? "OpenRouter API key (from https://openrouter.ai/keys): "
-    : "Letta API key (from https://app.letta.com/): ";
-
-  // 1. API key
+  // 2. Optional API key (only remote endpoints need one; local Ollama does not).
   const envPath = path.resolve(cwd, ".env");
   let envWritten: string | null = null;
-  const existingKey = process.env[providerApiKeyEnv];
-
-  if (existingKey) {
-    console.log(`${providerApiKeyEnv}: found in environment`);
-  } else {
-    let hasEnvFile = false;
-    try {
-      const envContent = await fs.readFile(envPath, "utf8");
-      hasEnvFile = envContent.includes(`${providerApiKeyEnv}=`) &&
-        !envContent.includes(`${providerApiKeyEnv}=your-key-here`);
-    } catch {
-      // no .env
-    }
-
-    if (hasEnvFile) {
-      console.log(`${providerApiKeyEnv}: found in .env`);
-    } else if (apiKeyFromFlag && apiKeyFromFlag.trim()) {
-      await fs.writeFile(envPath, `${providerApiKeyEnv}=${apiKeyFromFlag.trim()}\n`);
-      envWritten = envPath;
-      console.log(`${providerApiKeyEnv}: wrote ${envPath} from --api-key`);
-    } else {
-      if (!allowPrompts) {
-        console.error(`API key is required in non-interactive mode. Pass --api-key or set ${providerApiKeyEnv}.`);
-        process.exitCode = 1;
-        throw new Error("Missing API key");
-      }
-      const apiKey = await rl.question(providerApiKeyPrompt);
-      if (!apiKey.trim()) {
-        console.error(`API key is required. Set ${providerApiKeyEnv} and retry.`);
-        process.exitCode = 1;
-        throw new Error("Missing API key");
-      }
-      await fs.writeFile(envPath, `${providerApiKeyEnv}=${apiKey.trim()}\n`);
-      envWritten = envPath;
-      console.log(`  Wrote ${envPath}`);
-    }
+  if (apiKeyFromFlag && apiKeyFromFlag.trim()) {
+    await fs.writeFile(envPath, `${LLM_API_KEY_ENV}=${apiKeyFromFlag.trim()}\n`);
+    envWritten = envPath;
+    console.log(`${LLM_API_KEY_ENV}: wrote ${envPath} from --api-key`);
+  } else if (process.env[LLM_API_KEY_ENV]) {
+    console.log(`${LLM_API_KEY_ENV}: found in environment`);
   }
 
-  // 2. Repo path
+  // 3. Repo path
   const rawPath = repoPathFromFlag ?? (allowPrompts ? await rl.question("\nPath to your git repo: ") : "");
   if (!rawPath.trim()) {
     console.error("Repository path is required. Pass --repo-path in non-interactive mode.");
@@ -168,7 +132,7 @@ export async function runInit(rl: PromptReader, options: RunInitOptions = {}): P
     throw new Error("Not a git repository");
   }
 
-  // 3. Scan and detect
+  // 4. Scan and detect
   console.log("\nScanning files...");
   const files = await scanFilePaths(resolvedPath, fs);
   const extensions = detectExtensions(files);
@@ -185,7 +149,7 @@ export async function runInit(rl: PromptReader, options: RunInitOptions = {}): P
   console.log(`  Detected extensions: ${extensions.join(", ") || "(none)"}`);
   console.log(`  Detected ignore dirs: ${ignoreDirs.join(", ") || "(none)"}`);
 
-  // 4. Description
+  // 5. Description
   let defaultDescription = "";
   try {
     const pkgRaw = await fs.readFile(path.join(resolvedPath, "package.json"), "utf8");
@@ -206,11 +170,13 @@ export async function runInit(rl: PromptReader, options: RunInitOptions = {}): P
   }
   const description = descInput.trim() || defaultDescription || `${repoName} repository`;
 
-  // 5. Confirm
+  // 6. Confirm
   const displayPath = tildeify(resolvedPath);
   console.log(`\n  Repo: ${repoName}`);
   console.log(`  Path: ${displayPath}`);
   console.log(`  Description: ${description}`);
+  console.log(`  Model: ${model}`);
+  console.log(`  LLM base URL: ${baseUrl}`);
   console.log(`  Extensions: ${extensions.join(", ")}`);
   console.log(`  Ignore dirs: ${ignoreDirs.join(", ")}`);
 
@@ -224,7 +190,7 @@ export async function runInit(rl: PromptReader, options: RunInitOptions = {}): P
     throw new Error("Aborted by user");
   }
 
-  // 6. Write config.yaml
+  // 7. Write config.yaml
   const configPath = path.resolve(cwd, "config.yaml");
   const yamlContent = generateConfigYaml({
     repoName,
@@ -232,7 +198,8 @@ export async function runInit(rl: PromptReader, options: RunInitOptions = {}): P
     description,
     extensions,
     ignoreDirs,
-    providerType,
+    model,
+    baseUrl,
   });
 
   await fs.writeFile(configPath, yamlContent);
