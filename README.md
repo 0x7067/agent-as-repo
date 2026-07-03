@@ -47,7 +47,7 @@ pnpm repo-expert mcp-install  # writes the "repo-expert" entry to ~/.claude.json
 |---------|-------------|
 | `init` | Interactive setup: pick model + LLM base URL, scan a repo, generate `config.yaml` |
 | `setup [--repo] [--reindex]` | Create agents from `config.yaml`, load file passages, bootstrap |
-| `ask <repo> <question>` | Ask a single agent a question |
+| `ask <repo> <question> [--fast] [--fast-model <id>]` | Ask a single agent a question; `--fast` uses `provider.fast_model` (or `--fast-model`) |
 | `ask --all <question>` | Broadcast question to all agents and collect responses |
 | `sync [--repo] [--full]` | Sync file changes to agents via `git diff` |
 | `reconcile [--repo] [--fix]` | Compare local passage state vs the provider, detect and fix drift |
@@ -76,6 +76,7 @@ provider:
   # base_url: http://localhost:11434/v1   # optional; default local Ollama
   # fallback_models: []                   # optional; tried in order after `model`
   # viking_url: http://localhost:1933     # optional; default local OpenViking
+  # fast_model: llama3.2:3b               # optional; smaller model used by `ask --fast`
 
 repos:
   my-app:

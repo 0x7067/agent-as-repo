@@ -34,6 +34,8 @@ export interface ProviderConfig {
   fallbackModels: string[];
   /** OpenViking storage/retrieval base URL. */
   vikingUrl: string;
+  /** Smaller/faster chat model used when `ask --fast` is requested. No default. */
+  fastModel?: string;
 }
 
 /** Top-level validated config. */

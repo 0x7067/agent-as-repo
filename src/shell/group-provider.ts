@@ -73,6 +73,8 @@ export interface BroadcastResult {
 
 export interface BroadcastOptions {
   timeoutMs?: number;
+  /** Optional per-call model override (e.g. `ask --fast`), passed to each agent. */
+  overrideModel?: string;
 }
 
 /**
@@ -86,13 +88,14 @@ export async function broadcastAsk(
   options: BroadcastOptions = {},
 ): Promise<BroadcastResult[]> {
   const timeoutMs = options.timeoutMs ?? BROADCAST_ASK_DEFAULT_TIMEOUT_MS;
+  const sendOptions = options.overrideModel === undefined ? undefined : { overrideModel: options.overrideModel };
 
   return Promise.all(
     agents.map(async ({ repoName, agentId }): Promise<BroadcastResult> => {
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
         const response = await Promise.race([
-          provider.sendMessage(agentId, question),
+          provider.sendMessage(agentId, question, sendOptions),
           new Promise<never>((_resolve, reject) => {
             timeoutId = setTimeout(() => { reject(new Error(`Agent "${repoName}" timed out after ${String(timeoutMs)}ms`)); }, timeoutMs);
           }),

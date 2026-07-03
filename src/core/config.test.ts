@@ -103,6 +103,23 @@ describe("parseConfig", () => {
     expect(config.provider.vikingUrl).toBe("http://localhost:2000");
   });
 
+  it("parses provider.fast_model when provided", () => {
+    const raw = {
+      provider: {
+        model: MODEL,
+        fast_model: "llama3.2:3b",
+      },
+      repos: validRaw.repos,
+    };
+    const config = parseConfig(raw);
+    expect(config.provider.fastModel).toBe("llama3.2:3b");
+  });
+
+  it("leaves provider.fastModel undefined when omitted", () => {
+    const config = parseConfig(validRaw);
+    expect(config.provider.fastModel).toBeUndefined();
+  });
+
   it("allows per-repo overrides of defaults", () => {
     const raw = {
       ...validRaw,
@@ -307,6 +324,14 @@ describe("parseConfig", () => {
         repos: validRaw.repos,
       });
       expect(configErr.issues.some((i) => i.includes("embedding"))).toBe(true);
+    });
+
+    it("no longer rejects provider.fast_model as legacy", () => {
+      const config = parseConfig({
+        provider: { model: MODEL, fast_model: "llama3.2:3b" },
+        repos: validRaw.repos,
+      });
+      expect(config.provider.fastModel).toBe("llama3.2:3b");
     });
   });
 });

@@ -41,6 +41,7 @@ const providerSchema = z.object({
   base_url: z.string().optional(),
   fallback_models: z.array(z.string()).optional(),
   viking_url: z.string().optional(),
+  fast_model: z.string().optional(),
 });
 
 const rawConfigSchema = z.object({
@@ -50,7 +51,7 @@ const rawConfigSchema = z.object({
 });
 
 const NEW_SHAPE_HINT =
-  "Use provider: { model, base_url?, fallback_models?, viking_url? } (Viking + OpenAI-compatible LLM). See config.example.yaml.";
+  "Use provider: { model, base_url?, fallback_models?, viking_url?, fast_model? } (Viking + OpenAI-compatible LLM). See config.example.yaml.";
 
 /**
  * Detect configs written for the old dual-provider (Letta/Viking) schema and
@@ -77,9 +78,6 @@ function detectLegacyConfig(raw: unknown): string[] {
     }
     if ("embedding" in p) {
       issues.push(`'provider.embedding' is no longer supported (OpenViking owns embeddings). ${NEW_SHAPE_HINT}`);
-    }
-    if ("fast_model" in p) {
-      issues.push(`'provider.fast_model' is no longer supported. ${NEW_SHAPE_HINT}`);
     }
   }
 
@@ -160,6 +158,7 @@ export function parseConfig(raw: unknown): Config {
     baseUrl: parsed.provider.base_url ?? DEFAULT_LLM_BASE_URL,
     fallbackModels: parsed.provider.fallback_models ?? [],
     vikingUrl: parsed.provider.viking_url ?? DEFAULT_VIKING_URL,
+    ...(parsed.provider.fast_model === undefined ? {} : { fastModel: parsed.provider.fast_model }),
   };
 
   const userDefaults = parsed.defaults ?? {};

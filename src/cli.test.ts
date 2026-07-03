@@ -476,6 +476,89 @@ describe("cli contract", () => {
     await expect(fs.access(path.join(cwd, ".repo-expert-state.json"))).resolves.toBeUndefined();
   });
 
+  async function writeAskWorkspace(cwd: string, providerLines: string[]): Promise<void> {
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    const config = [
+      "provider:",
+      ...providerLines,
+      "repos:",
+      "  my-app:",
+      `    path: ${repoDir}`,
+      "    description: test repo",
+      "    extensions: [.ts]",
+      "    ignore_dirs: [node_modules, .git]",
+      "    bootstrap_on_create: false",
+    ].join("\n");
+    await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+  }
+
+  it("errors when ask --fast has no model source", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-ask-fast-error-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+
+    const result = runCli(["ask", "my-app", "How does auth work?", "--fast"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("--fast requires provider.fast_model in config.yaml or --fast-model");
+  });
+
+  it("uses provider.fast_model from config for ask --fast", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-ask-fast-config-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b", "  fast_model: llama3.2:3b"]);
+
+    const result = runCli(["ask", "my-app", "q", "--fast"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_ECHO_MODEL: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("model=llama3.2:3b");
+  });
+
+  it("prefers --fast-model flag over provider.fast_model config", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-ask-fast-precedence-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b", "  fast_model: config-model"]);
+
+    const result = runCli(["ask", "my-app", "q", "--fast", "--fast-model", "flag-model"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_ECHO_MODEL: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("model=flag-model");
+  });
+
+  it("does not apply a fast model when --fast is omitted", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-ask-no-fast-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b", "  fast_model: config-model"]);
+
+    const result = runCli(["ask", "my-app", "q"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_ECHO_MODEL: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("model=default");
+  });
+
   it("supports self-check --json", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-self-check-");
     await writeWorkspaceFile(

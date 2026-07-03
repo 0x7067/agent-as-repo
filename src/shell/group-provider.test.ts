@@ -121,6 +121,26 @@ describe("broadcastAsk", () => {
     expect(results[0].error).toContain("connection refused");
   });
 
+  it("forwards overrideModel to sendMessage when provided", async () => {
+    const provider = makeMockProvider();
+    (provider.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce("fast answer");
+
+    const agents = [{ repoName: "repo", agentId: "a1" }];
+    await broadcastAsk(provider, agents, "q", { overrideModel: "llama3.2:3b" });
+
+    expect(provider.sendMessage).toHaveBeenCalledWith("a1", "q", { overrideModel: "llama3.2:3b" });
+  });
+
+  it("omits send options when no overrideModel is given", async () => {
+    const provider = makeMockProvider();
+    (provider.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce("answer");
+
+    const agents = [{ repoName: "repo", agentId: "a1" }];
+    await broadcastAsk(provider, agents, "q");
+
+    expect(provider.sendMessage).toHaveBeenCalledWith("a1", "q", undefined);
+  });
+
   it("clears timeout after successful response (no timer leak)", async () => {
     const provider = makeMockProvider();
     (provider.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce("fast");

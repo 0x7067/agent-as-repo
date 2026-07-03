@@ -257,7 +257,7 @@ class FakeProvider implements AgentProvider {
     return Promise.resolve({ value, limit });
   }
 
-  async sendMessage(_agentId: string, _content: string, _options?: SendMessageOptions): Promise<string> {
+  async sendMessage(_agentId: string, _content: string, options?: SendMessageOptions): Promise<string> {
     const delayMs = Number.parseInt(process.env["REPO_EXPERT_TEST_DELAY_BOOTSTRAP_MS"] ?? "0", 10);
     if (!Number.isNaN(delayMs) && delayMs > 0) {
       await delay(delayMs);
@@ -265,6 +265,9 @@ class FakeProvider implements AgentProvider {
     if (process.env["REPO_EXPERT_TEST_FAIL_BOOTSTRAP_ONCE"] === "1") {
       process.env["REPO_EXPERT_TEST_FAIL_BOOTSTRAP_ONCE"] = "0";
       throw new Error("simulated bootstrap failure");
+    }
+    if (process.env["REPO_EXPERT_TEST_ECHO_MODEL"] === "1") {
+      return `model=${options?.overrideModel ?? "default"}`;
     }
     return "ok";
   }
@@ -576,6 +579,7 @@ const ASK_DEFAULT_TIMEOUT_MS = 60_000;
 
 async function loadAskConfigDefaults(configPath: string | undefined): Promise<{
   askTimeoutMs: number;
+  fastModel?: string;
 }> {
   const defaults = { askTimeoutMs: ASK_DEFAULT_TIMEOUT_MS };
 
@@ -592,6 +596,7 @@ async function loadAskConfigDefaults(configPath: string | undefined): Promise<{
   const config = await loadConfigSafe(resolvedPath);
   return {
     askTimeoutMs: config.defaults.askTimeoutMs ?? defaults.askTimeoutMs,
+    ...(config.provider.fastModel === undefined ? {} : { fastModel: config.provider.fastModel }),
   };
 }
 
@@ -958,11 +963,14 @@ program
   .action(async (repo: string | undefined, question: string | undefined, opts: AskOpts) => {
     const buildAskSettings = async (): Promise<AskRuntimeSettings> => {
       const configDefaults = await loadAskConfigDefaults(opts.config);
-      const fastModel = opts.fastModel;
+      const fastModel = opts.fastModel ?? configDefaults.fastModel;
       const maxSteps = parseOptionalMaxSteps(opts.maxSteps);
+      if (opts.fast && fastModel === undefined) {
+        throw new CliUserError("--fast requires provider.fast_model in config.yaml or --fast-model");
+      }
       return {
         askTimeoutMs: parseOptionalPositiveInt(opts.askTimeoutMs, configDefaults.askTimeoutMs),
-        useFast: Boolean(opts.fast) && Boolean(fastModel),
+        useFast: Boolean(opts.fast),
         ...(fastModel === undefined ? {} : { fastModel }),
         ...(maxSteps === undefined ? {} : { maxSteps }),
       };
@@ -985,6 +993,7 @@ program
         return;
       }
 
+      const askSettings = await buildAskSettings();
       const askAllConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
       const provider = createProvider(askAllConfig);
       const agents = entries.map(([repoName, agent]) => ({ repoName, agentId: agent.agentId }));
@@ -992,6 +1001,7 @@ program
       console.log(`Broadcasting to ${String(agents.length)} agents...`);
       const results = await broadcastAsk(provider, agents, actualQuestion, {
         timeoutMs: parseIntOrDefault(opts.timeout, BROADCAST_ASK_DEFAULT_TIMEOUT_MS),
+        ...(askSettings.useFast && askSettings.fastModel !== undefined ? { overrideModel: askSettings.fastModel } : {}),
       });
 
       for (const result of results) {
@@ -1018,7 +1028,7 @@ program
     if (!agentInfo) return;
 
     const askConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
-    const provider = createProvider(askConfig);
+    const provider = createProviderForCommands(askConfig);
     const askSettings = await buildAskSettings();
     const stop = startSpinner(`Asking ${repo}...`);
     try {
