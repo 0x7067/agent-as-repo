@@ -24,7 +24,9 @@ defaults:
   memory_block_limit: 5000    # Max chars per core memory block
   bootstrap_on_create: true   # Auto-analyze codebase on setup
   # ask_timeout_ms: 60000      # Default timeout for single-agent ask requests
-  # chunking: raw             # Chunking strategy: "raw" (default) or "tree-sitter"
+  # chunking: raw             # "raw" (default, ~2KB text splits) or "tree-sitter"
+                               # (symbol-boundary chunking for .ts/.tsx/.js/.jsx;
+                               # other file types automatically fall back to "raw")
   # tools:                    # Letta tools for all agents (per-repo overrides)
   #   - send_message_to_agents_matching_tags  # Cross-agent broadcast
 

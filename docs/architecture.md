@@ -114,6 +114,7 @@ pnpm test   # architecture.test.ts catches violations at the file content level
 | Adapter: git | `src/shell/adapters/node-git.ts` |
 | Adapter: admin | `src/shell/adapters/letta-admin-adapter.ts` |
 | Shell provider | `src/shell/provider.ts` |
+| Tree-sitter chunker | `src/core/tree-sitter-chunker.ts` |
 | Architecture tests | `src/__tests__/architecture.test.ts` |
 
 ---
@@ -128,13 +129,13 @@ pnpm test   # architecture.test.ts catches violations at the file content level
  │  ┌──────────┐    ┌─────────────┐    ┌─────────────────────┐     │
  │  │ repos:   │───▶│ collect     │───▶│  Agent per repo     │     │
  │  │  mobile  │    │ files       │    │  ┌───────────────┐  │     │
- │  │  backend │    │ chunk ~2KB  │    │  │ Core Memory   │  │     │
- │  │  etl     │    │ load as     │    │  │ (self-updated)│  │     │
- │  └──────────┘    │ passages    │    │  ├───────────────┤  │     │
- │                  │ bootstrap   │    │  │ Archival Mem  │  │     │
- │                  └─────────────┘    │  │ (vector store)│  │     │
- │                                     │  ├───────────────┤  │     │
- │       sync (git diff)               │  │ Recall Memory │  │     │
+ │  │  backend │    │ chunk       │    │  │ Core Memory   │  │     │
+ │  │  etl     │    │ (raw/       │    │  │ (self-updated)│  │     │
+ │  └──────────┘    │ tree-sitter)│    │  ├───────────────┤  │     │
+ │                  │ load as     │    │  │ Archival Mem  │  │     │
+ │                  │ passages    │    │  │ (vector store)│  │     │
+ │                  │ bootstrap   │    │  ├───────────────┤  │     │
+ │                  └─────────────┘    │  │ Recall Memory │  │     │
  │  ┌─────────────────┐                │  │ (conv history)│  │     │
  │  │ detect changed  │───▶ delete old │  └───────────────┘  │     │
  │  │ files since     │    passages,   │                     │     │
@@ -142,6 +143,8 @@ pnpm test   # architecture.test.ts catches violations at the file content level
  │  └─────────────────┘                                            │
  └──────────────────────────────────────────────────────────────────┘
 ```
+
+The chunk step supports two strategies, selected via `config.defaults.chunking`: **`raw`** (default, ~2KB text splits on paragraph boundaries) and **`tree-sitter`** (symbol-boundary chunking for `.ts`/`.tsx`/`.js`/`.jsx`, with automatic fallback to raw for other file types). Implementation lives in `src/core/tree-sitter-chunker.ts`.
 
 ---
 

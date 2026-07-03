@@ -93,6 +93,7 @@ Key points:
 - **Functional core, imperative shell** — `src/core/` contains pure functions, `src/shell/` handles all I/O
 - **Provider abstraction** — `AgentProvider` interface decouples business logic from the Letta SDK
 - **Three-tier memory** — core (always in context), archival (vector-searchable source files), recall (conversation history)
+- **Symbol-aware chunking** — optional `chunking: tree-sitter` mode chunks TypeScript/JavaScript at function/class boundaries instead of raw text splits, improving retrieval precision
 - **Incremental sync** — `git diff` detects changes; only affected passages are re-indexed
 
 ## Development
