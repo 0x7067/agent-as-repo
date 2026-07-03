@@ -57,7 +57,7 @@ const PROJECT_CONFIG_PATH = "/project/config.yaml";
 
 describe("runInit (port-injected, stryker)", () => {
   it("writes .env when API key provided via flag", async () => {
-    delete process.env.LETTA_API_KEY;
+    delete process.env.LLM_API_KEY;
     const fakeFs = makeFakeFs({
       "/repo": "__DIR__",
       "/repo/.git": "__DIR__",
@@ -76,7 +76,7 @@ describe("runInit (port-injected, stryker)", () => {
   });
 
   it("writes config.yaml with detected repo name", async () => {
-    delete process.env.LETTA_API_KEY;
+    delete process.env.LLM_API_KEY;
     const fakeFs = makeFakeFs({
       "/repo": "__DIR__",
       "/repo/.git": "__DIR__",
@@ -104,7 +104,7 @@ describe("runInit (port-injected, stryker)", () => {
   });
 
   it("throws Not a git repository when .git is missing", async () => {
-    delete process.env.LETTA_API_KEY;
+    delete process.env.LLM_API_KEY;
     const fakeFs = makeFakeFs({
       "/repo": "__DIR__",
     });
@@ -122,7 +122,7 @@ describe("runInit (port-injected, stryker)", () => {
   });
 
   it("envWritten is null when API key already in environment", async () => {
-    process.env.LETTA_API_KEY = "existing-key";
+    process.env.LLM_API_KEY = "existing-key";
     const fakeFs = makeFakeFs({
       "/repo": "__DIR__",
       "/repo/.git": "__DIR__",
@@ -138,29 +138,31 @@ describe("runInit (port-injected, stryker)", () => {
 
     expect(result.envPath).toBeNull();
     expect(fakeFs.store.has(PROJECT_ENV_PATH)).toBe(false);
-    process.env.LETTA_API_KEY = undefined;
+    process.env.LLM_API_KEY = undefined;
   });
 
-  it("throws Missing API key when no api key and non-interactive", async () => {
-    delete process.env.LETTA_API_KEY;
+  it("succeeds without an API key (local endpoint needs none)", async () => {
+    delete process.env.LLM_API_KEY;
     const fakeFs = makeFakeFs({
       "/repo": "__DIR__",
       "/repo/.git": "__DIR__",
     });
 
-    await expect(
-      runInit(mockRl, {
-        repoPath: "/repo",
-        assumeYes: true,
-        allowPrompts: false,
-        cwd: "/project",
-        fs: fakeFs,
-      }),
-    ).rejects.toThrow("Missing API key");
+    const result = await runInit(mockRl, {
+      repoPath: "/repo",
+      assumeYes: true,
+      allowPrompts: false,
+      cwd: "/project",
+      fs: fakeFs,
+    });
+
+    expect(result.envPath).toBeNull();
+    expect(fakeFs.store.has(PROJECT_ENV_PATH)).toBe(false);
+    expect(fakeFs.store.has(PROJECT_CONFIG_PATH)).toBe(true);
   });
 
   it("throws Missing repo path when no repo path and non-interactive", async () => {
-    delete process.env.LETTA_API_KEY;
+    delete process.env.LLM_API_KEY;
     const fakeFs = makeFakeFs({});
 
     await expect(
@@ -175,7 +177,7 @@ describe("runInit (port-injected, stryker)", () => {
   });
 
   it("throws Directory not found when directory does not exist", async () => {
-    delete process.env.LETTA_API_KEY;
+    delete process.env.LLM_API_KEY;
     const fakeFs = makeFakeFs({});
 
     await expect(
@@ -191,7 +193,7 @@ describe("runInit (port-injected, stryker)", () => {
   });
 
   it("uses description from package.json when available", async () => {
-    delete process.env.LETTA_API_KEY;
+    delete process.env.LLM_API_KEY;
     const fakeFs = makeFakeFs({
       "/repo": "__DIR__",
       "/repo/.git": "__DIR__",
@@ -214,13 +216,14 @@ describe("runInit (port-injected, stryker)", () => {
   });
 
   it("aborted by user when confirm is 'n'", async () => {
-    delete process.env.LETTA_API_KEY;
+    delete process.env.LLM_API_KEY;
     const fakeFs = makeFakeFs({
       "/repo": "__DIR__",
       "/repo/.git": "__DIR__",
     });
 
-    const answers = ["", "", "n"];
+    // answers: model, base URL, description, confirm
+    const answers = ["", "", "", "n"];
     const rl: MockRl = {
       question: vi.fn(() => Promise.resolve(answers.shift() ?? "")),
     };
@@ -238,7 +241,7 @@ describe("runInit (port-injected, stryker)", () => {
   });
 
   it("returns configPath in result", async () => {
-    delete process.env.LETTA_API_KEY;
+    delete process.env.LLM_API_KEY;
     const fakeFs = makeFakeFs({
       "/repo": "__DIR__",
       "/repo/.git": "__DIR__",
@@ -257,9 +260,9 @@ describe("runInit (port-injected, stryker)", () => {
   });
 
   it("uses .env from flag when .env file has placeholder value", async () => {
-    delete process.env.LETTA_API_KEY;
+    delete process.env.LLM_API_KEY;
     const fakeFs = makeFakeFs({
-      "/project/.env": "LETTA_API_KEY=your-key-here\n",
+      "/project/.env": "LLM_API_KEY=your-key-here\n",
       "/repo": "__DIR__",
       "/repo/.git": "__DIR__",
     });

@@ -169,11 +169,11 @@ describe("generateConfigYaml", () => {
       description: "React Native mobile app",
       extensions: [".ts", ".tsx", ".js"],
       ignoreDirs: ["node_modules", ".git", "dist"],
-      providerType: "letta",
     });
 
-    expect(output).toContain("model: openai/gpt-4.1");
-    expect(output).toContain("embedding: openai/text-embedding-3-small");
+    expect(output).toContain("model: qwen3-coder:30b");
+    expect(output).toContain("base_url: http://localhost:11434/v1");
+    expect(output).toContain("viking_url: http://localhost:1933");
     expect(output).toContain("my-app:");
     expect(output).toContain("path: ~/repos/my-app");
     expect(output).toContain("description: React Native mobile app");
@@ -188,7 +188,6 @@ describe("generateConfigYaml", () => {
       description: "test",
       extensions: [".ts"],
       ignoreDirs: [],
-      providerType: "letta",
     });
     const parsed = yaml.load(output) as Record<string, unknown>;
     expect(parsed).toBeDefined();
@@ -196,9 +195,21 @@ describe("generateConfigYaml", () => {
     expect(parsed.repos).toBeDefined();
   });
 
+  it("honors an explicit model and base_url override", () => {
+    const output = generateConfigYaml({
+      repoName: "app",
+      repoPath: APP_REPO_PATH,
+      description: "test",
+      extensions: [".ts"],
+      ignoreDirs: [],
+      model: "llama3.1:8b",
+      baseUrl: "https://openrouter.ai/api/v1",
+    });
+    expect(output).toContain("model: llama3.1:8b");
+    expect(output).toContain("base_url: https://openrouter.ai/api/v1");
+  });
+
   it("respects lineWidth option — long lines not wrapped at default 80", () => {
-    // yaml.dump default lineWidth is 80. Our code sets 120.
-    // Catches: ObjectLiteral mutation (options → {}) — would use default 80-char wrapping
     const longDescription = "A".repeat(100); // 100 chars, > 80 default
     const output = generateConfigYaml({
       repoName: "app",
@@ -206,34 +217,19 @@ describe("generateConfigYaml", () => {
       description: longDescription,
       extensions: [".ts"],
       ignoreDirs: [],
-      providerType: "letta",
     });
-    // With lineWidth 120: description fits on one line
-    // With default lineWidth 80 (or {} options): wraps using >- block scalar
     expect(output).toContain(`description: ${longDescription}`);
-    // Should NOT contain block scalar indicator (would appear with wrapping)
     expect(output).not.toContain(">-");
   });
 
   it("uses double-quote quoting type (not empty string)", () => {
-    // Catches: quotingType '"' → '' mutation
-    // With quotingType: '"', strings that need quoting use double quotes
-    // With quotingType: '', js-yaml defaults to single quotes
-    // To force quoting, we need a value that requires quotes in YAML
-    // A string with special chars like `:` or `#` will be quoted
     const output = generateConfigYaml({
       repoName: "app",
       repoPath: APP_REPO_PATH,
       description: "App: a test # with special chars",
       extensions: [".ts"],
       ignoreDirs: [],
-      providerType: "letta",
     });
-    // With quotingType: '"', the description should use double quotes
-    // With quotingType: '' (or default), it uses single quotes
-    // js-yaml only quotes when forceQuotes is true OR when the string requires it
-    // Our code has forceQuotes: false, so only strings with special chars get quoted
-    // A string with ":" triggers quoting
     expect(output).toContain('"App: a test # with special chars"');
   });
 
@@ -244,21 +240,7 @@ describe("generateConfigYaml", () => {
       description: "test",
       extensions: [".ts"],
       ignoreDirs: [],
-      providerType: "letta",
     });
     expect(output).toContain(`path: ${APP_REPO_PATH}`);
-  });
-
-  it("emits viking provider config when providerType is viking", () => {
-    const output = generateConfigYaml({
-      repoName: "app",
-      repoPath: APP_REPO_PATH,
-      description: "test",
-      extensions: [".ts"],
-      ignoreDirs: [],
-      providerType: "viking",
-    });
-    expect(output).toContain("type: viking");
-    expect(output).toContain("openrouter_model");
   });
 });

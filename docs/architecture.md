@@ -1,6 +1,6 @@
 # Repo Expert Agents — Architecture Overview
 
-A CLI framework that creates **persistent AI agents** (on Letta Cloud) that act as long-term memory for git repositories. Unlike IDE tools that forget between sessions, these agents accumulate and refine knowledge over time.
+A CLI framework that creates **persistent AI agents** (OpenViking for storage/retrieval + any OpenAI-compatible chat endpoint, defaulting to local Ollama) that act as long-term memory for git repositories. Unlike IDE tools that forget between sessions, these agents accumulate and refine knowledge over time.
 
 ---
 
@@ -17,13 +17,14 @@ graph TB
     subgraph "External Systems"
         FS["Filesystem (node:fs)"]
         GIT["Git (execFileSync)"]
-        LETTA["Letta Cloud (SDK)"]
+        VIKING["OpenViking server (HTTP)"]
+        LLM["OpenAI-compatible LLM endpoint\n(Ollama by default)"]
     end
 
     subgraph "src/shell/adapters/ — Port Implementations"
         NFS["NodeFilesystem\nimplements FileSystemPort"]
         NGIT["NodeGit\nimplements GitPort"]
-        LAA["LettaAdminAdapter\nimplements AdminPort"]
+        VAA["VikingAdminAdapter\nimplements AdminPort"]
     end
 
     subgraph "src/ports/ — Interfaces (boundary)"
@@ -37,7 +38,7 @@ graph TB
     end
 
     subgraph "src/shell/ — Imperative Shell"
-        SHELL["config-loader\nfile-collector\nstate-store\nagent-factory\nletta-provider"]
+        SHELL["config-loader\nfile-collector\nstate-store\nagent-factory\nviking-provider · llm-client"]
     end
 
     subgraph "User Interfaces"
@@ -50,13 +51,14 @@ graph TB
     SHELL --> CORE
     SHELL --> NFS
     SHELL --> NGIT
-    SHELL --> LAA
+    SHELL --> VAA
     NFS -->|implements| FP
     NGIT -->|implements| GP
-    LAA -->|implements| AP
+    VAA -->|implements| AP
     NFS --> FS
     NGIT --> GIT
-    LAA --> LETTA
+    VAA --> VIKING
+    SHELL --> LLM
     CORE -.->|depends on types only| FP
     CORE -.->|depends on types only| GP
     CORE -.->|depends on types only| AP
@@ -109,11 +111,13 @@ pnpm test   # architecture.test.ts catches violations at the file content level
 |---|---|
 | Port: filesystem | `src/ports/filesystem.ts` |
 | Port: git | `src/ports/git.ts` |
-| Port: admin (Letta) | `src/ports/admin.ts` |
+| Port: admin | `src/ports/admin.ts` |
 | Adapter: filesystem | `src/shell/adapters/node-filesystem.ts` |
 | Adapter: git | `src/shell/adapters/node-git.ts` |
-| Adapter: admin | `src/shell/adapters/letta-admin-adapter.ts` |
-| Shell provider | `src/shell/provider.ts` |
+| Adapter: admin | `src/shell/adapters/viking-admin-adapter.ts` |
+| Provider port | `src/ports/agent-provider.ts` |
+| Viking provider | `src/shell/viking-provider.ts` |
+| LLM client | `src/shell/llm-client.ts` |
 | Tree-sitter chunker | `src/core/tree-sitter-chunker.ts` |
 | Architecture tests | `src/__tests__/architecture.test.ts` |
 
@@ -125,7 +129,7 @@ pnpm test   # architecture.test.ts catches violations at the file content level
  ┌──────────────────────────────────────────────────────────────────┐
  │                         LIFECYCLE                                │
  │                                                                  │
- │  config.yaml          setup              Letta Cloud             │
+ │  config.yaml          setup           OpenViking + LLM endpoint  │
  │  ┌──────────┐    ┌─────────────┐    ┌─────────────────────┐     │
  │  │ repos:   │───▶│ collect     │───▶│  Agent per repo     │     │
  │  │  mobile  │    │ files       │    │  ┌───────────────┐  │     │
@@ -156,11 +160,11 @@ repo-expert
  ├── ask <repo> <q>       Query a single agent
  │   └── --all            Broadcast to all agents
  ├── sync [--full]        Incremental sync via git diff
- ├── reconcile [--fix]    Compare local state vs Letta, detect/fix drift
+ ├── reconcile [--fix]    Compare local state vs the provider, detect/fix drift
  ├── watch                Poll git HEAD, auto-sync on new commits
  ├── list                 Show agents and passage counts
  ├── status               Memory stats and health per agent
  ├── export               Dump agent memory to markdown
  ├── onboard <repo>       Guided codebase walkthrough
- └── destroy [--repo]     Delete agents from Letta Cloud
+ └── destroy [--repo]     Delete agents
 ```

@@ -2,55 +2,87 @@ import path from "node:path";
 import type { CheckResult } from "../core/doctor.js";
 import { createEmptyState } from "../core/state.js";
 import { saveState } from "./state-store.js";
-import type { AgentProvider } from "./provider.js";
+import type { AgentProvider } from "../ports/agent-provider.js";
 import type { FileSystemPort } from "../ports/filesystem.js";
 import type { GitPort } from "../ports/git.js";
 import { nodeFileSystem } from "./adapters/node-filesystem.js";
 import { nodeGit } from "./adapters/node-git.js";
 
-type ProviderType = "letta" | "viking";
+const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
+const LLM_ENDPOINT_TIMEOUT_MS = 3000;
 
-function expectedApiKeyEnv(providerType: ProviderType): "LETTA_API_KEY" | "OPENROUTER_API_KEY" {
-  return providerType === "viking" ? "OPENROUTER_API_KEY" : "LETTA_API_KEY";
+function isLocalUrl(url: string): boolean {
+  return /localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]/.test(url);
 }
 
-async function detectProviderType(configPath: string, fs: FileSystemPort = nodeFileSystem): Promise<ProviderType> {
+async function loadProviderBaseUrl(configPath: string, fs: FileSystemPort = nodeFileSystem): Promise<string> {
   try {
     const { loadConfig } = await import("./config-loader.js");
     const config = await loadConfig(configPath, fs);
-    return config.provider.type;
+    return config.provider.baseUrl;
   } catch {
-    return "letta";
+    return DEFAULT_LLM_BASE_URL;
   }
 }
 
-export function checkApiKey(providerType: ProviderType = "letta"): CheckResult {
-  const envName = expectedApiKeyEnv(providerType);
-  if (!process.env[envName]) {
-    return { name: "API key", status: "fail", message: `${envName} not set. Add it to .env or your environment.` };
+/**
+ * The LLM endpoint only needs an API key when it's remote (OpenRouter etc.).
+ * Local Ollama needs none, so a missing key is only a warning for remote URLs.
+ */
+export function checkApiKey(baseUrl: string = DEFAULT_LLM_BASE_URL): CheckResult {
+  if (isLocalUrl(baseUrl)) {
+    return { name: "LLM API key", status: "pass", message: `Local LLM endpoint (${baseUrl}) needs no API key` };
   }
-  return { name: "API key", status: "pass", message: "Set in environment" };
+  if (!process.env["LLM_API_KEY"]) {
+    return {
+      name: "LLM API key",
+      status: "warn",
+      message: `LLM_API_KEY not set for non-local endpoint ${baseUrl}. Set it in .env if the endpoint requires auth.`,
+    };
+  }
+  return { name: "LLM API key", status: "pass", message: "Set in environment" };
 }
 
 export async function checkApiConnection(
   provider: AgentProvider,
   agentId: string,
-  providerType: ProviderType = "letta",
 ): Promise<CheckResult> {
   try {
     await provider.listPassages(agentId);
     return {
       name: "API connection",
       status: "pass",
-      message: providerType === "viking" ? "Connected to OpenViking/OpenRouter runtime" : "Connected to Letta Cloud",
+      message: "Connected to OpenViking runtime",
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return {
       name: "API connection",
       status: "fail",
-      message: providerType === "viking" ? `Cannot reach Viking/OpenRouter runtime: ${msg}` : `Cannot reach Letta API: ${msg}`,
+      message: `Cannot reach OpenViking runtime: ${msg}`,
     };
+  }
+}
+
+export async function checkLlmEndpoint(
+  baseUrl: string = DEFAULT_LLM_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<CheckResult> {
+  const url = `${baseUrl}/models`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => { controller.abort(); }, LLM_ENDPOINT_TIMEOUT_MS);
+  try {
+    const res = await fetchImpl(url, { method: "GET", signal: controller.signal });
+    if (res.ok) {
+      return { name: "LLM endpoint", status: "pass", message: `Reachable at ${baseUrl}` };
+    }
+    return { name: "LLM endpoint", status: "warn", message: `${url} returned HTTP ${String(res.status)}` };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    // Warn (not fail): the endpoint may simply not be running yet (e.g. Ollama not started).
+    return { name: "LLM endpoint", status: "warn", message: `Cannot reach LLM endpoint ${baseUrl}: ${msg}` };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -148,11 +180,15 @@ export async function checkStateConsistency(configPath: string): Promise<CheckRe
   return results;
 }
 
-export async function runAllChecks(provider: AgentProvider | null, configPath: string): Promise<CheckResult[]> {
+export async function runAllChecks(
+  provider: AgentProvider | null,
+  configPath: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
-  const providerType = await detectProviderType(configPath);
+  const baseUrl = await loadProviderBaseUrl(configPath);
 
-  results.push(checkApiKey(providerType));
+  results.push(checkApiKey(baseUrl), await checkLlmEndpoint(baseUrl, fetchImpl));
 
   if (provider) {
     try {
@@ -171,7 +207,7 @@ export async function runAllChecks(provider: AgentProvider | null, configPath: s
       if (firstAgent === undefined) {
         results.push({ name: "API connection", status: "warn", message: "No agents yet — run setup to verify connection" });
       } else {
-        results.push(await checkApiConnection(provider, firstAgent.agentId, providerType));
+        results.push(await checkApiConnection(provider, firstAgent.agentId));
       }
     } catch {
       results.push({ name: "API connection", status: "warn", message: "No state file — run setup to verify connection" });
@@ -199,6 +235,14 @@ export interface DoctorFixResult {
   suggestions: string[];
 }
 
+const ENV_TEMPLATE = [
+  "# Optional: Bearer token for a non-local LLM endpoint (e.g. OpenRouter). Local Ollama needs none.",
+  "LLM_API_KEY=",
+  "# Optional: OpenViking API key.",
+  "VIKING_API_KEY=",
+  "",
+].join("\n");
+
 export async function runDoctorFixes(
   configPath: string,
   cwd = process.cwd(),
@@ -206,15 +250,13 @@ export async function runDoctorFixes(
 ): Promise<DoctorFixResult> {
   const applied: string[] = [];
   const suggestions: string[] = [];
-  const providerType = await detectProviderType(configPath, fs);
-  const envName = expectedApiKeyEnv(providerType);
 
   const envPath = path.resolve(cwd, ".env");
   try {
     await fs.access(envPath);
   } catch {
-    await fs.writeFile(envPath, `${envName}=your-key-here\n`);
-    applied.push(`Created ${envPath} with ${envName} template.`);
+    await fs.writeFile(envPath, ENV_TEMPLATE);
+    applied.push(`Created ${envPath} with LLM_API_KEY / VIKING_API_KEY template.`);
   }
 
   try {

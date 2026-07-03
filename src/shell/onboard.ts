@@ -1,4 +1,4 @@
-import type { AgentProvider } from "./provider.js";
+import type { AgentProvider } from "../ports/agent-provider.js";
 import { buildOnboardPrompt } from "../core/onboard.js";
 
 export async function onboardAgent(

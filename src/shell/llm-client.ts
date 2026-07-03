@@ -33,10 +33,13 @@ export interface ChatCompletionResponse {
   }>;
 }
 
-interface OpenRouterRequestOptions {
+interface ChatCompletionsRequestOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
 }
+
+/** Default OpenAI-compatible endpoint: local Ollama. */
+export const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -46,7 +49,7 @@ function composeAbortSignal(signal: AbortSignal | undefined, timeoutMs: number):
 } {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
-    controller.abort(new Error(`OpenRouter request timed out after ${String(timeoutMs)}ms`));
+    controller.abort(new Error(`LLM request timed out after ${String(timeoutMs)}ms`));
   }, timeoutMs);
   let onAbort: (() => void) | undefined;
 
@@ -77,21 +80,31 @@ function normalizeAbortError(error: unknown, signal: AbortSignal): Error {
   }
 
   if (error instanceof Error && error.message) return error;
-  return new Error("OpenRouter request aborted");
+  return new Error("LLM request aborted");
 }
 
-export async function callOpenRouter(
+/**
+ * Call an OpenAI-compatible chat-completions endpoint.
+ * Sends `Authorization: Bearer <apiKey>` only when an API key is provided
+ * (local endpoints like Ollama need none).
+ */
+export async function callChatCompletions(
   messages: Message[],
   tools: ToolDefinition[],
   model: string,
-  apiKey: string,
-  baseUrl = "https://openrouter.ai/api/v1",
-  options: OpenRouterRequestOptions = {},
+  baseUrl = DEFAULT_LLM_BASE_URL,
+  apiKey?: string,
+  options: ChatCompletionsRequestOptions = {},
 ): Promise<ChatCompletionResponse> {
   const url = `${baseUrl}/chat/completions`;
   const body: Record<string, unknown> = { model, messages };
   if (tools.length > 0) {
     body["tools"] = tools;
+  }
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey !== undefined && apiKey.length > 0) {
+    headers["Authorization"] = `Bearer ${apiKey}`;
   }
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
@@ -100,10 +113,7 @@ export async function callOpenRouter(
   try {
     res = await fetch(url, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify(body),
       signal: request.signal,
     });
@@ -130,7 +140,7 @@ function disabledDebug(_message: string): void {
 }
 
 function writeDebug(message: string): void {
-  process.stderr.write(`[openrouter] ${message}\n`);
+  process.stderr.write(`[llm] ${message}\n`);
 }
 
 function getMessageContentText(content: string | null): string {
@@ -147,7 +157,7 @@ function getFirstChoiceOrThrow(
 ): ChatCompletionResponse["choices"][number] {
   const choice = response.choices.at(0);
   if (choice === undefined) {
-    throw new Error(`OpenRouter returned no choices (${context})`);
+    throw new Error(`LLM returned no choices (${context})`);
   }
   return choice;
 }
@@ -190,8 +200,8 @@ async function executeToolCalls(params: {
 async function requestFinalAssistantMessage(params: {
   messages: Message[];
   model: string;
-  apiKey: string;
   baseUrl?: string;
+  apiKey?: string;
   signal?: AbortSignal;
   requestTimeoutMs?: number;
   maxSteps: number;
@@ -200,8 +210,8 @@ async function requestFinalAssistantMessage(params: {
   const {
     messages,
     model,
-    apiKey,
     baseUrl,
+    apiKey,
     signal,
     requestTimeoutMs,
     maxSteps,
@@ -209,11 +219,11 @@ async function requestFinalAssistantMessage(params: {
   } = params;
 
   debug("max_steps reached with pending tool flow; requesting final completion without tools");
-  const requestOptions: OpenRouterRequestOptions = {
+  const requestOptions: ChatCompletionsRequestOptions = {
     ...(signal === undefined ? {} : { signal }),
     ...(requestTimeoutMs === undefined ? {} : { timeoutMs: requestTimeoutMs }),
   };
-  const finalResponse = await callOpenRouter(messages, [], model, apiKey, baseUrl, requestOptions);
+  const finalResponse = await callChatCompletions(messages, [], model, baseUrl, apiKey, requestOptions);
   const finalChoice = getFirstChoiceOrThrow(finalResponse, "finalization");
   const finalContent = getMessageContentText(finalChoice.message.content);
   debug(`finalization finish_reason=${finalChoice.finish_reason} content_length=${String(finalContent.length)}`);
@@ -231,8 +241,8 @@ export async function toolCallingLoop(params: {
   tools: ToolDefinition[];
   toolHandlers: Partial<Record<string, ToolHandler>>;
   model: string;
-  apiKey: string;
   baseUrl?: string;
+  apiKey?: string;
   maxSteps?: number;
   signal?: AbortSignal;
   requestTimeoutMs?: number;
@@ -243,8 +253,8 @@ export async function toolCallingLoop(params: {
     tools,
     toolHandlers,
     model,
-    apiKey,
     baseUrl,
+    apiKey,
     maxSteps = 10,
     signal,
     requestTimeoutMs,
@@ -257,16 +267,16 @@ export async function toolCallingLoop(params: {
 
   let steps = 0;
 
-  const debugEnabled = process.env["REPO_EXPERT_DEBUG_OPENROUTER"] === "1";
+  const debugEnabled = process.env["REPO_EXPERT_DEBUG_LLM"] === "1";
   const debug = debugEnabled ? writeDebug : disabledDebug;
-  const requestOptions: OpenRouterRequestOptions = {
+  const requestOptions: ChatCompletionsRequestOptions = {
     ...(signal === undefined ? {} : { signal }),
     ...(requestTimeoutMs === undefined ? {} : { timeoutMs: requestTimeoutMs }),
   };
 
   while (steps < maxSteps) {
     const startedAt = Date.now();
-    const response = await callOpenRouter(messages, tools, model, apiKey, baseUrl, requestOptions);
+    const response = await callChatCompletions(messages, tools, model, baseUrl, apiKey, requestOptions);
     steps++;
     const choice = getFirstChoiceOrThrow(response, `step-${String(steps)}`);
     const toolCalls = getToolCalls(choice);
@@ -296,10 +306,10 @@ export async function toolCallingLoop(params: {
       const finalRequestParams = {
         messages,
         model,
-        apiKey,
         maxSteps,
         debug,
         ...(baseUrl === undefined ? {} : { baseUrl }),
+        ...(apiKey === undefined ? {} : { apiKey }),
         ...(signal === undefined ? {} : { signal }),
         ...(requestTimeoutMs === undefined ? {} : { requestTimeoutMs }),
       };

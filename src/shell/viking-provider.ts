@@ -9,10 +9,12 @@ import type {
   SendMessageOptions,
 } from "../ports/agent-provider.js";
 import type { VikingHttpClient } from "./viking-http.js";
-import { toolCallingLoop, type ToolDefinition } from "./openrouter-client.js";
+import { toolCallingLoop, DEFAULT_LLM_BASE_URL, type ToolDefinition } from "./llm-client.js";
 import type { BlockStorage } from "./block-storage.js";
 
 export interface VikingRuntimeOptions {
+  baseUrl?: string;
+  apiKey?: string;
   fallbackModels?: string[];
   requestTimeoutMs?: number;
   maxRetriesPerModel?: number;
@@ -22,11 +24,6 @@ export interface VikingRuntimeOptions {
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_RETRIES_PER_MODEL = 1;
 const DEFAULT_RETRY_BASE_DELAY_MS = 600;
-const DEFAULT_FALLBACK_MODELS = [
-  "moonshotai/kimi-k2.5",
-  "deepseek/deepseek-v3.2",
-  "z-ai/glm-5",
-];
 
 function isAbortLikeError(error: unknown): boolean {
   if (error instanceof Error) {
@@ -81,6 +78,8 @@ function unknownToMessage(value: unknown): string {
 }
 
 export class VikingProvider implements AgentProvider {
+  private readonly baseUrl: string;
+  private readonly apiKey: string | undefined;
   private readonly fallbackModels: string[];
   private readonly requestTimeoutMs: number;
   private readonly maxRetriesPerModel: number;
@@ -88,14 +87,13 @@ export class VikingProvider implements AgentProvider {
 
   constructor(
     private viking: VikingHttpClient,
-    private openrouterApiKey: string,
     private model: string,
     private blockStorage: BlockStorage,
     runtimeOptions: VikingRuntimeOptions = {},
   ) {
-    this.fallbackModels = runtimeOptions.fallbackModels && runtimeOptions.fallbackModels.length > 0
-      ? runtimeOptions.fallbackModels
-      : DEFAULT_FALLBACK_MODELS;
+    this.baseUrl = runtimeOptions.baseUrl ?? DEFAULT_LLM_BASE_URL;
+    this.apiKey = runtimeOptions.apiKey;
+    this.fallbackModels = runtimeOptions.fallbackModels ?? [];
     this.requestTimeoutMs = runtimeOptions.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.maxRetriesPerModel = runtimeOptions.maxRetriesPerModel ?? DEFAULT_MAX_RETRIES_PER_MODEL;
     this.retryBaseDelayMs = runtimeOptions.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
@@ -103,7 +101,7 @@ export class VikingProvider implements AgentProvider {
 
   async createAgent(params: CreateAgentParams): Promise<CreateAgentResult> {
     const { repoName } = params;
-    const persona = buildPersona(repoName, params.description, params.persona, params.tools);
+    const persona = buildPersona(repoName, params.description, params.persona);
 
     await this.viking.mkdir(`viking://resources/${repoName}/`);
     await this.viking.mkdir(`viking://resources/${repoName}/passages/`);
@@ -131,10 +129,6 @@ export class VikingProvider implements AgentProvider {
   async deleteAgent(agentId: string): Promise<void> {
     await this.viking.deleteResource(`viking://resources/${agentId}/`);
     this.blockStorage.delete(agentId);
-  }
-
-  enableSleeptime(_agentId: string): Promise<void> {
-    return Promise.resolve();
   }
 
   async storePassage(agentId: string, text: string): Promise<string> {
@@ -310,8 +304,9 @@ export class VikingProvider implements AgentProvider {
             tools,
             toolHandlers,
             model: modelCandidate,
-            apiKey: this.openrouterApiKey,
+            baseUrl: this.baseUrl,
             requestTimeoutMs: this.requestTimeoutMs,
+            ...(this.apiKey === undefined ? {} : { apiKey: this.apiKey }),
             ...(options?.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }),
             ...(options?.signal === undefined ? {} : { signal: options.signal }),
           };

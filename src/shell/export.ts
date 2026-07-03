@@ -1,4 +1,4 @@
-import type { AgentProvider } from "./provider.js";
+import type { AgentProvider } from "../ports/agent-provider.js";
 import { formatExport } from "../core/export.js";
 import { BLOCK_LABELS, FILE_PREFIX } from "../core/types.js";
 

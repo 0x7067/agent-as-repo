@@ -1,4 +1,4 @@
-import type { AgentProvider } from "./provider.js";
+import type { AgentProvider } from "../ports/agent-provider.js";
 import { BLOCK_LABELS, type AgentState } from "../core/types.js";
 import { formatAgentStatus, type AgentStatusData, type BlockStatus } from "../core/status.js";
 

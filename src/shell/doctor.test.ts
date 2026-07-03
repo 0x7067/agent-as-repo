@@ -2,14 +2,43 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { checkApiKey, checkConfigFile, checkGit, runAllChecks, runDoctorFixes } from "./doctor.js";
+import {
+  checkApiKey,
+  checkConfigFile,
+  checkGit,
+  checkLlmEndpoint,
+  runAllChecks,
+  runDoctorFixes,
+} from "./doctor.js";
 import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
 import type { GitPort } from "../ports/git.js";
-import type { AgentProvider } from "./provider.js";
+import type { AgentProvider } from "../ports/agent-provider.js";
 
 const tempDirs: string[] = [];
-const originalApiKey = process.env.LETTA_API_KEY;
+const originalLlmApiKey = process.env.LLM_API_KEY;
 const originalCwd = process.cwd();
+const REMOTE_BASE_URL = "https://openrouter.ai/api/v1";
+const LOCAL_BASE_URL = "http://localhost:11434/v1";
+
+function okResponse(): Response {
+  return { ok: true, status: 200 } as unknown as Response;
+}
+
+function stubFetchOk(): void {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okResponse()));
+}
+
+const providerYaml = (repoDir: string, repoName = "my-app"): string =>
+  [
+    "provider:",
+    "  model: qwen3-coder:30b",
+    "repos:",
+    `  ${repoName}:`,
+    `    path: ${repoDir}`,
+    "    description: test repo",
+    "    extensions: [.ts]",
+    "    ignore_dirs: [node_modules, .git]",
+  ].join("\n");
 
 async function makeTempDir(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -19,35 +48,44 @@ async function makeTempDir(prefix: string): Promise<string> {
 
 afterEach(async () => {
   process.chdir(originalCwd);
-  process.env.LETTA_API_KEY = originalApiKey;
+  process.env.LLM_API_KEY = originalLlmApiKey;
+  vi.unstubAllGlobals();
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
 describe("doctor shell checks", () => {
-  it("checkApiKey fails when LETTA_API_KEY is missing", () => {
-    delete process.env.LETTA_API_KEY;
-    const result = checkApiKey();
-    expect(result.status).toBe("fail");
-    expect(result.message).toContain("LETTA_API_KEY");
+  it("checkApiKey passes for a local endpoint without a key", () => {
+    delete process.env.LLM_API_KEY;
+    const result = checkApiKey(LOCAL_BASE_URL);
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("no API key");
   });
 
-  it("checkApiKey passes when LETTA_API_KEY is set", () => {
-    process.env.LETTA_API_KEY = "test-key";
-    const result = checkApiKey();
+  it("checkApiKey warns for a remote endpoint when LLM_API_KEY is missing", () => {
+    delete process.env.LLM_API_KEY;
+    const result = checkApiKey(REMOTE_BASE_URL);
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("LLM_API_KEY");
+  });
+
+  it("checkApiKey passes for a remote endpoint when LLM_API_KEY is set", () => {
+    process.env.LLM_API_KEY = "sk-remote";
+    const result = checkApiKey(REMOTE_BASE_URL);
     expect(result.status).toBe("pass");
   });
 
-  it("checkApiKey fails when OPENROUTER_API_KEY is missing for viking provider", () => {
-    delete process.env.OPENROUTER_API_KEY;
-    const result = checkApiKey("viking");
-    expect(result.status).toBe("fail");
-    expect(result.message).toContain("OPENROUTER_API_KEY");
+  it("checkLlmEndpoint passes when the endpoint returns ok", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    const result = await checkLlmEndpoint(LOCAL_BASE_URL, fetchImpl as unknown as typeof fetch);
+    expect(result.status).toBe("pass");
+    expect(fetchImpl).toHaveBeenCalledWith(`${LOCAL_BASE_URL}/models`, expect.objectContaining({ method: "GET" }));
   });
 
-  it("checkApiKey passes when OPENROUTER_API_KEY is set for viking provider", () => {
-    process.env.OPENROUTER_API_KEY = "or-test";
-    const result = checkApiKey("viking");
-    expect(result.status).toBe("pass");
+  it("checkLlmEndpoint warns when the fetch rejects", async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+    const result = await checkLlmEndpoint(LOCAL_BASE_URL, fetchImpl as unknown as typeof fetch);
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("ECONNREFUSED");
   });
 
   it("checkConfigFile reports missing config", async () => {
@@ -58,31 +96,19 @@ describe("doctor shell checks", () => {
   });
 
   it("runAllChecks includes config and git checks when config exists", async () => {
+    stubFetchOk();
     const tempDir = await makeTempDir("doctor-");
     const repoDir = path.join(tempDir, "repo");
-    // Path is constrained under the mkdtemp-created test directory.
     // eslint-disable-next-line security/detect-non-literal-fs-filename
     await fs.mkdir(repoDir, { recursive: true });
     const configPath = path.join(tempDir, "config.yaml");
-    const config = [
-      "letta:",
-      "  model: openai/gpt-4.1",
-      "  embedding: openai/text-embedding-3-small",
-      "repos:",
-      "  my-app:",
-      `    path: ${repoDir}`,
-      "    description: test repo",
-      "    extensions: [.ts]",
-      "    ignore_dirs: [node_modules, .git]",
-    ].join("\n");
-    // Path is constrained under the mkdtemp-created test directory.
     // eslint-disable-next-line security/detect-non-literal-fs-filename
-    await fs.writeFile(configPath, config, "utf8");
+    await fs.writeFile(configPath, providerYaml(repoDir), "utf8");
 
-    delete process.env.LETTA_API_KEY;
     const results = await runAllChecks(null, configPath);
     const names = results.map((r) => r.name);
-    expect(names).toContain("API key");
+    expect(names).toContain("LLM API key");
+    expect(names).toContain("LLM endpoint");
     expect(names).toContain("Config file");
     expect(names).toContain("Git");
     expect(names).toContain('Repo "my-app"');
@@ -92,9 +118,8 @@ describe("doctor shell checks", () => {
     const tempDir = await makeTempDir("doctor-fix-");
     process.chdir(tempDir);
     const configPath = path.join(tempDir, "config.yaml");
-    // Path is constrained under the mkdtemp-created test directory.
     // eslint-disable-next-line security/detect-non-literal-fs-filename
-    await fs.writeFile(path.join(tempDir, "config.example.yaml"), "repos: {}\nletta:\n  model: x\n  embedding: y\n", "utf8");
+    await fs.writeFile(path.join(tempDir, "config.example.yaml"), "provider:\n  model: x\nrepos: {}\n", "utf8");
 
     const result = await runDoctorFixes(configPath);
 
@@ -108,31 +133,16 @@ describe("doctor shell checks", () => {
   });
 
   it("runAllChecks prefers agent from configured repos when state has orphan first", async () => {
+    stubFetchOk();
     const tempDir = await makeTempDir("doctor-");
     process.chdir(tempDir);
     const repoDir = path.join(tempDir, "repo");
-    // Path is constrained under the mkdtemp-created test directory.
     // eslint-disable-next-line security/detect-non-literal-fs-filename
     await fs.mkdir(repoDir, { recursive: true });
 
     const configPath = path.join(tempDir, "config.yaml");
-    // Path is constrained under the mkdtemp-created test directory.
     // eslint-disable-next-line security/detect-non-literal-fs-filename
-    await fs.writeFile(
-      configPath,
-      [
-        "letta:",
-        "  model: openai/gpt-4.1",
-        "  embedding: openai/text-embedding-3-small",
-        "repos:",
-        "  configured-repo:",
-        `    path: ${repoDir}`,
-        "    description: test repo",
-        "    extensions: [.ts]",
-        "    ignore_dirs: [node_modules, .git]",
-      ].join("\n"),
-      "utf8",
-    );
+    await fs.writeFile(configPath, providerYaml(repoDir, "configured-repo"), "utf8");
 
     const state = {
       stateVersion: 2,
@@ -157,7 +167,6 @@ describe("doctor shell checks", () => {
         },
       },
     };
-    // Path is constrained under the mkdtemp-created test directory.
     // eslint-disable-next-line security/detect-non-literal-fs-filename
     await fs.writeFile(path.join(tempDir, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
 
@@ -265,32 +274,20 @@ describe("runDoctorFixes (port-injected)", () => {
   it("creates .env when missing", async () => {
     const fakeFs = makeFakeFs({});
     await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
-    expect(fakeFs.store.get("/project/.env")).toContain("LETTA_API_KEY");
+    expect(fakeFs.store.get("/project/.env")).toContain("LLM_API_KEY");
     expect(fakeFs.store.has("/project/.repo-expert-state.json")).toBe(true);
   });
 
-  it("creates OpenRouter .env template when provider is viking", async () => {
-    const fakeFs = makeFakeFs({
-      "/project/config.yaml": [
-        "provider:",
-        "  type: viking",
-        "  openrouter_model: openai/gpt-4o-mini",
-        "repos:",
-        "  demo:",
-        "    path: /repo",
-        "    description: test",
-        "    extensions: [.ts]",
-        "    ignore_dirs: [node_modules, .git]",
-      ].join("\n"),
-    });
+  it("env template also references VIKING_API_KEY", async () => {
+    const fakeFs = makeFakeFs({});
     await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
-    expect(fakeFs.store.get("/project/.env")).toContain("OPENROUTER_API_KEY");
+    expect(fakeFs.store.get("/project/.env")).toContain("VIKING_API_KEY");
   });
 
   it("does not overwrite existing .env", async () => {
-    const fakeFs = makeFakeFs({ "/project/.env": "LETTA_API_KEY=real-key\n" });
+    const fakeFs = makeFakeFs({ "/project/.env": "LLM_API_KEY=real-key\n" });
     const result = await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
-    expect(fakeFs.store.get("/project/.env")).toBe("LETTA_API_KEY=real-key\n");
+    expect(fakeFs.store.get("/project/.env")).toBe("LLM_API_KEY=real-key\n");
     expect(result.applied.every((s) => !s.includes(".env"))).toBe(true);
   });
 

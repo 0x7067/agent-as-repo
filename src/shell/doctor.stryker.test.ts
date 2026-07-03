@@ -6,13 +6,15 @@ import { expect, describe, it, afterEach } from "vitest";
 import { checkApiKey, checkApiConnection, checkConfigFile, checkGit, runDoctorFixes } from "./doctor.js";
 import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
 import type { GitPort } from "../ports/git.js";
-import type { AgentProvider } from "./provider.js";
+import type { AgentProvider } from "../ports/agent-provider.js";
 
 const GIT_VERSION = "git version 2.39.0";
 const PROJECT_CONFIG_PATH = "/project/config.yaml";
 const PROJECT_ENV_PATH = "/project/.env";
 const PROJECT_STATE_PATH = "/project/.repo-expert-state.json";
-const REAL_ENV_CONTENT = "LETTA_API_KEY=real-key\n";
+const REAL_ENV_CONTENT = "LLM_API_KEY=real-key\n";
+const LOCAL_BASE_URL = "http://localhost:11434/v1";
+const REMOTE_BASE_URL = "https://openrouter.ai/api/v1";
 
 function createWatcherHandle(): WatcherHandle {
   return { close: () => {}, on: () => ({}) } as unknown as WatcherHandle;
@@ -71,37 +73,33 @@ function makeFakeGit(overrides: Partial<GitPort> = {}): GitPort {
   };
 }
 
-const originalApiKey = process.env.LETTA_API_KEY;
+const originalApiKey = process.env.LLM_API_KEY;
 afterEach(() => {
-  process.env.LETTA_API_KEY = originalApiKey;
+  process.env.LLM_API_KEY = originalApiKey;
 });
 
 describe("checkApiKey (port-injected, stryker)", () => {
-  it("returns fail when LETTA_API_KEY is missing", () => {
-    delete process.env.LETTA_API_KEY;
-    const result = checkApiKey();
-    expect(result.status).toBe("fail");
-    expect(result.name).toBe("API key");
-    expect(result.message).toContain("LETTA_API_KEY");
-  });
-
-  it("returns pass when LETTA_API_KEY is set", () => {
-    process.env.LETTA_API_KEY = "test-key";
-    const result = checkApiKey();
+  it("passes for a local endpoint with no key", () => {
+    delete process.env.LLM_API_KEY;
+    const result = checkApiKey(LOCAL_BASE_URL);
     expect(result.status).toBe("pass");
-    expect(result.name).toBe("API key");
+    expect(result.name).toBe("LLM API key");
+    expect(result.message).toContain("no API key");
   });
 
-  it("pass message is 'Set in environment'", () => {
-    process.env.LETTA_API_KEY = "any-key";
-    const result = checkApiKey();
+  it("warns for a remote endpoint when LLM_API_KEY is missing", () => {
+    delete process.env.LLM_API_KEY;
+    const result = checkApiKey(REMOTE_BASE_URL);
+    expect(result.status).toBe("warn");
+    expect(result.name).toBe("LLM API key");
+    expect(result.message).toContain("LLM_API_KEY");
+  });
+
+  it("passes for a remote endpoint when LLM_API_KEY is set", () => {
+    process.env.LLM_API_KEY = "sk-remote";
+    const result = checkApiKey(REMOTE_BASE_URL);
+    expect(result.status).toBe("pass");
     expect(result.message).toBe("Set in environment");
-  });
-
-  it("fail message contains 'not set'", () => {
-    delete process.env.LETTA_API_KEY;
-    const result = checkApiKey();
-    expect(result.message).toContain("not set");
   });
 });
 
@@ -202,7 +200,7 @@ describe("runDoctorFixes (port-injected, stryker)", () => {
   it("creates .env when missing", async () => {
     const fakeFs = makeFakeFs({});
     await runDoctorFixes(PROJECT_CONFIG_PATH, "/project", fakeFs);
-    expect(fakeFs.store.get(PROJECT_ENV_PATH)).toContain("LETTA_API_KEY");
+    expect(fakeFs.store.get(PROJECT_ENV_PATH)).toContain("LLM_API_KEY");
     expect(fakeFs.store.has(PROJECT_STATE_PATH)).toBe(true);
   });
 

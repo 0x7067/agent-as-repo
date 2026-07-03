@@ -1,11 +1,10 @@
 import { vi } from "vitest";
-import type { AgentProvider } from "../provider.js";
+import type { AgentProvider } from "../../ports/agent-provider.js";
 
 export function makeMockProvider(overrides?: Partial<AgentProvider>): AgentProvider {
   return {
     createAgent: vi.fn().mockResolvedValue({ agentId: "agent-abc" }),
     deleteAgent: vi.fn().mockResolvedValue(),
-    enableSleeptime: vi.fn().mockResolvedValue(),
     deletePassage: vi.fn().mockResolvedValue(),
     listPassages: vi.fn().mockResolvedValue([]),
     getBlock: vi.fn().mockResolvedValue({ value: "", limit: 5000 }),

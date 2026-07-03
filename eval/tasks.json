@@ -31,7 +31,7 @@
           "must_not_include": []
         },
         "grounded": {
-          "must_include": ["LETTA_API_KEY"],
+          "must_include": ["LLM_API_KEY"],
           "must_not_include": ["open browser"]
         },
         "useful": {

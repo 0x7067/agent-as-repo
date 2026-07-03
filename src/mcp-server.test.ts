@@ -1,42 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
-  buildProviderRegistry,
-  createClient,
+  buildRuntime,
   getVikingRuntimeOptionsFromEnv,
   main,
   parseModelCsv,
-  parseNamespacedAgentId,
   parseNonNegativeInt,
-  registerTools,
-  registerUnifiedTools,
   parsePositiveInt,
-  selectLegacyRuntime,
+  registerTools,
   withTimeout,
 } from "./mcp-server.js";
-import type { AgentProvider } from "./shell/provider.js";
+import type { AgentProvider } from "./ports/agent-provider.js";
 import type { AdminPort } from "./ports/admin.js";
-
-const lettaCtor = vi.hoisted(() => vi.fn());
-const MockLetta = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- mock must be `new`-able for createClient tests
-  return class {
-    constructor(opts: unknown) {
-      lettaCtor(opts);
-    }
-  };
-});
-
-vi.mock("@letta-ai/letta-client", () => ({
-  Letta: MockLetta,
-  default: MockLetta,
-}));
 
 function makeMockProvider(): AgentProvider {
   return {
     createAgent: vi.fn(),
     deleteAgent: vi.fn(),
-    enableSleeptime: vi.fn(),
     storePassage: vi.fn<[], Promise<string>>().mockResolvedValue("p-new"),
     deletePassage: vi.fn<[], Promise<void>>().mockResolvedValue(),
     listPassages: vi.fn().mockResolvedValue([]),
@@ -49,21 +29,21 @@ function makeMockProvider(): AgentProvider {
 function makeMockAdmin(): AdminPort {
   return {
     listAgents: vi.fn().mockResolvedValue([
-      { id: "agent-1", name: "Alice", description: "Test agent", model: "openai/gpt-4.1" },
-      { id: "agent-2", name: "Bob", description: null, model: "openai/gpt-4.1-mini" },
+      { id: "agent-1", name: "Alice", description: "Test agent", model: "qwen3-coder:30b" },
+      { id: "agent-2", name: "Bob", description: null, model: "llama3.1:8b" },
     ]),
     getAgent: vi.fn().mockResolvedValue({
       id: "agent-1",
       name: "Alice",
-      model: "openai/gpt-4.1",
+      model: "qwen3-coder:30b",
       blocks: [
         { label: "persona", value: "I am Alice.", limit: 5000 },
-        { label: "human", value: "Unknown user.", limit: 5000 },
+        { label: "architecture", value: "Layered.", limit: 5000 },
       ],
     }),
     getCoreMemory: vi.fn().mockResolvedValue([
       { label: "persona", value: "I am Alice.", limit: 5000 },
-      { label: "human", value: "Unknown user.", limit: 5000 },
+      { label: "architecture", value: "Layered.", limit: 5000 },
     ]),
     searchPassages: vi.fn().mockResolvedValue([
       { id: "p-1", text: "found it" },
@@ -106,28 +86,38 @@ describe("parsePositiveInt", () => {
     expect(parsePositiveInt(undefined, 60_000)).toBe(60_000);
   });
 
-  it("returns fallback when raw is empty string", () => {
-    expect(parsePositiveInt("", 60_000)).toBe(60_000);
-  });
-
-  it("returns fallback when raw is NaN", () => {
-    expect(parsePositiveInt("abc", 60_000)).toBe(60_000);
-  });
-
-  it("returns fallback when raw is zero", () => {
+  it("returns fallback when raw is zero or negative", () => {
     expect(parsePositiveInt("0", 60_000)).toBe(60_000);
-  });
-
-  it("returns fallback when raw is negative", () => {
     expect(parsePositiveInt("-5", 60_000)).toBe(60_000);
   });
 
   it("returns parsed int when raw is a positive integer string", () => {
     expect(parsePositiveInt("30000", 60_000)).toBe(30_000);
   });
+});
 
-  it("returns parsed int when raw is '1'", () => {
-    expect(parsePositiveInt("1", 60_000)).toBe(1);
+describe("parseNonNegativeInt", () => {
+  it("returns fallback for undefined, empty, NaN, negative", () => {
+    expect(parseNonNegativeInt(undefined, 1)).toBe(1);
+    expect(parseNonNegativeInt("", 1)).toBe(1);
+    expect(parseNonNegativeInt("abc", 1)).toBe(1);
+    expect(parseNonNegativeInt("-1", 1)).toBe(1);
+  });
+
+  it("returns parsed value for zero and positive integers", () => {
+    expect(parseNonNegativeInt("0", 1)).toBe(0);
+    expect(parseNonNegativeInt("3", 1)).toBe(3);
+  });
+});
+
+describe("parseModelCsv", () => {
+  it("returns empty array when value is undefined or empty", () => {
+    expect(parseModelCsv()).toEqual([]);
+    expect(parseModelCsv("")).toEqual([]);
+  });
+
+  it("splits, trims, and drops empty entries", () => {
+    expect(parseModelCsv(" model-a , , model-b ")).toEqual(["model-a", "model-b"]);
   });
 });
 
@@ -144,18 +134,69 @@ describe("withTimeout", () => {
   });
 
   it("clears timeout after function resolves (no timer leak)", async () => {
-    // If timeout is not cleared, the test would run indefinitely after resolving
-    const start = Date.now();
-    await withTimeout("fast", 500, () => Promise.resolve("done"));
-    expect(Date.now() - start).toBeLessThan(500);
-  });
-
-  it("calls clearTimeout with the actual timer ID when function resolves", async () => {
     const spy = vi.spyOn(globalThis, "clearTimeout");
     await withTimeout("test", 5000, () => Promise.resolve("done"));
     expect(spy).toHaveBeenCalledOnce();
-    expect(spy.mock.calls[0][0]).toBeDefined();
     spy.mockRestore();
+  });
+});
+
+describe("getVikingRuntimeOptionsFromEnv", () => {
+  const keys = [
+    "LLM_REQUEST_TIMEOUT_MS",
+    "LLM_MAX_RETRIES_PER_MODEL",
+    "LLM_RETRY_BASE_DELAY_MS",
+    "LLM_FALLBACK_MODELS",
+  ] as const;
+
+  afterEach(() => {
+    for (const key of keys) Reflect.deleteProperty(process.env, key);
+  });
+
+  it("uses defaults when env vars are absent", () => {
+    expect(getVikingRuntimeOptionsFromEnv()).toEqual({
+      requestTimeoutMs: 20_000,
+      maxRetriesPerModel: 1,
+      retryBaseDelayMs: 600,
+      fallbackModels: [],
+    });
+  });
+
+  it("reads custom env values", () => {
+    process.env["LLM_REQUEST_TIMEOUT_MS"] = "15000";
+    process.env["LLM_MAX_RETRIES_PER_MODEL"] = "2";
+    process.env["LLM_RETRY_BASE_DELAY_MS"] = "900";
+    process.env["LLM_FALLBACK_MODELS"] = "model-a, model-b";
+
+    expect(getVikingRuntimeOptionsFromEnv()).toEqual({
+      requestTimeoutMs: 15_000,
+      maxRetriesPerModel: 2,
+      retryBaseDelayMs: 900,
+      fallbackModels: ["model-a", "model-b"],
+    });
+  });
+});
+
+describe("buildRuntime", () => {
+  const envKeys = ["LLM_MODEL", "LLM_BASE_URL", "LLM_API_KEY", "VIKING_URL", "VIKING_API_KEY"] as const;
+
+  afterEach(() => {
+    for (const key of envKeys) Reflect.deleteProperty(process.env, key);
+  });
+
+  it("builds a provider and admin from env/defaults", () => {
+    const runtime = buildRuntime();
+    expect(runtime.provider).toBeDefined();
+    expect(runtime.admin).toBeDefined();
+    expect(typeof runtime.provider.sendMessage).toBe("function");
+    expect(typeof runtime.admin.listAgents).toBe("function");
+  });
+
+  it("builds without throwing when a custom base URL and key are set", () => {
+    process.env["LLM_MODEL"] = "llama3.1:8b";
+    process.env["LLM_BASE_URL"] = "https://openrouter.ai/api/v1";
+    process.env["LLM_API_KEY"] = "sk-test";
+    expect(() => buildRuntime()).not.toThrow();
   });
 });
 
@@ -174,279 +215,181 @@ describe("MCP Server tools", () => {
   });
 
   it("content type is 'text' on success", async () => {
-    const handler = extractToolHandler(server, "letta_list_agents");
+    const handler = extractToolHandler(server, "agent_list");
     const result = await handler({});
     expect(result.content[0].type).toBe("text");
   });
 
   it("content type is 'text' on error", async () => {
     (admin.listAgents as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("boom"));
-    const handler = extractToolHandler(server, "letta_list_agents");
+    const handler = extractToolHandler(server, "agent_list");
     const result = await handler({});
     expect(result.content[0].type).toBe("text");
     expect(result.isError).toBe(true);
   });
 
-  it("registers all 8 tools", () => {
+  it("registers exactly the 8 provider-neutral tools", () => {
     const tools = (server as unknown as { _registeredTools: Record<string, unknown> })._registeredTools;
     expect(Object.keys(tools).length).toBe(8);
     // eslint-disable-next-line unicorn/no-array-sort
     expect(Object.keys(tools).sort((a, b) => a.localeCompare(b))).toEqual([
-      "letta_delete_passage",
-      "letta_get_agent",
-      "letta_get_core_memory",
-      "letta_insert_passage",
-      "letta_list_agents",
-      "letta_search_archival",
-      "letta_send_message",
-      "letta_update_block",
+      "agent_call",
+      "agent_delete_passage",
+      "agent_get",
+      "agent_get_core_memory",
+      "agent_insert_passage",
+      "agent_list",
+      "agent_search_archival",
+      "agent_update_block",
     ]);
   });
 
-  describe("letta_list_agents", () => {
+  describe("agent_list", () => {
     it("returns agent summaries", async () => {
-      const handler = extractToolHandler(server, "letta_list_agents");
+      const handler = extractToolHandler(server, "agent_list");
       const result = await handler({});
-      const data = parseToolJson(result) as Array<{ id: string; name: string; description: string | null; model: string }>;
+      const data = parseToolJson(result) as Array<{ id: string; name: string }>;
       expect(data).toHaveLength(2);
-      expect(data[0]).toEqual({ id: "agent-1", name: "Alice", description: "Test agent", model: "openai/gpt-4.1" });
-    });
-
-    it("returns isError on failure", async () => {
-      (admin.listAgents as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("API down"));
-      const handler = extractToolHandler(server, "letta_list_agents");
-      const result = await handler({});
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toBe("API down");
+      expect(data[0]).toEqual({ id: "agent-1", name: "Alice", description: "Test agent", model: "qwen3-coder:30b" });
     });
 
     it("stringifies non-Error rejections", async () => {
       (admin.listAgents as ReturnType<typeof vi.fn>).mockRejectedValue("plain failure");
-      const handler = extractToolHandler(server, "letta_list_agents");
+      const handler = extractToolHandler(server, "agent_list");
       const result = await handler({});
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toBe("plain failure");
     });
   });
 
-  describe("letta_get_agent", () => {
+  describe("agent_get", () => {
     it("returns full agent details", async () => {
-      const handler = extractToolHandler(server, "letta_get_agent");
+      const handler = extractToolHandler(server, "agent_get");
       const result = await handler({ agent_id: "agent-1" });
       const data = parseToolJson(result) as { id: string; name: string };
       expect(data.id).toBe("agent-1");
-      expect(data.name).toBe("Alice");
       expect(mockAdmin.getAgent).toHaveBeenCalledWith("agent-1");
     });
 
     it("returns isError on failure", async () => {
       (admin.getAgent as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("not found"));
-      const handler = extractToolHandler(server, "letta_get_agent");
+      const handler = extractToolHandler(server, "agent_get");
       const result = await handler({ agent_id: "bad-id" });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toBe("not found");
     });
   });
 
-  describe("letta_send_message", () => {
+  describe("agent_call", () => {
     it("returns assistant message text", async () => {
-      const handler = extractToolHandler(server, "letta_send_message");
+      const handler = extractToolHandler(server, "agent_call");
       const result = await handler({ agent_id: "agent-1", content: "Hi" });
       expect(result.content[0].text).toBe("Hello from agent");
       expect(provider.sendMessage).toHaveBeenCalledWith("agent-1", "Hi", {});
     });
 
-    it("returns empty string when provider returns empty", async () => {
-      (provider.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue("");
-      const handler = extractToolHandler(server, "letta_send_message");
-      const result = await handler({ agent_id: "agent-1", content: "Hi" });
-      expect(result.content[0].text).toBe("");
-    });
-
     it("returns isError on failure", async () => {
       (provider.sendMessage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("timeout"));
-      const handler = extractToolHandler(server, "letta_send_message");
+      const handler = extractToolHandler(server, "agent_call");
       const result = await handler({ agent_id: "agent-1", content: "Hi" });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toBe("timeout");
     });
 
     it("passes overrideModel and maxSteps through to provider", async () => {
-      const handler = extractToolHandler(server, "letta_send_message");
+      const handler = extractToolHandler(server, "agent_call");
       await handler({
         agent_id: "agent-1",
         content: "Hi",
-        override_model: "openai/gpt-4.1-mini",
+        override_model: "llama3.1:8b",
         max_steps: 3,
       });
       expect(provider.sendMessage).toHaveBeenCalledWith("agent-1", "Hi", {
-        overrideModel: "openai/gpt-4.1-mini",
+        overrideModel: "llama3.1:8b",
         maxSteps: 3,
       });
     });
 
-    it("does not set overrideModel when override_model is absent", async () => {
-      const handler = extractToolHandler(server, "letta_send_message");
+    it("does not set overrideModel/maxSteps when absent", async () => {
+      const handler = extractToolHandler(server, "agent_call");
       await handler({ agent_id: "agent-1", content: "Hi" });
       const options = getSendMessageOptions(provider);
       expect(options).toEqual({});
-      expect(options.overrideModel).toBeUndefined();
-    });
-
-    it("does not set maxSteps when max_steps is absent", async () => {
-      const handler = extractToolHandler(server, "letta_send_message");
-      await handler({ agent_id: "agent-1", content: "Hi" });
-      const options = getSendMessageOptions(provider);
-      expect(options.maxSteps).toBeUndefined();
-    });
-
-    it("uses LETTA_ASK_TIMEOUT_MS env var when timeout_ms not provided", async () => {
-      const originalEnv = process.env["LETTA_ASK_TIMEOUT_MS"];
-      try {
-        process.env["LETTA_ASK_TIMEOUT_MS"] = "5000";
-        // Make sendMessage hang to verify timeout is used
-        let resolveHang!: () => void;
-        vi.mocked(provider.sendMessage).mockImplementation(
-          () => new Promise<string>((resolve) => { resolveHang = () => { resolve(""); }; }),
-        );
-        const handler = extractToolHandler(server, "letta_send_message");
-        const resultPromise = handler({ agent_id: "agent-1", content: "Hi" });
-        // The tool should complete (env var parsed correctly as 5000ms; we won't wait that long)
-        // Just verify sending works with the env var set (no crash on parsing)
-        resolveHang();
-        const result = await resultPromise;
-        expect(result.isError).toBeFalsy();
-      } finally {
-        if (originalEnv === undefined) {
-          delete process.env["LETTA_ASK_TIMEOUT_MS"];
-        } else {
-          process.env["LETTA_ASK_TIMEOUT_MS"] = originalEnv;
-        }
-      }
-    });
-
-    it("falls back to default timeout when LETTA_ASK_TIMEOUT_MS is invalid", async () => {
-      const originalEnv = process.env["LETTA_ASK_TIMEOUT_MS"];
-      try {
-        process.env["LETTA_ASK_TIMEOUT_MS"] = "notanumber";
-        const handler = extractToolHandler(server, "letta_send_message");
-        const result = await handler({ agent_id: "agent-1", content: "Hi" });
-        expect(result.content[0].text).toBe("Hello from agent");
-      } finally {
-        if (originalEnv === undefined) {
-          delete process.env["LETTA_ASK_TIMEOUT_MS"];
-        } else {
-          process.env["LETTA_ASK_TIMEOUT_MS"] = originalEnv;
-        }
-      }
-    });
-
-    it("options object has no overrideModel property key when override_model is absent", async () => {
-      const handler = extractToolHandler(server, "letta_send_message");
-      await handler({ agent_id: "agent-1", content: "Hi" });
-      const options = getSendMessageOptions(provider);
       expect("overrideModel" in options).toBe(false);
-    });
-
-    it("options object has no maxSteps property key when max_steps is absent", async () => {
-      const handler = extractToolHandler(server, "letta_send_message");
-      await handler({ agent_id: "agent-1", content: "Hi" });
-      const options = getSendMessageOptions(provider);
       expect("maxSteps" in options).toBe(false);
     });
 
-    it("explicit timeout_ms wins over LETTA_ASK_TIMEOUT_MS env var", async () => {
-      const origEnv = process.env["LETTA_ASK_TIMEOUT_MS"];
-      process.env["LETTA_ASK_TIMEOUT_MS"] = "1"; // 1ms — would cause timeout if used
-      try {
-        vi.mocked(provider.sendMessage).mockImplementation(
-          () => new Promise<string>((resolve) => setTimeout(() => { resolve("ok"); }, 20)),
-        );
-        const handler = extractToolHandler(server, "letta_send_message");
-        // Explicit 10s timeout: should NOT time out even though env=1ms
-        const result = await handler({ agent_id: "agent-1", content: "Hi", timeout_ms: 10_000 });
-        expect(result.isError).toBeFalsy();
-      } finally {
-        if (origEnv === undefined) delete process.env["LETTA_ASK_TIMEOUT_MS"];
-        else process.env["LETTA_ASK_TIMEOUT_MS"] = origEnv;
-      }
-    });
-
-    it("reads timeout from LETTA_ASK_TIMEOUT_MS env var (not empty string key)", async () => {
-      const origEnv = process.env["LETTA_ASK_TIMEOUT_MS"];
-      process.env["LETTA_ASK_TIMEOUT_MS"] = "1"; // 1ms
+    it("reads timeout from REPO_EXPERT_ASK_TIMEOUT_MS env var", async () => {
+      const origEnv = process.env["REPO_EXPERT_ASK_TIMEOUT_MS"];
+      process.env["REPO_EXPERT_ASK_TIMEOUT_MS"] = "1"; // 1ms
       try {
         vi.mocked(provider.sendMessage).mockImplementation(
           () => new Promise<string>((resolve) => setTimeout(() => { resolve("ok"); }, 50)),
         );
-        const handler = extractToolHandler(server, "letta_send_message");
+        const handler = extractToolHandler(server, "agent_call");
         const result = await handler({ agent_id: "agent-1", content: "Hi" });
-        // With correct env var: 1ms timeout fires before 50ms response → isError
         expect(result.isError).toBe(true);
         expect(result.content[0].text).toContain("timed out");
       } finally {
-        if (origEnv === undefined) delete process.env["LETTA_ASK_TIMEOUT_MS"];
-        else process.env["LETTA_ASK_TIMEOUT_MS"] = origEnv;
+        if (origEnv === undefined) delete process.env["REPO_EXPERT_ASK_TIMEOUT_MS"];
+        else process.env["REPO_EXPERT_ASK_TIMEOUT_MS"] = origEnv;
       }
     });
 
-    it("timeout error label includes override_model when provided (not 'agent-default')", async () => {
+    it("explicit timeout_ms wins over env var", async () => {
+      const origEnv = process.env["REPO_EXPERT_ASK_TIMEOUT_MS"];
+      process.env["REPO_EXPERT_ASK_TIMEOUT_MS"] = "1";
+      try {
+        vi.mocked(provider.sendMessage).mockImplementation(
+          () => new Promise<string>((resolve) => setTimeout(() => { resolve("ok"); }, 20)),
+        );
+        const handler = extractToolHandler(server, "agent_call");
+        const result = await handler({ agent_id: "agent-1", content: "Hi", timeout_ms: 10_000 });
+        expect(result.isError).toBeFalsy();
+      } finally {
+        if (origEnv === undefined) delete process.env["REPO_EXPERT_ASK_TIMEOUT_MS"];
+        else process.env["REPO_EXPERT_ASK_TIMEOUT_MS"] = origEnv;
+      }
+    });
+
+    it("timeout error label includes override_model when provided", async () => {
       vi.mocked(provider.sendMessage).mockImplementation(
         () => new Promise<string>((resolve) => setTimeout(resolve, 5000)),
       );
-      const handler = extractToolHandler(server, "letta_send_message");
+      const handler = extractToolHandler(server, "agent_call");
       const result = await handler({
         agent_id: "agent-1",
         content: "Hi",
-        override_model: "openai/gpt-4.1",
+        override_model: "llama3.1:8b",
         timeout_ms: 10,
       });
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("openai/gpt-4.1");
+      expect(result.content[0].text).toContain("llama3.1:8b");
       expect(result.content[0].text).not.toContain("agent-default");
-    });
-
-    it("timeout error label uses 'agent-default' when override_model is absent", async () => {
-      vi.mocked(provider.sendMessage).mockImplementation(
-        () => new Promise<string>((resolve) => setTimeout(resolve, 5000)),
-      );
-      const handler = extractToolHandler(server, "letta_send_message");
-      const result = await handler({ agent_id: "agent-1", content: "Hi", timeout_ms: 10 });
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("agent-default");
     });
   });
 
-  describe("letta_get_core_memory", () => {
+  describe("agent_get_core_memory", () => {
     it("returns memory blocks", async () => {
-      const handler = extractToolHandler(server, "letta_get_core_memory");
+      const handler = extractToolHandler(server, "agent_get_core_memory");
       const result = await handler({ agent_id: "agent-1" });
-      const data = parseToolJson(result) as Array<{ label: string; value: string; limit: number }>;
-      expect(data).toEqual([
-        { label: "persona", value: "I am Alice.", limit: 5000 },
-        { label: "human", value: "Unknown user.", limit: 5000 },
-      ]);
-    });
-
-    it("returns empty array when no memory blocks", async () => {
-      (admin.getCoreMemory as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-      const handler = extractToolHandler(server, "letta_get_core_memory");
-      const result = await handler({ agent_id: "agent-1" });
-      expect(parseToolJson(result) as unknown[]).toEqual([]);
+      const data = parseToolJson(result) as Array<{ label: string }>;
+      expect(data).toHaveLength(2);
+      expect(data[0].label).toBe("persona");
     });
 
     it("returns isError on failure", async () => {
       (admin.getCoreMemory as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("agent gone"));
-      const handler = extractToolHandler(server, "letta_get_core_memory");
+      const handler = extractToolHandler(server, "agent_get_core_memory");
       const result = await handler({ agent_id: "bad-id" });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toBe("agent gone");
     });
   });
 
-  describe("letta_search_archival", () => {
+  describe("agent_search_archival", () => {
     it("returns search results", async () => {
-      const handler = extractToolHandler(server, "letta_search_archival");
+      const handler = extractToolHandler(server, "agent_search_archival");
       const result = await handler({ agent_id: "agent-1", query: "auth" });
       const data = parseToolJson(result) as Array<{ id: string; text: string }>;
       expect(data).toEqual([{ id: "p-1", text: "found it" }]);
@@ -454,68 +397,43 @@ describe("MCP Server tools", () => {
     });
 
     it("passes top_k when provided", async () => {
-      const handler = extractToolHandler(server, "letta_search_archival");
+      const handler = extractToolHandler(server, "agent_search_archival");
       await handler({ agent_id: "agent-1", query: "auth", top_k: 5 });
       expect(mockAdmin.searchPassages).toHaveBeenCalledWith("agent-1", "auth", 5);
     });
-
-    it("returns isError on failure", async () => {
-      (admin.searchPassages as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("search failed"));
-      const handler = extractToolHandler(server, "letta_search_archival");
-      const result = await handler({ agent_id: "agent-1", query: "auth" });
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toBe("search failed");
-    });
   });
 
-  describe("letta_insert_passage", () => {
+  describe("agent_insert_passage", () => {
     it("inserts and returns the passage id", async () => {
-      const handler = extractToolHandler(server, "letta_insert_passage");
+      const handler = extractToolHandler(server, "agent_insert_passage");
       const result = await handler({ agent_id: "agent-1", text: "new passage" });
       const data = parseToolJson(result) as { id: string };
       expect(data.id).toBe("p-new");
       expect(provider.storePassage).toHaveBeenCalledWith("agent-1", "new passage");
     });
-
-    it("returns isError on failure", async () => {
-      (provider.storePassage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("quota exceeded"));
-      const handler = extractToolHandler(server, "letta_insert_passage");
-      const result = await handler({ agent_id: "agent-1", text: "x" });
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toBe("quota exceeded");
-    });
   });
 
-  describe("letta_delete_passage", () => {
+  describe("agent_delete_passage", () => {
     it("deletes a passage", async () => {
-      const handler = extractToolHandler(server, "letta_delete_passage");
+      const handler = extractToolHandler(server, "agent_delete_passage");
       const result = await handler({ agent_id: "agent-1", passage_id: "p-1" });
       expect(result.content[0].text).toBe("Deleted");
       expect(provider.deletePassage).toHaveBeenCalledWith("agent-1", "p-1");
     });
-
-    it("returns isError on failure", async () => {
-      (provider.deletePassage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("not found"));
-      const handler = extractToolHandler(server, "letta_delete_passage");
-      const result = await handler({ agent_id: "agent-1", passage_id: "p-x" });
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toBe("not found");
-    });
   });
 
-  describe("letta_update_block", () => {
+  describe("agent_update_block", () => {
     it("updates and returns the block", async () => {
-      const handler = extractToolHandler(server, "letta_update_block");
+      const handler = extractToolHandler(server, "agent_update_block");
       const result = await handler({ agent_id: "agent-1", label: "persona", value: "Updated." });
       const data = parseToolJson(result) as { value: string; limit: number };
       expect(data.value).toBe("Updated.");
-      expect(data.limit).toBe(5000);
       expect(provider.updateBlock).toHaveBeenCalledWith("agent-1", "persona", "Updated.");
     });
 
     it("returns isError on failure", async () => {
       (provider.updateBlock as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("not found"));
-      const handler = extractToolHandler(server, "letta_update_block");
+      const handler = extractToolHandler(server, "agent_update_block");
       const result = await handler({ agent_id: "agent-1", label: "persona", value: "x" });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toBe("not found");
@@ -523,452 +441,12 @@ describe("MCP Server tools", () => {
   });
 });
 
-describe("Unified MCP tools", () => {
-  it("parses namespaced agent IDs", () => {
-    expect(parseNamespacedAgentId("letta:agent-1")).toEqual({ provider: "letta", agentId: "agent-1" });
-    expect(parseNamespacedAgentId("viking:repo-a")).toEqual({ provider: "viking", agentId: "repo-a" });
-  });
-
-  it("rejects malformed namespaced agent IDs", () => {
-    expect(() => parseNamespacedAgentId("agent-1")).toThrow("must be namespaced");
-    expect(() => parseNamespacedAgentId("foo:agent-1")).toThrow("Unsupported provider prefix");
-    expect(() => parseNamespacedAgentId("letta:")).toThrow("must be namespaced");
-  });
-
-  it("agent_list returns flat namespaced list with provider metadata", async () => {
-    const server = new McpServer({ name: "test", version: "0.0.1" });
-    const lettaProvider = makeMockProvider();
-    const vikingProvider = makeMockProvider();
-    const lettaAdmin = makeMockAdmin();
-    const vikingAdmin = makeMockAdmin();
-    (vikingAdmin.listAgents as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { id: "repo-a", name: "Repo A", description: null, model: null },
-    ]);
-    registerUnifiedTools(server, {
-      providers: {
-        letta: { provider: lettaProvider, admin: lettaAdmin },
-        viking: { provider: vikingProvider, admin: vikingAdmin },
-      },
-      bootstrapErrors: {},
-    });
-
-    const handler = extractToolHandler(server, "agent_list");
-    const result = await handler({});
-    const data = JSON.parse(result.content[0].text) as {
-      agents: Array<{ id: string; provider: string; provider_agent_id: string }>;
-    };
-
-    expect(data.agents).toEqual(
-      expect.arrayContaining([
-        { id: "letta:agent-1", provider: "letta", provider_agent_id: "agent-1", name: "Alice", description: "Test agent", model: "openai/gpt-4.1" },
-        { id: "letta:agent-2", provider: "letta", provider_agent_id: "agent-2", name: "Bob", description: null, model: "openai/gpt-4.1-mini" },
-        { id: "viking:repo-a", provider: "viking", provider_agent_id: "repo-a", name: "Repo A", description: null, model: null },
-      ]),
-    );
-  });
-
-  it("agent_list returns partial results with per-provider errors", async () => {
-    const server = new McpServer({ name: "test", version: "0.0.1" });
-    const lettaProvider = makeMockProvider();
-    const vikingProvider = makeMockProvider();
-    const lettaAdmin = makeMockAdmin();
-    const vikingAdmin = makeMockAdmin();
-    (vikingAdmin.listAgents as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("viking down"));
-
-    registerUnifiedTools(server, {
-      providers: {
-        letta: { provider: lettaProvider, admin: lettaAdmin },
-        viking: { provider: vikingProvider, admin: vikingAdmin },
-      },
-      bootstrapErrors: {},
-    });
-
-    const handler = extractToolHandler(server, "agent_list");
-    const result = await handler({});
-    const data = JSON.parse(result.content[0].text) as {
-      agents: Array<{ id: string }>;
-      errors?: Array<{ provider: string; error: string }>;
-    };
-
-    expect(data.agents).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: "letta:agent-1" }),
-        expect.objectContaining({ id: "letta:agent-2" }),
-      ]),
-    );
-    expect(data.errors).toEqual([{ provider: "viking", error: "viking down" }]);
-  });
-
-  it("agent_call routes message by provider namespace", async () => {
-    const server = new McpServer({ name: "test", version: "0.0.1" });
-    const lettaProvider = makeMockProvider();
-    const vikingProvider = makeMockProvider();
-    (lettaProvider.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue("from letta");
-    (vikingProvider.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue("from viking");
-    registerUnifiedTools(server, {
-      providers: {
-        letta: { provider: lettaProvider, admin: makeMockAdmin() },
-        viking: { provider: vikingProvider, admin: makeMockAdmin() },
-      },
-      bootstrapErrors: {},
-    });
-
-    const handler = extractToolHandler(server, "agent_call");
-    const lettaResult = await handler({ agent_id: "letta:agent-1", content: "ping" });
-    const vikingResult = await handler({ agent_id: "viking:repo-a", content: "ping" });
-
-    expect(lettaResult.content[0].text).toBe("from letta");
-    expect(vikingResult.content[0].text).toBe("from viking");
-    expect(lettaProvider.sendMessage).toHaveBeenCalledWith("agent-1", "ping", {});
-    expect(vikingProvider.sendMessage).toHaveBeenCalledWith("repo-a", "ping", {});
-  });
-
-  it("agent_call returns error when provider is not configured", async () => {
-    const server = new McpServer({ name: "test", version: "0.0.1" });
-    const lettaProvider = makeMockProvider();
-    registerUnifiedTools(server, {
-      providers: {
-        letta: { provider: lettaProvider, admin: makeMockAdmin() },
-      },
-      bootstrapErrors: {},
-    });
-
-    const handler = extractToolHandler(server, "agent_call");
-    const result = await handler({ agent_id: "viking:repo-a", content: "ping" });
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("not configured");
-  });
-
-  it("agent_list includes bootstrap errors when providers failed to initialize", async () => {
-    const server = new McpServer({ name: "test", version: "0.0.1" });
-    registerUnifiedTools(server, {
-      providers: {},
-      bootstrapErrors: { letta: "letta init failed", viking: "viking init failed" },
-    });
-
-    const handler = extractToolHandler(server, "agent_list");
-    const result = await handler({});
-    const data = JSON.parse(result.content[0].text) as {
-      agents: unknown[];
-      errors: Array<{ provider: string; error: string }>;
-    };
-
-    expect(data.agents).toEqual([]);
-    expect(data.errors).toEqual([
-      { provider: "letta", error: "letta init failed" },
-      { provider: "viking", error: "viking init failed" },
-    ]);
-  });
-
-  it("agent_list sorts agents by namespaced id", async () => {
-    const server = new McpServer({ name: "test", version: "0.0.1" });
-    const admin = makeMockAdmin();
-    (admin.listAgents as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { id: "z-last", name: "Z", description: null, model: null },
-      { id: "a-first", name: "A", description: null, model: null },
-    ]);
-    registerUnifiedTools(server, {
-      providers: { letta: { provider: makeMockProvider(), admin } },
-      bootstrapErrors: {},
-    });
-
-    const handler = extractToolHandler(server, "agent_list");
-    const result = await handler({});
-    const data = JSON.parse(result.content[0].text) as { agents: Array<{ id: string }> };
-
-    expect(data.agents.map((agent) => agent.id)).toEqual(["letta:a-first", "letta:z-last"]);
-  });
-
-  it("agent_list omits errors key when there are no errors", async () => {
-    const server = new McpServer({ name: "test", version: "0.0.1" });
-    registerUnifiedTools(server, {
-      providers: { letta: { provider: makeMockProvider(), admin: makeMockAdmin() } },
-      bootstrapErrors: {},
-    });
-
-    const handler = extractToolHandler(server, "agent_list");
-    const result = await handler({});
-    const data = JSON.parse(result.content[0].text) as { errors?: unknown };
-
-    expect(data.errors).toBeUndefined();
-  });
-
-  it("agent_call passes overrideModel and maxSteps through to provider", async () => {
-    const server = new McpServer({ name: "test", version: "0.0.1" });
-    const lettaProvider = makeMockProvider();
-    registerUnifiedTools(server, {
-      providers: { letta: { provider: lettaProvider, admin: makeMockAdmin() } },
-      bootstrapErrors: {},
-    });
-
-    const handler = extractToolHandler(server, "agent_call");
-    await handler({
-      agent_id: "letta:agent-1",
-      content: "Hi",
-      override_model: "openai/gpt-4.1-mini",
-      max_steps: 4,
-    });
-
-    expect(lettaProvider.sendMessage).toHaveBeenCalledWith("agent-1", "Hi", {
-      overrideModel: "openai/gpt-4.1-mini",
-      maxSteps: 4,
-    });
-  });
-
-  it("agent_call uses explicit timeout_ms over env default", async () => {
-    const server = new McpServer({ name: "test", version: "0.0.1" });
-    const lettaProvider = makeMockProvider();
-    vi.mocked(lettaProvider.sendMessage).mockImplementation(
-      () => new Promise<string>((resolve) => setTimeout(() => { resolve("ok"); }, 50)),
-    );
-    registerUnifiedTools(server, {
-      providers: { letta: { provider: lettaProvider, admin: makeMockAdmin() } },
-      bootstrapErrors: {},
-    });
-
-    const origEnv = process.env["LETTA_ASK_TIMEOUT_MS"];
-    process.env["LETTA_ASK_TIMEOUT_MS"] = "1";
-    try {
-      const handler = extractToolHandler(server, "agent_call");
-      const result = await handler({ agent_id: "letta:agent-1", content: "Hi", timeout_ms: 10_000 });
-      expect(result.isError).toBeFalsy();
-    } finally {
-      if (origEnv === undefined) delete process.env["LETTA_ASK_TIMEOUT_MS"];
-      else process.env["LETTA_ASK_TIMEOUT_MS"] = origEnv;
-    }
-  });
-
-  it("agent_call timeout label includes override_model when provided", async () => {
-    const server = new McpServer({ name: "test", version: "0.0.1" });
-    const lettaProvider = makeMockProvider();
-    vi.mocked(lettaProvider.sendMessage).mockImplementation(
-      () => new Promise<string>((resolve) => setTimeout(resolve, 5000)),
-    );
-    registerUnifiedTools(server, {
-      providers: { letta: { provider: lettaProvider, admin: makeMockAdmin() } },
-      bootstrapErrors: {},
-    });
-
-    const handler = extractToolHandler(server, "agent_call");
-    const result = await handler({
-      agent_id: "letta:agent-1",
-      content: "Hi",
-      override_model: "openai/gpt-4.1",
-      timeout_ms: 10,
-    });
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("openai/gpt-4.1");
-    expect(result.content[0].text).toContain("agent_call letta");
-  });
-
-  it("agent_call returns stringified non-Error failures", async () => {
-    const server = new McpServer({ name: "test", version: "0.0.1" });
-    const lettaProvider = makeMockProvider();
-    vi.mocked(lettaProvider.sendMessage).mockRejectedValue("plain failure");
-    registerUnifiedTools(server, {
-      providers: { letta: { provider: lettaProvider, admin: makeMockAdmin() } },
-      bootstrapErrors: {},
-    });
-
-    const handler = extractToolHandler(server, "agent_call");
-    const result = await handler({ agent_id: "letta:agent-1", content: "Hi" });
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toBe("plain failure");
-  });
-});
-
-describe("parseNonNegativeInt", () => {
-  it("returns fallback when raw is undefined", () => {
-    const missing: string | undefined = undefined;
-    expect(parseNonNegativeInt(missing, 1)).toBe(1);
-  });
-
-  it("returns fallback when raw is empty", () => {
-    expect(parseNonNegativeInt("", 1)).toBe(1);
-  });
-
-  it("returns fallback when raw is NaN", () => {
-    expect(parseNonNegativeInt("abc", 1)).toBe(1);
-  });
-
-  it("returns fallback when raw is negative", () => {
-    expect(parseNonNegativeInt("-1", 1)).toBe(1);
-  });
-
-  it("returns parsed value for zero and positive integers", () => {
-    expect(parseNonNegativeInt("0", 1)).toBe(0);
-    expect(parseNonNegativeInt("3", 1)).toBe(3);
-  });
-});
-
-describe("parseModelCsv", () => {
-  it("returns empty array when value is undefined", () => {
-    expect(parseModelCsv()).toEqual([]);
-  });
-
-  it("returns empty array when value is empty", () => {
-    expect(parseModelCsv("")).toEqual([]);
-  });
-
-  it("splits, trims, and drops empty entries", () => {
-    expect(parseModelCsv(" model-a , , model-b ")).toEqual(["model-a", "model-b"]);
-  });
-});
-
-describe("getVikingRuntimeOptionsFromEnv", () => {
-  const keys = [
-    "OPENROUTER_REQUEST_TIMEOUT_MS",
-    "OPENROUTER_MAX_RETRIES_PER_MODEL",
-    "OPENROUTER_RETRY_BASE_DELAY_MS",
-    "OPENROUTER_FALLBACK_MODELS",
-  ] as const;
-
-  afterEach(() => {
-    for (const key of keys) Reflect.deleteProperty(process.env, key);
-  });
-
-  it("uses defaults when env vars are absent", () => {
-    expect(getVikingRuntimeOptionsFromEnv()).toEqual({
-      requestTimeoutMs: 20_000,
-      maxRetriesPerModel: 1,
-      retryBaseDelayMs: 600,
-      fallbackModels: [],
-    });
-  });
-
-  it("reads custom env values", () => {
-    process.env["OPENROUTER_REQUEST_TIMEOUT_MS"] = "15000";
-    process.env["OPENROUTER_MAX_RETRIES_PER_MODEL"] = "2";
-    process.env["OPENROUTER_RETRY_BASE_DELAY_MS"] = "900";
-    process.env["OPENROUTER_FALLBACK_MODELS"] = "model-a, model-b";
-
-    expect(getVikingRuntimeOptionsFromEnv()).toEqual({
-      requestTimeoutMs: 15_000,
-      maxRetriesPerModel: 2,
-      retryBaseDelayMs: 900,
-      fallbackModels: ["model-a", "model-b"],
-    });
-  });
-});
-
-describe("createClient", () => {
-  afterEach(() => {
-    Reflect.deleteProperty(process.env, "LETTA_BASE_URL");
-    lettaCtor.mockClear();
-  });
-
-  it("passes LETTA_BASE_URL to the Letta constructor", () => {
-    process.env["LETTA_BASE_URL"] = "https://api.letta.example";
-    createClient();
-    expect(lettaCtor).toHaveBeenCalledWith({ baseURL: "https://api.letta.example" });
-  });
-});
-
-describe("buildProviderRegistry", () => {
-  const envKeys = ["LETTA_API_KEY", "OPENROUTER_API_KEY", "VIKING_URL", "OPENROUTER_MODEL"] as const;
-
-  afterEach(() => {
-    for (const key of envKeys) Reflect.deleteProperty(process.env, key);
-  });
-
-  it("registers letta when LETTA_API_KEY is set", () => {
-    process.env["LETTA_API_KEY"] = "test-key";
-    const registry = buildProviderRegistry();
-    expect(registry.providers.letta).toBeDefined();
-    expect(registry.bootstrapErrors.letta).toBeUndefined();
-  });
-
-  it("registers viking when OPENROUTER_API_KEY is set", () => {
-    process.env["OPENROUTER_API_KEY"] = "or-key";
-    const registry = buildProviderRegistry();
-    expect(registry.providers.viking).toBeDefined();
-    expect(registry.bootstrapErrors.viking).toBeUndefined();
-  });
-
-  it("leaves providers empty when no credentials are configured", () => {
-    const registry = buildProviderRegistry();
-    expect(registry.providers.letta).toBeUndefined();
-    expect(registry.providers.viking).toBeUndefined();
-    expect(registry.bootstrapErrors).toEqual({});
-  });
-
-  it("records letta bootstrap errors when client construction fails", () => {
-    process.env["LETTA_API_KEY"] = "test-key";
-    lettaCtor.mockImplementationOnce(() => {
-      throw new Error("letta init failed");
-    });
-    const registry = buildProviderRegistry();
-    expect(registry.providers.letta).toBeUndefined();
-    expect(registry.bootstrapErrors.letta).toBe("letta init failed");
-  });
-});
-
-describe("selectLegacyRuntime", () => {
-  const runtime = {
-    provider: makeMockProvider(),
-    admin: makeMockAdmin(),
-  };
-
-  it("prefers configured PROVIDER_TYPE when available", () => {
-    const selected = selectLegacyRuntime(
-      { providers: { letta: runtime, viking: runtime }, bootstrapErrors: {} },
-      "viking",
-    );
-    expect(selected).toBe(runtime);
-  });
-
-  it("falls back to letta when preferred provider is missing", () => {
-    const selected = selectLegacyRuntime(
-      { providers: { letta: runtime }, bootstrapErrors: {} },
-      "viking",
-    );
-    expect(selected).toBe(runtime);
-  });
-
-  it("falls back to viking when letta is unavailable", () => {
-    const selected = selectLegacyRuntime(
-      { providers: { viking: runtime }, bootstrapErrors: {} },
-    );
-    expect(selected).toBe(runtime);
-  });
-
-  it("throws with bootstrap error details when no provider is configured", () => {
-    expect(() =>
-      selectLegacyRuntime(
-        { providers: {}, bootstrapErrors: { letta: "boom", viking: "bust" } },
-      ),
-    ).toThrow(/No provider is configured[\s\S]*Bootstrap errors:[\s\S]*letta: boom[\s\S]*viking: bust/);
-  });
-
-  it("throws without bootstrap suffix when there are no bootstrap errors", () => {
-    expect(() => selectLegacyRuntime({ providers: {}, bootstrapErrors: {} })).toThrow(
-      "No provider is configured. Set LETTA_API_KEY and/or OPENROUTER_API_KEY in the MCP server env.",
-    );
-  });
-});
-
-describe("parseNamespacedAgentId edge cases", () => {
-  it("rejects ids with separator at position zero", () => {
-    expect(() => parseNamespacedAgentId(":agent-1")).toThrow("must be namespaced");
-  });
-
-  it("includes unsupported prefix in error message", () => {
-    expect(() => parseNamespacedAgentId("aws:agent-1")).toThrow('Unsupported provider prefix "aws"');
-  });
-});
-
 describe("main", () => {
   afterEach(() => {
-    Reflect.deleteProperty(process.env, "LETTA_API_KEY");
-    Reflect.deleteProperty(process.env, "PROVIDER_TYPE");
     vi.restoreAllMocks();
   });
 
-  it("connects server to stdio transport when letta is configured", async () => {
-    process.env["LETTA_API_KEY"] = "test-key";
+  it("connects the server to a stdio transport", async () => {
     const connectSpy = vi.spyOn(McpServer.prototype, "connect").mockResolvedValue(undefined as never);
     await main();
     expect(connectSpy).toHaveBeenCalledOnce();

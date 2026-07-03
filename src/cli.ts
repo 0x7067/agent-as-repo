@@ -2,7 +2,6 @@
 /* eslint-disable max-lines */
 import "dotenv/config";
 import { Command } from "commander";
-import { Letta } from "@letta-ai/letta-client";
 import path from "node:path";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -18,8 +17,7 @@ import { collectFiles } from "./shell/file-collector.js";
 import { StateFileError, loadState, saveState } from "./shell/state-store.js";
 import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
 import { bootstrapAgent } from "./shell/bootstrap.js";
-import type { AgentProvider, CreateAgentParams, SendMessageOptions } from "./shell/provider.js";
-import { LettaProvider } from "./shell/letta-provider.js";
+import type { AgentProvider, CreateAgentParams, SendMessageOptions } from "./ports/agent-provider.js";
 import { VikingProvider } from "./shell/viking-provider.js";
 import { VikingHttpClient } from "./shell/viking-http.js";
 import { FilesystemBlockStorage } from "./shell/block-storage.js";
@@ -65,7 +63,8 @@ interface ProgramOpts {
 interface InitOpts {
   apiKey?: string;
   repoPath?: string;
-  provider?: "letta" | "viking";
+  model?: string;
+  baseUrl?: string;
   yes?: boolean;
 }
 
@@ -161,28 +160,21 @@ class CliUserError extends Error {
 }
 
 function createProvider(config: Config): AgentProvider {
-  if (config.provider.type === "letta") {
-    if (!process.env["LETTA_API_KEY"]) {
-      throw new CliUserError('Missing LETTA_API_KEY.\nRun "repo-expert init" to configure, or add it to .env manually.');
-    }
-    return new LettaProvider(new Letta({ timeout: 5 * 60 * 1000 }));
-  } else {
-    if (!process.env["OPENROUTER_API_KEY"]) {
-      throw new CliUserError('Missing OPENROUTER_API_KEY. Add it to .env.');
-    }
-    const vikingUrl = config.provider.vikingUrl ?? process.env["VIKING_URL"] ?? "http://localhost:1933";
-    const vikingApiKey = process.env["VIKING_API_KEY"];
-    const openrouterApiKey = process.env["OPENROUTER_API_KEY"];
-    const viking = new VikingHttpClient(vikingUrl, vikingApiKey);
-    const blockStorage = new FilesystemBlockStorage(resolveOpenVikingBlocksDir());
-    return new VikingProvider(
-      viking,
-      openrouterApiKey,
-      config.provider.openrouterModel,
-      blockStorage,
-      getVikingRuntimeOptionsFromEnv(),
-    );
-  }
+  const vikingUrl = config.provider.vikingUrl;
+  const vikingApiKey = process.env["VIKING_API_KEY"];
+  const viking = new VikingHttpClient(vikingUrl, vikingApiKey);
+  const blockStorage = new FilesystemBlockStorage(resolveOpenVikingBlocksDir());
+  return new VikingProvider(
+    viking,
+    config.provider.model,
+    blockStorage,
+    {
+      baseUrl: config.provider.baseUrl,
+      fallbackModels: config.provider.fallbackModels,
+      ...(process.env["LLM_API_KEY"] === undefined ? {} : { apiKey: process.env["LLM_API_KEY"] }),
+      ...getVikingRuntimeOptionsFromEnv(),
+    },
+  );
 }
 
 class FakeProvider implements AgentProvider {
@@ -211,8 +203,6 @@ class FakeProvider implements AgentProvider {
     );
     return Promise.resolve();
   }
-
-  async enableSleeptime(_agentId: string): Promise<void> {}
 
   async storePassage(agentId: string, text: string): Promise<string> {
     const delayMs = Number.parseInt(process.env["REPO_EXPERT_TEST_DELAY_STORE_MS"] ?? "0", 10);
@@ -316,54 +306,36 @@ async function prepareChunking(config: Config): Promise<ReturnType<typeof select
   return selectChunkingStrategy(config.defaults.chunking);
 }
 
-function resolveMcpProviderConfig(baseUrl: string): { providerConfig: McpProviderConfig; warnings: string[] } {
+function resolveMcpProviderConfig(config: Config | null): { providerConfig: McpProviderConfig; warnings: string[] } {
   const warnings: string[] = [];
-  const lettaApiKey = process.env["LETTA_API_KEY"] ?? process.env["LETTA_PASSWORD"];
-  const openrouterApiKey = process.env["OPENROUTER_API_KEY"];
-  const openrouterModel = process.env["OPENROUTER_MODEL"] ?? "openai/gpt-4o-mini";
-  const vikingUrl = process.env["VIKING_URL"] ?? "http://localhost:1933";
-  const providerTypeRaw = process.env["PROVIDER_TYPE"];
+  const model = config?.provider.model ?? process.env["LLM_MODEL"];
+  const baseUrl = config?.provider.baseUrl ?? process.env["LLM_BASE_URL"];
+  const vikingUrl = config?.provider.vikingUrl ?? process.env["VIKING_URL"];
+  const llmApiKey = process.env["LLM_API_KEY"];
+  const vikingApiKey = process.env["VIKING_API_KEY"];
 
-  let preferredProvider: "letta" | "viking" | undefined;
-  if (providerTypeRaw === "letta" || providerTypeRaw === "viking") {
-    preferredProvider = providerTypeRaw;
-  } else if (providerTypeRaw) {
-    warnings.push(`Ignoring invalid PROVIDER_TYPE="${providerTypeRaw}". Use "letta" or "viking".`);
-  } else if (lettaApiKey) {
-    preferredProvider = "letta";
-  } else if (openrouterApiKey) {
-    preferredProvider = "viking";
+  if (config === null) {
+    warnings.push("config.yaml not found; MCP entry uses env/default values for model and URLs.");
   }
-
-  if (!lettaApiKey) {
-    warnings.push("LETTA_API_KEY is not set; Letta agents will not be available in unified MCP.");
-  }
-  if (!openrouterApiKey) {
-    warnings.push("OPENROUTER_API_KEY is not set; Viking agents will not be available in unified MCP.");
-  }
-  if (!lettaApiKey && !openrouterApiKey) {
-    warnings.push("No provider key found. MCP entry is written, but the server will fail until a provider key is added.");
-  }
-
-  const lettaProviderConfig = {
-    ...(lettaApiKey === undefined ? {} : { apiKey: lettaApiKey }),
-    baseUrl: process.env["LETTA_BASE_URL"] ?? baseUrl,
-  };
-  const vikingProviderConfig = {
-    ...(openrouterApiKey === undefined ? {} : { openrouterApiKey }),
-    openrouterModel,
-    vikingUrl,
-    ...(process.env["VIKING_API_KEY"] === undefined ? {} : { vikingApiKey: process.env["VIKING_API_KEY"] }),
-  };
 
   return {
     providerConfig: {
-      ...(preferredProvider === undefined ? {} : { preferredProvider }),
-      letta: lettaProviderConfig,
-      viking: vikingProviderConfig,
+      ...(model === undefined ? {} : { model }),
+      ...(baseUrl === undefined ? {} : { baseUrl }),
+      ...(vikingUrl === undefined ? {} : { vikingUrl }),
+      ...(llmApiKey === undefined ? {} : { llmApiKey }),
+      ...(vikingApiKey === undefined ? {} : { vikingApiKey }),
     },
     warnings,
   };
+}
+
+async function loadOptionalConfig(configPath: string): Promise<Config | null> {
+  try {
+    return await loadConfig(configPath);
+  } catch {
+    return null;
+  }
 }
 
 function gitHeadCommit(cwd: string): string | null {
@@ -473,7 +445,7 @@ async function destroyAgents(
     try {
       await provider.deleteAgent(agentInfo.agentId);
     } catch {
-      console.warn(`  Warning: could not delete agent ${agentInfo.agentId} from Letta`);
+      console.warn(`  Warning: could not delete agent ${agentInfo.agentId} from the provider`);
     }
   }
 }
@@ -502,20 +474,11 @@ function parseOptionalMaxSteps(value: string | undefined): number | undefined {
   return parsed;
 }
 
-function parseModelCsv(value: string | undefined): string[] {
-  if (!value) return [];
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-}
-
 function getVikingRuntimeOptionsFromEnv(): VikingRuntimeOptions {
-  const requestTimeoutMs = parseOptionalPositiveInt(process.env["OPENROUTER_REQUEST_TIMEOUT_MS"], 20_000);
-  const maxRetriesPerModel = parseNonNegativeInt(process.env["OPENROUTER_MAX_RETRIES_PER_MODEL"] ?? "1", 1);
-  const retryBaseDelayMs = parseOptionalPositiveInt(process.env["OPENROUTER_RETRY_BASE_DELAY_MS"], 600);
-  const fallbackModels = parseModelCsv(process.env["OPENROUTER_FALLBACK_MODELS"]);
-  return { requestTimeoutMs, maxRetriesPerModel, retryBaseDelayMs, fallbackModels };
+  const requestTimeoutMs = parseOptionalPositiveInt(process.env["LLM_REQUEST_TIMEOUT_MS"], 20_000);
+  const maxRetriesPerModel = parseNonNegativeInt(process.env["LLM_MAX_RETRIES_PER_MODEL"] ?? "1", 1);
+  const retryBaseDelayMs = parseOptionalPositiveInt(process.env["LLM_RETRY_BASE_DELAY_MS"], 600);
+  return { requestTimeoutMs, maxRetriesPerModel, retryBaseDelayMs };
 }
 
 function formatDurationMs(durationMs: number): string {
@@ -612,7 +575,6 @@ function question(rl: ReadlineInterface, prompt: string): Promise<string> {
 const ASK_DEFAULT_TIMEOUT_MS = 60_000;
 
 async function loadAskConfigDefaults(configPath: string | undefined): Promise<{
-  fastModel?: string;
   askTimeoutMs: number;
 }> {
   const defaults = { askTimeoutMs: ASK_DEFAULT_TIMEOUT_MS };
@@ -628,10 +590,8 @@ async function loadAskConfigDefaults(configPath: string | undefined): Promise<{
   }
 
   const config = await loadConfigSafe(resolvedPath);
-  const fastModel = config.provider.type === "letta" ? config.provider.fastModel : undefined;
   return {
     askTimeoutMs: config.defaults.askTimeoutMs ?? defaults.askTimeoutMs,
-    ...(fastModel === undefined ? {} : { fastModel }),
   };
 }
 
@@ -684,9 +644,10 @@ program.addHelpText(
 
 program
   .command("init")
-  .description("Interactive setup: configure provider/API key, scan a repo, generate config.yaml")
-  .option("--provider <type>", "Provider type: letta or viking")
-  .option("--api-key <key>", "Provider API key to write to .env (non-interactive)")
+  .description("Interactive setup: pick model + LLM endpoint, scan a repo, generate config.yaml")
+  .option("--model <model>", "Chat model id as the LLM endpoint knows it")
+  .option("--base-url <url>", "OpenAI-compatible LLM base URL (default: local Ollama)")
+  .option("--api-key <key>", "Optional LLM Bearer key to write to .env as LLM_API_KEY (non-interactive)")
   .option("--repo-path <path>", "Repository path to configure")
   .option("-y, --yes", "Accept defaults and skip confirmation prompts")
   .action(async (opts: InitOpts) => {
@@ -695,7 +656,8 @@ program
       const initOptions = {
         ...(opts.apiKey === undefined ? {} : { apiKey: opts.apiKey }),
         ...(opts.repoPath === undefined ? {} : { repoPath: opts.repoPath }),
-        ...(opts.provider === undefined ? {} : { provider: opts.provider }),
+        ...(opts.model === undefined ? {} : { model: opts.model }),
+        ...(opts.baseUrl === undefined ? {} : { baseUrl: opts.baseUrl }),
         assumeYes: Boolean(opts.yes),
         allowPrompts: !noInputEnabled() && interactiveInputAvailable(),
       };
@@ -840,9 +802,7 @@ program
       try {
         if (mode === "create") {
           const createStart = Date.now();
-          const modelOptions = config.provider.type === "letta"
-            ? { model: config.provider.model, embedding: config.provider.embedding }
-            : { model: config.provider.openrouterModel, embedding: "" };
+          const modelOptions = { model: config.provider.model };
           const agentState = await createRepoAgent(provider, repoName, repoConfig, modelOptions);
           agentId = agentState.agentId;
           createMs = Date.now() - createStart;
@@ -998,7 +958,7 @@ program
   .action(async (repo: string | undefined, question: string | undefined, opts: AskOpts) => {
     const buildAskSettings = async (): Promise<AskRuntimeSettings> => {
       const configDefaults = await loadAskConfigDefaults(opts.config);
-      const fastModel = opts.fastModel ?? configDefaults.fastModel;
+      const fastModel = opts.fastModel;
       const maxSteps = parseOptionalMaxSteps(opts.maxSteps);
       return {
         askTimeoutMs: parseOptionalPositiveInt(opts.askTimeoutMs, configDefaults.askTimeoutMs),
@@ -1079,7 +1039,7 @@ program
   .option("--since <ref>", "Git ref to diff from (overrides stored commit)")
   .option("--config <path>", "Config file path", "config.yaml")
   .option("--json", "Output sync results as JSON")
-  .option("--dry-run", "Preview sync plan without writing state or calling Letta")
+  .option("--dry-run", "Preview sync plan without writing state or calling the provider")
   // eslint-disable-next-line sonarjs/cognitive-complexity
   .action(async (opts: SyncOpts) => {
     const log = opts.json ? (_: string) => {} : (line: string) => { console.log(line); };
@@ -1253,7 +1213,7 @@ program
   .command("list")
   .description("List all agents")
   .option("--json", "Output agent list as JSON")
-  .option("--live", "Fetch live passage counts from Letta (slower)")
+  .option("--live", "Fetch live passage counts from the provider (slower)")
   // eslint-disable-next-line sonarjs/cognitive-complexity
   .action(async (opts: ListOpts) => {
     const state = await loadState(STATE_FILE);
@@ -1413,7 +1373,7 @@ program
 
 program
   .command("reconcile")
-  .description("Compare local passage state against Letta's actual state and report drift")
+  .description("Compare local passage state against the provider's actual state and report drift")
   .option("--repo <name>", "Reconcile a single repo agent (default: all)")
   .option("--fix", "Delete orphan passages and clean up stale local entries")
   .option("--json", "Output reconcile results as JSON")
@@ -1489,39 +1449,6 @@ program
     }
 
     if (anyDrift && !opts.fix) process.exitCode = 1;
-  });
-
-program
-  .command("sleeptime")
-  .description("Enable sleep-time memory consolidation on existing agents")
-  .option("--repo <name>", "Enable on a single repo agent (default: all)")
-  .action(async (opts: { repo?: string }) => {
-    const state = await loadState(STATE_FILE);
-    const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
-    const existing = repoNames.filter((n) => Object.hasOwn(state.agents, n));
-
-    if (existing.length === 0) {
-      console.log("No agents found.");
-      return;
-    }
-
-    const sleeptimeConfig = await loadConfigForProvider(path.resolve("config.yaml"));
-    const provider = createProviderForCommands(sleeptimeConfig);
-    for (const repoName of existing) {
-      const agentInfo = getOwnRecordValue(state.agents, repoName);
-      if (agentInfo === undefined) {
-        continue;
-      }
-      process.stdout.write(`Enabling sleep-time for "${repoName}" (${agentInfo.agentId})... `);
-      try {
-        await provider.enableSleeptime(agentInfo.agentId);
-        console.log("done.");
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        console.log(`failed: ${msg}`);
-        process.exitCode = 1;
-      }
-    }
   });
 
 program
@@ -1680,23 +1607,26 @@ program
 interface McpInstallOpts {
   global?: boolean;
   local?: boolean;
-  baseUrl: string;
+  config: string;
 }
 
 interface McpCheckOpts {
   json?: boolean;
+  config: string;
 }
 
 interface CompletionOpts {
   installDir?: string;
 }
 
+const MCP_ENTRY_NAME = "repo-expert";
+
 program
   .command("mcp-install")
-  .description("Add MCP server entry to Claude Code config (provider-aware)")
+  .description("Add the repo-expert MCP server entry to Claude Code config")
   .option("--global", "Write to global ~/.claude.json (default)")
   .option("--local", "Write to local ./.claude.json")
-  .option("--base-url <url>", "Letta base URL", "https://api.letta.com")
+  .option("--config <path>", "Config file path", "config.yaml")
   .action(async (opts: McpInstallOpts) => {
     if (opts.global && opts.local) {
       console.error("Choose either --global or --local, not both.");
@@ -1724,16 +1654,17 @@ program
     }
 
     const mcpServers = (config["mcpServers"] ?? {}) as Record<string, unknown>;
-    if (mcpServers["letta"]) {
-      console.log("Existing 'letta' entry found — overwriting.");
+    if (mcpServers[MCP_ENTRY_NAME]) {
+      console.log(`Existing '${MCP_ENTRY_NAME}' entry found — overwriting.`);
     }
 
-    const seaLettaTools = path.resolve(process.cwd(), "dist", "letta-tools");
-    const binaryPath = (await pathExists(seaLettaTools)) ? seaLettaTools : undefined;
+    const seaBinary = path.resolve(process.cwd(), "dist", "repo-expert-mcp");
+    const binaryPath = (await pathExists(seaBinary)) ? seaBinary : undefined;
     if (binaryPath) console.log(`Using SEA binary: ${binaryPath}`);
-    const { providerConfig, warnings } = resolveMcpProviderConfig(opts.baseUrl);
+    const repoConfig = await loadOptionalConfig(path.resolve(opts.config));
+    const { providerConfig, warnings } = resolveMcpProviderConfig(repoConfig);
     const entry = generateMcpEntry(mcpServerPath, providerConfig, binaryPath);
-    mcpServers["letta"] = entry;
+    mcpServers[MCP_ENTRY_NAME] = entry;
     config["mcpServers"] = mcpServers;
 
     await fs.writeFile(configFile, JSON.stringify(config, null, 2) + "\n", "utf8");
@@ -1751,6 +1682,7 @@ program
   .command("mcp-check")
   .description("Validate existing MCP server entry in Claude Code config")
   .option("--json", "Output check result as JSON")
+  .option("--config <path>", "Config file path", "config.yaml")
   .action(async (opts: McpCheckOpts) => {
     const fs = await import("node:fs/promises");
     const os = await import("node:os");
@@ -1777,10 +1709,11 @@ program
     }
 
     const mcpServers = (config["mcpServers"] ?? {}) as Record<string, unknown>;
-    const entry = mcpServers["letta"] as Parameters<typeof checkMcpEntry>[0];
-    const seaLettaTools = path.resolve(process.cwd(), "dist", "letta-tools");
-    const binaryPath = (await pathExists(seaLettaTools)) ? seaLettaTools : undefined;
-    const { providerConfig, warnings } = resolveMcpProviderConfig("https://api.letta.com");
+    const entry = mcpServers[MCP_ENTRY_NAME] as Parameters<typeof checkMcpEntry>[0];
+    const seaBinary = path.resolve(process.cwd(), "dist", "repo-expert-mcp");
+    const binaryPath = (await pathExists(seaBinary)) ? seaBinary : undefined;
+    const repoConfig = await loadOptionalConfig(path.resolve(opts.config));
+    const { providerConfig, warnings } = resolveMcpProviderConfig(repoConfig);
     const result = checkMcpEntry(entry, mcpServerPath, providerConfig, binaryPath);
 
     if (opts.json) {
