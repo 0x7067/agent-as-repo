@@ -635,6 +635,85 @@ async function askAgent(
   );
 }
 
+async function buildAskSettings(opts: AskOpts): Promise<AskRuntimeSettings> {
+  const configDefaults = await loadAskConfigDefaults(opts.config);
+  const fastModel = opts.fastModel ?? configDefaults.fastModel;
+  const maxSteps = parseOptionalMaxSteps(opts.maxSteps);
+  if (opts.fast && fastModel === undefined) {
+    throw new CliUserError("--fast requires provider.fast_model in config.yaml or --fast-model");
+  }
+  return {
+    askTimeoutMs: parseOptionalPositiveInt(opts.askTimeoutMs, configDefaults.askTimeoutMs),
+    useFast: Boolean(opts.fast),
+    ...(fastModel === undefined ? {} : { fastModel }),
+    ...(maxSteps === undefined ? {} : { maxSteps }),
+  };
+}
+
+async function runBroadcastAsk(repo: string | undefined, opts: AskOpts): Promise<void> {
+  // When --all is used, the first positional arg is the question
+  const actualQuestion = repo;
+  if (!actualQuestion) {
+    console.error("Usage: repo-expert ask --all <question>");
+    process.exitCode = 1;
+    return;
+  }
+
+  const state = await loadState(STATE_FILE);
+  const entries = Object.entries(state.agents);
+  if (entries.length === 0) {
+    console.error('No agents found. Run "repo-expert setup" to create them.');
+    process.exitCode = 1;
+    return;
+  }
+
+  const askSettings = await buildAskSettings(opts);
+  const askAllConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
+  const provider = createProvider(askAllConfig);
+  const agents = entries.map(([repoName, agent]) => ({ repoName, agentId: agent.agentId }));
+
+  console.log(`Broadcasting to ${String(agents.length)} agents...`);
+  const results = await broadcastAsk(provider, agents, actualQuestion, {
+    timeoutMs: parseIntOrDefault(opts.timeout, BROADCAST_ASK_DEFAULT_TIMEOUT_MS),
+    ...(askSettings.useFast && askSettings.fastModel !== undefined ? { overrideModel: askSettings.fastModel } : {}),
+  });
+
+  for (const result of results) {
+    console.log(`\n--- ${result.repoName} ---`);
+    if (result.error) {
+      console.error(`  Error: ${result.error}`);
+    } else {
+      console.log(result.response);
+    }
+  }
+}
+
+async function runSingleAsk(repo: string | undefined, question: string | undefined, opts: AskOpts): Promise<void> {
+  if (!repo || !question) {
+    console.error("Usage: repo-expert ask <repo> <question>");
+    console.error("       repo-expert ask --all <question>");
+    process.exitCode = 1;
+    return;
+  }
+
+  const state = await loadState(STATE_FILE);
+  const agentInfo = requireAgent(state, repo);
+  if (!agentInfo) return;
+
+  const askConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
+  const provider = createProviderForCommands(askConfig);
+  const askSettings = await buildAskSettings(opts);
+  const stop = startSpinner(`Asking ${repo}...`);
+  try {
+    const answer = await askAgent(provider, agentInfo, question, askSettings);
+    stop();
+    console.log(answer);
+  } catch (error) {
+    stop();
+    throw error;
+  }
+}
+
 function startSpinner(label: string): () => void {
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   let i = 0;
@@ -979,84 +1058,12 @@ program
   .option("--max-steps <n>", "Maximum agent reasoning/tool steps per ask")
   .option("--config <path>", "Optional config file path for ask defaults")
   .action(async (repo: string | undefined, question: string | undefined, opts: AskOpts) => {
-    const buildAskSettings = async (): Promise<AskRuntimeSettings> => {
-      const configDefaults = await loadAskConfigDefaults(opts.config);
-      const fastModel = opts.fastModel ?? configDefaults.fastModel;
-      const maxSteps = parseOptionalMaxSteps(opts.maxSteps);
-      if (opts.fast && fastModel === undefined) {
-        throw new CliUserError("--fast requires provider.fast_model in config.yaml or --fast-model");
-      }
-      return {
-        askTimeoutMs: parseOptionalPositiveInt(opts.askTimeoutMs, configDefaults.askTimeoutMs),
-        useFast: Boolean(opts.fast),
-        ...(fastModel === undefined ? {} : { fastModel }),
-        ...(maxSteps === undefined ? {} : { maxSteps }),
-      };
-    };
-
     if (opts.all) {
-      // When --all is used, the first positional arg is the question
-      const actualQuestion = repo;
-      if (!actualQuestion) {
-        console.error("Usage: repo-expert ask --all <question>");
-        process.exitCode = 1;
-        return;
-      }
-
-      const state = await loadState(STATE_FILE);
-      const entries = Object.entries(state.agents);
-      if (entries.length === 0) {
-        console.error('No agents found. Run "repo-expert setup" to create them.');
-        process.exitCode = 1;
-        return;
-      }
-
-      const askSettings = await buildAskSettings();
-      const askAllConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
-      const provider = createProvider(askAllConfig);
-      const agents = entries.map(([repoName, agent]) => ({ repoName, agentId: agent.agentId }));
-
-      console.log(`Broadcasting to ${String(agents.length)} agents...`);
-      const results = await broadcastAsk(provider, agents, actualQuestion, {
-        timeoutMs: parseIntOrDefault(opts.timeout, BROADCAST_ASK_DEFAULT_TIMEOUT_MS),
-        ...(askSettings.useFast && askSettings.fastModel !== undefined ? { overrideModel: askSettings.fastModel } : {}),
-      });
-
-      for (const result of results) {
-        console.log(`\n--- ${result.repoName} ---`);
-        if (result.error) {
-          console.error(`  Error: ${result.error}`);
-        } else {
-          console.log(result.response);
-        }
-      }
+      await runBroadcastAsk(repo, opts);
       return;
     }
 
-    // Single agent query
-    if (!repo || !question) {
-      console.error("Usage: repo-expert ask <repo> <question>");
-      console.error("       repo-expert ask --all <question>");
-      process.exitCode = 1;
-      return;
-    }
-
-    const state = await loadState(STATE_FILE);
-    const agentInfo = requireAgent(state, repo);
-    if (!agentInfo) return;
-
-    const askConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
-    const provider = createProviderForCommands(askConfig);
-    const askSettings = await buildAskSettings();
-    const stop = startSpinner(`Asking ${repo}...`);
-    try {
-      const answer = await askAgent(provider, agentInfo, question, askSettings);
-      stop();
-      console.log(answer);
-    } catch (error) {
-      stop();
-      throw error;
-    }
+    await runSingleAsk(repo, question, opts);
   });
 
 program

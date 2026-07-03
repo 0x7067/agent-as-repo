@@ -103,6 +103,58 @@ async function writeConfig(cwd: string, repoName: string, repoPath: string): Pro
   await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
 }
 
+async function writeWarnDoctorWorkspace(cwd: string): Promise<string> {
+  const repoDir = path.join(cwd, "repo");
+  await mkdirWorkspaceDir(repoDir, { recursive: true });
+  // Unreachable LLM base_url forces checkLlmEndpoint into a warning (never a failure).
+  const config = [
+    "provider:",
+    "  model: qwen3-coder:30b",
+    "  base_url: http://127.0.0.1:1",
+    "repos:",
+    "  my-app:",
+    `    path: ${repoDir}`,
+    "    description: test repo",
+    "    extensions: [.ts]",
+    "    ignore_dirs: [node_modules, .git]",
+    "    bootstrap_on_create: false",
+  ].join("\n");
+  await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
+  return repoDir;
+}
+
+async function writeAskWorkspace(cwd: string, providerLines: string[]): Promise<void> {
+  const repoDir = path.join(cwd, "repo");
+  await mkdirWorkspaceDir(repoDir, { recursive: true });
+  const config = [
+    "provider:",
+    ...providerLines,
+    "repos:",
+    "  my-app:",
+    `    path: ${repoDir}`,
+    "    description: test repo",
+    "    extensions: [.ts]",
+    "    ignore_dirs: [node_modules, .git]",
+    "    bootstrap_on_create: false",
+  ].join("\n");
+  await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
+  const state = {
+    stateVersion: 2,
+    agents: {
+      "my-app": {
+        agentId: "agent-1",
+        repoName: "my-app",
+        passages: {},
+        lastBootstrap: null,
+        lastSyncCommit: null,
+        lastSyncAt: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    },
+  };
+  await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+}
+
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
@@ -531,26 +583,6 @@ describe("cli contract", () => {
     await expect(fs.access(path.join(cwd, ".repo-expert-state.json"))).resolves.toBeUndefined();
   });
 
-  async function writeWarnDoctorWorkspace(cwd: string): Promise<string> {
-    const repoDir = path.join(cwd, "repo");
-    await mkdirWorkspaceDir(repoDir, { recursive: true });
-    // Unreachable LLM base_url forces checkLlmEndpoint into a warning (never a failure).
-    const config = [
-      "provider:",
-      "  model: qwen3-coder:30b",
-      "  base_url: http://127.0.0.1:1",
-      "repos:",
-      "  my-app:",
-      `    path: ${repoDir}`,
-      "    description: test repo",
-      "    extensions: [.ts]",
-      "    ignore_dirs: [node_modules, .git]",
-      "    bootstrap_on_create: false",
-    ].join("\n");
-    await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
-    return repoDir;
-  }
-
   it("doctor exits 0 on warnings without --strict", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-doctor-warn-");
     await writeWarnDoctorWorkspace(cwd);
@@ -570,38 +602,6 @@ describe("cli contract", () => {
     expect(result.status).toBe(1);
     expect(result.stdout).toContain("WARN");
   });
-
-  async function writeAskWorkspace(cwd: string, providerLines: string[]): Promise<void> {
-    const repoDir = path.join(cwd, "repo");
-    await mkdirWorkspaceDir(repoDir, { recursive: true });
-    const config = [
-      "provider:",
-      ...providerLines,
-      "repos:",
-      "  my-app:",
-      `    path: ${repoDir}`,
-      "    description: test repo",
-      "    extensions: [.ts]",
-      "    ignore_dirs: [node_modules, .git]",
-      "    bootstrap_on_create: false",
-    ].join("\n");
-    await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
-    const state = {
-      stateVersion: 2,
-      agents: {
-        "my-app": {
-          agentId: "agent-1",
-          repoName: "my-app",
-          passages: {},
-          lastBootstrap: null,
-          lastSyncCommit: null,
-          lastSyncAt: null,
-          createdAt: "2026-01-01T00:00:00.000Z",
-        },
-      },
-    };
-    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
-  }
 
   it("errors when ask --fast has no model source", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-ask-fast-error-");
