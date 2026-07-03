@@ -18,13 +18,18 @@ import type { AgentProvider } from "./shell/provider.js";
 import type { AdminPort } from "./ports/admin.js";
 
 const lettaCtor = vi.hoisted(() => vi.fn());
-
-vi.mock("@letta-ai/letta-client", () => ({
-  Letta: class MockLetta {
+const MockLetta = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- mock must be `new`-able for createClient tests
+  return class {
     constructor(opts: unknown) {
       lettaCtor(opts);
     }
-  },
+  };
+});
+
+vi.mock("@letta-ai/letta-client", () => ({
+  Letta: MockLetta,
+  default: MockLetta,
 }));
 
 function makeMockProvider(): AgentProvider {
@@ -777,7 +782,8 @@ describe("Unified MCP tools", () => {
 
 describe("parseNonNegativeInt", () => {
   it("returns fallback when raw is undefined", () => {
-    expect(parseNonNegativeInt(undefined, 1)).toBe(1);
+    const missing: string | undefined = undefined;
+    expect(parseNonNegativeInt(missing, 1)).toBe(1);
   });
 
   it("returns fallback when raw is empty", () => {
@@ -800,7 +806,7 @@ describe("parseNonNegativeInt", () => {
 
 describe("parseModelCsv", () => {
   it("returns empty array when value is undefined", () => {
-    expect(parseModelCsv(undefined)).toEqual([]);
+    expect(parseModelCsv()).toEqual([]);
   });
 
   it("returns empty array when value is empty", () => {
@@ -821,7 +827,7 @@ describe("getVikingRuntimeOptionsFromEnv", () => {
   ] as const;
 
   afterEach(() => {
-    for (const key of keys) delete process.env[key];
+    for (const key of keys) Reflect.deleteProperty(process.env, key);
   });
 
   it("uses defaults when env vars are absent", () => {
@@ -850,7 +856,7 @@ describe("getVikingRuntimeOptionsFromEnv", () => {
 
 describe("createClient", () => {
   afterEach(() => {
-    delete process.env["LETTA_BASE_URL"];
+    Reflect.deleteProperty(process.env, "LETTA_BASE_URL");
     lettaCtor.mockClear();
   });
 
@@ -865,7 +871,7 @@ describe("buildProviderRegistry", () => {
   const envKeys = ["LETTA_API_KEY", "OPENROUTER_API_KEY", "VIKING_URL", "OPENROUTER_MODEL"] as const;
 
   afterEach(() => {
-    for (const key of envKeys) delete process.env[key];
+    for (const key of envKeys) Reflect.deleteProperty(process.env, key);
   });
 
   it("registers letta when LETTA_API_KEY is set", () => {
@@ -925,7 +931,6 @@ describe("selectLegacyRuntime", () => {
   it("falls back to viking when letta is unavailable", () => {
     const selected = selectLegacyRuntime(
       { providers: { viking: runtime }, bootstrapErrors: {} },
-      undefined,
     );
     expect(selected).toBe(runtime);
   });
@@ -934,13 +939,12 @@ describe("selectLegacyRuntime", () => {
     expect(() =>
       selectLegacyRuntime(
         { providers: {}, bootstrapErrors: { letta: "boom", viking: "bust" } },
-        undefined,
       ),
     ).toThrow(/No provider is configured[\s\S]*Bootstrap errors:[\s\S]*letta: boom[\s\S]*viking: bust/);
   });
 
   it("throws without bootstrap suffix when there are no bootstrap errors", () => {
-    expect(() => selectLegacyRuntime({ providers: {}, bootstrapErrors: {} }, undefined)).toThrow(
+    expect(() => selectLegacyRuntime({ providers: {}, bootstrapErrors: {} })).toThrow(
       "No provider is configured. Set LETTA_API_KEY and/or OPENROUTER_API_KEY in the MCP server env.",
     );
   });
@@ -958,8 +962,8 @@ describe("parseNamespacedAgentId edge cases", () => {
 
 describe("main", () => {
   afterEach(() => {
-    delete process.env["LETTA_API_KEY"];
-    delete process.env["PROVIDER_TYPE"];
+    Reflect.deleteProperty(process.env, "LETTA_API_KEY");
+    Reflect.deleteProperty(process.env, "PROVIDER_TYPE");
     vi.restoreAllMocks();
   });
 
