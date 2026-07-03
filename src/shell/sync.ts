@@ -68,7 +68,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
     onProgress,
   } = params;
 
-  const effectiveChunkingStrategy = chunkingStrategy ?? selectChunkingStrategy(chunking ?? "raw");
+  const effectiveChunkingStrategy = chunkingStrategy ?? selectChunkingStrategy(chunking ?? "tree-sitter");
 
   const plan = computeSyncPlan(agent.passages, changedFiles, fullReIndexThreshold);
   const limit = pLimit(concurrency);

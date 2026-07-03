@@ -43,9 +43,9 @@ describe("parseConfig", () => {
     expect(config.defaults.askTimeoutMs).toBe(60_000);
   });
 
-  it("defaults chunking to 'raw' when omitted", () => {
+  it("defaults chunking to 'tree-sitter' when omitted", () => {
     const config = parseConfig(validRaw);
-    expect(config.defaults.chunking).toBe("raw");
+    expect(config.defaults.chunking).toBe("tree-sitter");
   });
 
   it("accepts chunking: tree-sitter and threads it into defaults", () => {

@@ -140,7 +140,7 @@ describe("syncRepo", () => {
     expect(provider.storePassage).toHaveBeenCalledWith("agent-abc", "custom chunk");
   });
 
-  it("defaults to rawTextStrategy when chunkingStrategy is omitted", async () => {
+  it("defaults to rawTextStrategy when chunking is raw", async () => {
     const provider = makeMockProvider();
     const result = await syncRepo({
       provider,
@@ -148,6 +148,7 @@ describe("syncRepo", () => {
       changedFiles: ["src/a.ts"],
       collectFile: (path) => Promise.resolve({ path, content: "const x = 1;", sizeKb: 0.01 }),
       headCommit: "def456",
+      chunking: "raw",
     });
 
     // rawTextStrategy produces a chunk with FILE: prefix

@@ -311,7 +311,7 @@ async function loadConfigSafe(configPath: string): Promise<Config> {
 
 async function prepareChunking(config: Config): Promise<ReturnType<typeof selectChunkingStrategy>> {
   if (config.defaults.chunking === "tree-sitter") {
-    await initTreeSitterChunker(resolveTreeSitterWasmPaths(process.cwd()));
+    await initTreeSitterChunker(resolveTreeSitterWasmPaths());
   }
   return selectChunkingStrategy(config.defaults.chunking);
 }
