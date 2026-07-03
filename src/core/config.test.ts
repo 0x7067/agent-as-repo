@@ -48,18 +48,30 @@ describe("parseConfig", () => {
     expect(config.defaults.chunking).toBe("raw");
   });
 
+  it("rejects chunking: tree-sitter until the strategy is implemented", () => {
+    const raw = {
+      provider: { type: "letta", model: LETTA_MODEL, embedding: LETTA_EMBEDDING },
+      defaults: { chunking: "tree-sitter" },
+      repos: {
+        "my-app": {
+          path: "~/repos/my-app",
+          description: "test",
+          extensions: [".ts"],
+          ignore_dirs: ["node_modules"],
+        },
+      },
+    };
+
+    expect(() => parseConfig(raw)).toThrow(ConfigError);
+    expect(() => parseConfig(raw)).toThrow(/tree-sitter.*not yet implemented/i);
+  });
+
   it("accepts explicit 'raw' chunking in defaults", () => {
     // Catches: z.enum(["raw", ...]) → z.enum(["", ...]) mutation
     // With mutation: "raw" is not in enum ["", "tree-sitter"] → ZodError
     const raw = { ...validRaw, defaults: { chunking: "raw" } };
     const config = parseConfig(raw);
     expect(config.defaults.chunking).toBe("raw");
-  });
-
-  it("accepts 'tree-sitter' chunking override", () => {
-    const raw = { ...validRaw, defaults: { chunking: "tree-sitter" } };
-    const config = parseConfig(raw);
-    expect(config.defaults.chunking).toBe("tree-sitter");
   });
 
   it("applies explicit defaults over built-in defaults", () => {
