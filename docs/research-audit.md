@@ -298,3 +298,17 @@ Keep Letta agents for conversation/reasoning, but upgrade the context pipeline:
 - [Best AI Code Review Tools 2026](https://dev.to/heraldofsolace/the-best-ai-code-review-tools-of-2026-2mb3)
 - [Survey of AI Agent Memory Frameworks](https://www.graphlit.com/blog/survey-of-ai-agent-memory-frameworks)
 - [CodeRAG with Dependency Graph](https://medium.com/@shsax/how-i-built-coderag-with-dependency-graph-using-tree-sitter-0a71867059ae)
+
+---
+
+## 10. Addendum — July 2026 Update
+
+> Appended 2026-07-03. The competitive landscape narrowed further against this project's core "persistent memory" differentiator since the March 2026 audit above:
+
+- **Windsurf** rebranded from Devin Desktop (June 2, 2026, Cognition AI) and ships "Memories"/"Cascade Flows" — persistent codebase context across sessions, built into the IDE, requiring zero external agent infrastructure.
+- **Claude Code** continues to lean on large context windows (1M-token models now available via Letta's own model catalog) plus automatic compaction, reducing many teams' practical need for external retrieval infrastructure.
+- **Letta Cloud pricing is now published and non-trivial for automated workloads**: $20/month base + $0.10/active-agent/month + $0.00015/sec tool execution, plus separate LLM provider costs — model this explicitly before scaling to many repos/teams.
+- **Letta Cloud has had recurring partial outages** (13 incidents, ~6h40m downtime since Jan 2026 per public status history) and community-reported archival-memory timeouts at scale — relevant given this project positions Letta-backed memory as reliable "institutional memory."
+- **Cross-repo agent messaging remains this project's most defensible, still-unreplicated differentiator** — no competing tool above offers it. The recommendation from §8 (prioritize tree-sitter chunking, then repo-expert-specific MCP tools, then PR review integration) still holds and is unaffected by the above.
+
+See `docs/plans/2026-07-03-production-readiness-plan.md` for the concrete remediation plan covering setup, maintainability, security, and this wave of value-add work.
