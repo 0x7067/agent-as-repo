@@ -327,7 +327,10 @@ describe("self-check", () => {
     });
   });
 
-  it("readPackageJson rethrows non-ENOENT errors (e.g. EACCES)", async () => {
+  // Root ignores file permission bits, so chmod(0o000) does not make the file
+  // unreadable when tests run as uid 0 — the read would unexpectedly succeed
+  // and this assertion would fail for reasons unrelated to the code under test.
+  it.skipIf(process.getuid?.() === 0)("readPackageJson rethrows non-ENOENT errors (e.g. EACCES)", async () => {
     await withTempDir("repo-expert-self-check-eacces-", async (dir) => {
       // Write a package.json then make it unreadable
       const pkgPath = path.join(dir, PACKAGE_JSON_CHECK);
