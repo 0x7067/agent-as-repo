@@ -1,14 +1,15 @@
-# Exposing Letta and Viking Agents via MCP
+# Exposing repo-expert Agents via MCP
 
-This repo includes a built-in MCP server (`src/mcp-server.ts`) that exposes 10 tightly-typed tools over stdio, including unified cross-provider tools. No external packages needed beyond `tsx` (dev dependency).
+This repo includes a built-in MCP server (`src/mcp-server.ts`) that exposes 8 tightly-typed tools over stdio. No external packages needed beyond `tsx` (dev dependency).
 
 ## Why this wrapper exists
 
-The official `letta-mcp` server exposes hub-style tools where a single `operation` string param multiplexes many actions, with everything else optional. LLMs routinely get the required params wrong. This wrapper exposes **individual tools with strict schemas** — `agent_id` is required where needed, not optional.
+Hub-style MCP servers expose tools where a single `operation` string param multiplexes many actions, with everything else optional. LLMs routinely get the required params wrong. This wrapper exposes **individual tools with strict schemas** — `agent_id` is required where needed, not optional.
 
 ## Prerequisites
 
-- Letta Cloud API key (`LETTA_API_KEY`) and/or OpenRouter API key (`OPENROUTER_API_KEY`)
+- An [OpenViking](https://github.com/volcengine/OpenViking) server running (default `http://localhost:1933`)
+- An OpenAI-compatible chat endpoint — local [Ollama](https://ollama.com) by default, or a remote endpoint (e.g. OpenRouter) with `LLM_API_KEY` set
 - `tsx` installed (already a dev dependency of this repo)
 
 ## Configure for Claude Code
@@ -18,13 +19,14 @@ Add to `~/.claude.json` under the top-level `mcpServers` key (global, all projec
 ```json
 {
   "mcpServers": {
-    "letta": {
+    "repo-expert": {
       "command": "npx",
       "args": ["tsx", "/path/to/agent-as-repo/src/mcp-server.ts"],
       "timeout": 300,
       "env": {
-        "LETTA_BASE_URL": "https://api.letta.com",
-        "LETTA_API_KEY": "<your key>"
+        "LLM_MODEL": "qwen3-coder:30b",
+        "LLM_BASE_URL": "http://localhost:11434/v1",
+        "VIKING_URL": "http://localhost:1933"
       }
     }
   }
@@ -33,22 +35,23 @@ Add to `~/.claude.json` under the top-level `mcpServers` key (global, all projec
 
 Or per-project in `.mcp.json` (same format inside `"mcpServers"`).
 
+`pnpm repo-expert mcp-install` generates this entry for you (reading `config.yaml` if present) — see below.
+
 ## Configure for Codex
 
 Add to `~/.codex/config.toml`:
 
 ```toml
-[mcp_servers.letta]
+[mcp_servers.repo-expert]
 command = "npx"
 args = ["tsx", "/path/to/agent-as-repo/src/mcp-server.ts"]
 tool_timeout_sec = 300
 
-[mcp_servers.letta.env]
-LETTA_BASE_URL = "https://api.letta.com"
-LETTA_API_KEY = "<your key>"
+[mcp_servers.repo-expert.env]
+LLM_MODEL = "qwen3-coder:30b"
+LLM_BASE_URL = "http://localhost:11434/v1"
+VIKING_URL = "http://localhost:1933"
 ```
-
-Codex uses `LETTA_PASSWORD` as an alias for `LETTA_API_KEY` — the server accepts both.
 
 ## Configure for Cursor
 
@@ -57,119 +60,86 @@ Add to `.cursor/mcp.json` in your project root:
 ```json
 {
   "mcpServers": {
-    "letta": {
+    "repo-expert": {
       "command": "npx",
       "args": ["tsx", "/path/to/agent-as-repo/src/mcp-server.ts"],
       "env": {
-        "LETTA_BASE_URL": "https://api.letta.com",
-        "LETTA_API_KEY": "<your key>"
+        "LLM_MODEL": "qwen3-coder:30b",
+        "LLM_BASE_URL": "http://localhost:11434/v1",
+        "VIKING_URL": "http://localhost:1933"
       }
     }
   }
 }
 ```
 
+## Generate the entry automatically
+
+```bash
+pnpm repo-expert mcp-install  # writes/overwrites the "repo-expert" entry in ~/.claude.json
+pnpm repo-expert mcp-check    # validates the existing entry
+```
+
+Both commands read `config.yaml` (if present) for `model`, `base_url`, and `viking_url`, and pull `LLM_API_KEY`/`VIKING_API_KEY` from the environment.
+
+## Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `LLM_MODEL` | Chat model id (default `qwen3-coder:30b`) |
+| `LLM_BASE_URL` | OpenAI-compatible LLM endpoint (default `http://localhost:11434/v1`) |
+| `LLM_API_KEY` | Optional Bearer token for the LLM endpoint. Needed for remote endpoints (e.g. OpenRouter); local Ollama needs none |
+| `VIKING_URL` | OpenViking server URL (default `http://localhost:1933`) |
+| `VIKING_API_KEY` | Optional OpenViking API key |
+| `LLM_FALLBACK_MODELS` | Comma-separated fallback model list |
+| `LLM_REQUEST_TIMEOUT_MS` | Per-request LLM timeout (default 20000) |
+| `LLM_MAX_RETRIES_PER_MODEL` | Retries per model before falling back (default 1) |
+| `LLM_RETRY_BASE_DELAY_MS` | Base delay for retry backoff (default 600) |
+| `REPO_EXPERT_ASK_TIMEOUT_MS` | Default timeout for `agent_call` when `timeout_ms` isn't passed per-call (default 60000) |
+
 ## Available Tools
 
 | Tool | Params | Description |
 |------|--------|-------------|
-| `agent_list` | _(none)_ | List agents from all configured providers (`letta` + `viking`) with namespaced IDs |
-| `agent_call` | `agent_id`, `content`, `override_model?`, `timeout_ms?`, `max_steps?` | Send message to namespaced `agent_id` (`letta:<id>` or `viking:<id>`) |
-| `letta_list_agents` | _(none)_ | Legacy compatibility list tool (primary provider) |
-| `letta_get_agent` | `agent_id` | Full agent details |
-| `letta_send_message` | `agent_id`, `content`, `override_model?`, `timeout_ms?`, `max_steps?` | Send message, get response |
-| `letta_get_core_memory` | `agent_id` | All memory blocks |
-| `letta_search_archival` | `agent_id`, `query`, `top_k?` | Semantic passage search |
-| `letta_insert_passage` | `agent_id`, `text` | Insert into archival memory |
-| `letta_delete_passage` | `agent_id`, `passage_id` | Delete a passage |
-| `letta_update_block` | `agent_id`, `label`, `value` | Update a memory block |
+| `agent_list` | _(none)_ | List all repo-expert agents |
+| `agent_get` | `agent_id` | Full agent details including memory blocks |
+| `agent_call` | `agent_id`, `content`, `override_model?`, `timeout_ms?`, `max_steps?` | Send a message to an agent and get the response |
+| `agent_get_core_memory` | `agent_id` | Get all memory blocks (`{label, value, limit}`) for an agent |
+| `agent_search_archival` | `agent_id`, `query`, `top_k?` | Semantic search over archival passages |
+| `agent_insert_passage` | `agent_id`, `text` | Insert a passage into archival memory |
+| `agent_delete_passage` | `agent_id`, `passage_id` | Delete a passage. To update, delete then insert |
+| `agent_update_block` | `agent_id`, `label`, `value` | Overwrite a memory block's value |
 
-## Bring Your Own Key (BYOK)
-
-By default, agents use Letta-managed model providers (e.g. `openai/gpt-4.1`), which are billed through your Letta Cloud subscription. You can register your own LLM provider API keys in Letta Cloud so that requests are billed directly by the provider instead.
-
-### Register a provider key
-
-1. Go to the [Letta Cloud models page](https://app.letta.com/models)
-2. Click "Add your own LLM API keys" and connect a provider (OpenAI, Anthropic, Z.ai, ChatGPT Plus, etc.)
-3. Note the provider handle that appears (e.g. `chatgpt-plus-pro`, `lc-zai`)
-
-### Use BYOK models in config.yaml
-
-Set the `model` field to a handle from your BYOK provider, not the managed provider:
-
-```yaml
-letta:
-  # Letta-managed (billed through Letta):
-  # model: openai/gpt-4.1
-
-  # BYOK (billed directly by provider):
-  model: chatgpt-plus-pro/gpt-5.1
-```
-
-Run `repo-expert setup` to create new agents with the BYOK model. Existing agents keep their old model until you re-create them or update via the Letta API.
-
-Not every model listed under a BYOK provider will work — some providers only support a subset. List the models available for your provider before choosing:
-
-```bash
-# List models for a specific BYOK provider (replace with your handle)
-PROVIDER=chatgpt-plus-pro
-curl -s -H "Authorization: Bearer $LETTA_API_KEY" \
-  "https://api.letta.com/v1/models" \
-  | python3 -c "
-import json, sys, os
-prefix = os.environ['PROVIDER'] + '/'
-for m in json.load(sys.stdin):
-    h = m.get('handle', '')
-    if h.startswith(prefix):
-        print(h)
-"
-```
-
-Replace `chatgpt-plus-pro` with your provider handle (e.g. `lc-zai`). Models under `openai/`, `anthropic/`, etc. (without your provider prefix) use Letta's managed keys and are billed through Letta.
+Call `agent_list` first to discover agent IDs, then pass an `agent_id` to the other tools. Agent IDs are plain repo names — there is no provider namespacing.
 
 ## Verify
 
 ```bash
 # MCP handshake
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0.1.0"}}}' \
-  | LETTA_BASE_URL=https://api.letta.com LETTA_API_KEY=<your-key> npx tsx src/mcp-server.ts
+  | npx tsx src/mcp-server.ts
 ```
 
-Should return `serverInfo: { name: "letta-tools" }` with 10 tools.
+Should return `serverInfo: { name: "repo-expert-mcp" }` with 8 tools.
 
 ## Troubleshooting
 
-### `404 {"detail":"Not Found"}`
+### Connection refused to OpenViking or the LLM endpoint
 
-**Most likely: double `/v1` in the base URL.** The `@letta-ai/letta-client` SDK appends `/v1` to all requests automatically. If you set `LETTA_BASE_URL=https://api.letta.com/v1`, the actual requests hit `https://api.letta.com/v1/v1/agents` → 404.
-
-**Fix:** Use `https://api.letta.com` (no `/v1` suffix).
-
-Quick check:
-```bash
-# This should return 200
-curl -s -o /dev/null -w "%{http_code}" \
-  -H "Authorization: Bearer <your-key>" \
-  "https://api.letta.com/v1/agents"
-
-# This returns 404 (double /v1)
-curl -s -o /dev/null -w "%{http_code}" \
-  -H "Authorization: Bearer <your-key>" \
-  "https://api.letta.com/v1/v1/agents"
-```
+- Confirm OpenViking is running and reachable at `VIKING_URL` (default `http://localhost:1933`)
+- Confirm Ollama (or your configured endpoint) is running and reachable at `LLM_BASE_URL` (default `http://localhost:11434/v1`), and that the model in `LLM_MODEL` has been pulled
+- Run `pnpm repo-expert doctor` for a full connectivity + config check
 
 ### "Authentication failed" or 401
 
-- Verify `LETTA_API_KEY` is set in the `env` block of your MCP config (not just in `.env`)
-- MCP servers run as separate processes — they don't inherit your shell's `.env` file
-- For Codex, the env var can also be named `LETTA_PASSWORD` (the server accepts both)
+- If you're pointed at a remote endpoint (e.g. OpenRouter), verify `LLM_API_KEY` is set in the `env` block of your MCP config (not just in `.env`) — MCP servers run as separate processes and don't inherit your shell's `.env` file
+- Local Ollama requires no API key; a 401 there usually means the wrong `LLM_BASE_URL`
 
 ### Server fails to start / "Failed to reconnect"
 
 - Use `npx tsx`, not bare `tsx`. Bare `tsx` may not be on `PATH` in the MCP subprocess environment
 - Verify the path to `src/mcp-server.ts` is absolute
-- Test manually: `LETTA_BASE_URL=https://api.letta.com LETTA_API_KEY=<key> npx tsx src/mcp-server.ts` — should hang waiting for stdin (that's correct)
+- Test manually: `npx tsx src/mcp-server.ts` — should hang waiting for stdin (that's correct)
 
 ### Agents not found
 
@@ -177,7 +147,7 @@ Run `pnpm repo-expert list` to confirm agents exist, or use the MCP handshake ab
 
 ### Timeouts
 
-Letta API calls can take 30s+ for complex agent responses. Set `timeout: 300` (Claude Code) or `tool_timeout_sec = 300` (Codex).
+Agent responses can take 30s+ for complex requests. Set `timeout: 300` (Claude Code) or `tool_timeout_sec = 300` (Codex).
 
 ### Per-project vs global config
 

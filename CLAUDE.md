@@ -5,7 +5,7 @@ Global `~/.claude/CLAUDE.md` applies (think before coding, simplicity, surgical 
 ## Architecture: Functional Core, Imperative Shell
 
 - All business logic as pure functions — no I/O, no side effects, deterministic input/output
-- Side effects (fs, network, Letta SDK, env vars) live in a thin shell at the boundary
+- Side effects (fs, network, OpenViking/LLM HTTP calls, env vars) live in a thin shell at the boundary
 - When unsure where code belongs: "Can this function run without touching the outside world?" Yes → core. No → push the effect outward.
 - Core modules import nothing from the shell. The shell imports from the core.
 - `src/core/` for pure logic, `src/shell/` for I/O and integration
@@ -19,7 +19,7 @@ Global `~/.claude/CLAUDE.md` applies (think before coding, simplicity, surgical 
 - Test framework: vitest
 - Colocated test files: `foo.ts` → `foo.test.ts` (same directory)
 - Core tests: no mocks needed (pure functions)
-- Shell tests: mock external boundaries (Letta SDK, filesystem)
+- Shell tests: mock external boundaries (OpenViking HTTP client, LLM endpoint, filesystem)
 
 ## Project Conventions
 
@@ -29,13 +29,12 @@ Global `~/.claude/CLAUDE.md` applies (think before coding, simplicity, surgical 
 - Run MCP server: `pnpm mcp-server` (or `tsx src/mcp-server.ts`)
 - Run tests: `pnpm test` (vitest)
 - TypeScript strict mode, ES2022 target
-- Letta SDK import: `import { Letta } from "@letta-ai/letta-client"` (not LettaClient)
 - Zod import: `import { z } from "zod/v4"` (not `"zod"` — project uses Zod v4 path)
-- Always attach `archival_memory_search` tool explicitly to agents
+- `archival_memory_search` and `memory_replace` are defined by the Viking send loop itself — don't redefine them elsewhere
 - Chunk files at ~2KB, split on `\n\n`, prefix with `FILE: <path>`
-- Never override Letta system prompt — use `persona` block for agent instructions
+- Agent instructions live in the `persona` block — the Viking provider injects it into the system prompt; don't override the system prompt directly
 - State persistence: `.repo-expert-state.json` (gitignored)
-- API key: `LETTA_API_KEY` in `.env`
+- API keys: `LLM_API_KEY` in `.env` (optional; only needed for remote LLM endpoints like OpenRouter — local Ollama needs none), `VIKING_API_KEY` in `.env` (optional)
 - Shell commands: always `execFileSync` with arg arrays, never `execSync` with template literals
 - Any code path producing a file list must filter through `shouldIncludeFile` (extensions, ignoreDirs)
 - Guard entry-point `main()` calls: `if (process.argv[1] === fileURLToPath(import.meta.url))`
@@ -45,7 +44,8 @@ Global `~/.claude/CLAUDE.md` applies (think before coding, simplicity, surgical 
 
 - `src/cli.ts` — CLI entry point (commander-based, all subcommands)
 - `src/mcp-server.ts` — MCP server entry point
-- `src/shell/provider.ts` — `AgentProvider` interface (all Letta SDK calls go through this)
+- `src/ports/agent-provider.ts` — `AgentProvider` interface (all provider calls go through this)
+- `src/shell/llm-client.ts` — OpenAI-compatible chat-completions client + tool-calling loop
 - `src/core/types.ts` — Shared type definitions
 - `config.yaml` — Repo configuration (gitignored)
 
@@ -55,5 +55,5 @@ Global `~/.claude/CLAUDE.md` applies (think before coding, simplicity, surgical 
 2. No business logic with side effects — pure functions in core
 3. No mocks in core tests
 4. Every new function has a colocated test
-5. Letta SDK patterns match `memory/letta-sdk.md` signatures
+5. LLM/Viking calls match the conventions in `src/shell/llm-client.ts` and `src/shell/viking-provider.ts` (no ad hoc HTTP calls elsewhere)
 6. No duplicated rules from global CLAUDE.md

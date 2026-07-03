@@ -2,6 +2,14 @@
 
 Persistent AI agents that act as long-term memory for your git repositories. Unlike IDE tools that forget between sessions, these agents accumulate knowledge over time and answer questions about your codebase instantly.
 
+Single path: [OpenViking](https://github.com/volcengine/OpenViking) for storage/retrieval + any OpenAI-compatible chat endpoint, defaulting to a local [Ollama](https://ollama.com) server. Everything runs locally by default; point `base_url` at a remote endpoint (e.g. OpenRouter) if you'd rather not run a local model.
+
+## Prerequisites
+
+- [Ollama](https://ollama.com) running locally with a chat model pulled (default config expects `qwen3-coder:30b`; pull whatever model you configure, e.g. `ollama pull qwen3-coder:30b`)
+- An [OpenViking](https://github.com/volcengine/OpenViking) server running on `localhost:1933` (default), with an embedding backend configured in `~/.openviking/ov.conf`
+- Node.js and pnpm
+
 ## Quickstart
 
 1. **Install dependencies**
@@ -9,10 +17,11 @@ Persistent AI agents that act as long-term memory for your git repositories. Unl
    pnpm install
    ```
 
-2. **Configure API key and generate `config.yaml`**
+2. **Generate `config.yaml`**
    ```bash
    pnpm repo-expert init
    ```
+   Prompts for a chat model and LLM base URL (both default to local Ollama), then scans a repo and writes `config.yaml`.
 
 3. **Create agents and index your repo**
    ```bash
@@ -26,56 +35,47 @@ Persistent AI agents that act as long-term memory for your git repositories. Unl
 
 ## MCP Server
 
-Expose Letta and Viking agents to Claude Code, Cursor, or Codex via MCP (10 typed tools, including unified `agent_list`/`agent_call`). See [docs/mcp-setup.md](docs/mcp-setup.md) for configuration.
+Expose agents to Claude Code, Cursor, or Codex via MCP (8 typed tools: `agent_list`, `agent_get`, `agent_call`, `agent_get_core_memory`, `agent_search_archival`, `agent_insert_passage`, `agent_delete_passage`, `agent_update_block`). See [docs/mcp-setup.md](docs/mcp-setup.md) for configuration.
 
 ```bash
-pnpm repo-expert mcp-install  # writes entry to ~/.claude.json
+pnpm repo-expert mcp-install  # writes the "repo-expert" entry to ~/.claude.json
 ```
 
 ## Command Reference
 
 | Command | Description |
 |---------|-------------|
-| `init` | Interactive setup: configure API key, scan a repo, generate `config.yaml` |
+| `init` | Interactive setup: pick model + LLM base URL, scan a repo, generate `config.yaml` |
 | `setup [--repo] [--reindex]` | Create agents from `config.yaml`, load file passages, bootstrap |
 | `ask <repo> <question>` | Ask a single agent a question |
 | `ask --all <question>` | Broadcast question to all agents and collect responses |
 | `sync [--repo] [--full]` | Sync file changes to agents via `git diff` |
-| `reconcile [--repo] [--fix]` | Compare local passage state vs Letta, detect and fix drift |
-| `list [--json]` | List all agents with passage counts |
+| `reconcile [--repo] [--fix]` | Compare local passage state vs the provider, detect and fix drift |
+| `list [--json] [--live]` | List all agents with passage counts |
 | `status [--repo]` | Show agent memory stats and health |
 | `export [--repo]` | Export agent memory to markdown |
 | `onboard <repo>` | Guided codebase walkthrough for new developers |
-| `destroy [--repo] [--force]` | Delete agents from Letta Cloud |
-| `sleeptime [--repo]` | Enable sleep-time memory consolidation on existing agents |
-| `watch [--repo] [--interval]` | Poll git HEAD and auto-sync on new commits |
+| `destroy [--repo] [--force] [--dry-run]` | Delete agents |
+| `watch [--repo] [--interval] [--debounce]` | Poll git HEAD and auto-sync on new commits |
 | `install-daemon` | Install launchd daemon for auto-sync on macOS |
 | `uninstall-daemon` | Remove the launchd watch daemon |
 | `mcp-install [--global\|--local]` | Write MCP server entry to Claude Code config |
-| `mcp-check` | Validate existing MCP server entry |
-| `config lint` | Validate `config.yaml` structure and semantics |
-| `doctor [--fix]` | Check API key, config, repo paths, git, state consistency |
-| `self-check` | Check local runtime/toolchain health (Node, pnpm, dependencies) |
+| `mcp-check [--json]` | Validate existing MCP server entry |
+| `config lint [--json]` | Validate `config.yaml` structure and semantics |
+| `doctor [--fix] [--json]` | Check config, viking/LLM endpoint reachability, repo paths, git, state consistency |
+| `self-check [--json]` | Check local runtime/toolchain health (Node, pnpm, dependencies) |
 | `completion <shell>` | Print shell completion script (bash, zsh, fish) |
 
 ## Configuration
 
-Copy `config.example.yaml` to `config.yaml` and set provider-specific credentials in `.env`:
-- Letta mode: `LETTA_API_KEY`
-- Viking mode: `OPENROUTER_API_KEY` (optional `VIKING_URL`, `VIKING_API_KEY`)
-  - Requires a running [OpenViking](https://github.com/volcengine/OpenViking) server (default: `localhost:1933`)
-  - OpenViking needs an embedding backend configured in `~/.openviking/ov.conf` (e.g., Ollama with `nomic-embed-text`)
+Copy `config.example.yaml` to `config.yaml`:
 
 ```yaml
 provider:
-  type: letta
-  model: openai/gpt-4.1
-  embedding: openai/text-embedding-3-small
-
-# provider:
-#   type: viking
-#   openrouter_model: openai/gpt-4o-mini
-#   viking_url: http://localhost:1933
+  model: qwen3-coder:30b                  # chat model id as the endpoint knows it
+  # base_url: http://localhost:11434/v1   # optional; default local Ollama
+  # fallback_models: []                   # optional; tried in order after `model`
+  # viking_url: http://localhost:1933     # optional; default local OpenViking
 
 repos:
   my-app:
@@ -85,13 +85,36 @@ repos:
     ignore_dirs: [node_modules, .git, dist]
 ```
 
+To use a remote endpoint (e.g. OpenRouter) instead of local Ollama, set `base_url` and provide `LLM_API_KEY` in `.env`:
+
+```yaml
+provider:
+  model: openai/gpt-4o-mini
+  base_url: https://openrouter.ai/api/v1
+```
+
+OpenViking owns embeddings for archival search — configure the embedding backend in `~/.openviking/ov.conf` (typically delegating to Ollama, e.g. `nomic-embed-text`), not in `config.yaml`.
+
+### Environment variables (`.env`)
+
+| Variable | Purpose |
+|---|---|
+| `LLM_API_KEY` | Optional Bearer token for the LLM endpoint. Required in practice only for remote endpoints (e.g. OpenRouter); local Ollama needs none. |
+| `VIKING_API_KEY` | Optional API key for the OpenViking server. |
+| `LLM_REQUEST_TIMEOUT_MS` | Per-request timeout for LLM calls (default 20000). |
+| `LLM_MAX_RETRIES_PER_MODEL` | Retries per model before falling back (default 1). |
+| `LLM_RETRY_BASE_DELAY_MS` | Base delay for retry backoff (default 600). |
+| `LLM_FALLBACK_MODELS` | Comma-separated fallback model list (MCP server only; CLI uses `config.provider.fallback_models`). |
+| `REPO_EXPERT_DEBUG_LLM` | Set to log LLM request/response debug info. |
+| `REPO_EXPERT_ASK_TIMEOUT_MS` | Timeout for MCP `agent_call` when not overridden per-call. |
+
 ## Architecture
 
 See [docs/architecture.md](docs/architecture.md) for the full architecture diagram and design decisions.
 
 Key points:
 - **Functional core, imperative shell** — `src/core/` contains pure functions, `src/shell/` handles all I/O
-- **Provider abstraction** — `AgentProvider` interface decouples business logic from the Letta SDK
+- **Provider abstraction** — `AgentProvider` interface (`src/ports/agent-provider.ts`) decouples business logic from the OpenViking/LLM implementation
 - **Three-tier memory** — core (always in context), archival (vector-searchable source files), recall (conversation history)
 - **Symbol-aware chunking** — `chunking: tree-sitter` (default) chunks TypeScript/JavaScript at function/class boundaries; set `chunking: raw` for legacy ~2KB text splits
 - **Incremental sync** — `git diff` detects changes; only affected passages are re-indexed
@@ -103,12 +126,11 @@ pnpm install              # install dependencies
 pnpm test                 # run all tests (vitest)
 pnpm repo-expert --help   # CLI entry point
 pnpm mcp-server           # start MCP server (stdio)
-pnpm provider:parity-stress  # parity gate + live stress report (requires provider credentials)
 ```
 
 Conventions:
 - TypeScript strict mode, ES2022 target
 - TDD: write failing tests first, then implement
 - Core modules (`src/core/`) have no side effects and require no mocks in tests
-- Shell modules (`src/shell/`) mock external boundaries (Letta SDK, filesystem)
+- Shell modules (`src/shell/`) mock external boundaries (OpenViking HTTP client, LLM endpoint, filesystem)
 - Package manager: pnpm (never npm or yarn)

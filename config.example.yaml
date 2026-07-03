@@ -1,22 +1,27 @@
 # Repo Expert Agents — Configuration
 # Copy to config.yaml and customize for your repos.
-# Provider setup:
-# Letta mode: set LETTA_API_KEY in .env
-# Viking mode: set OPENROUTER_API_KEY in .env (and optional VIKING_URL / VIKING_API_KEY)
+#
+# Single provider path: OpenViking for storage/retrieval + any OpenAI-compatible
+# chat endpoint. Defaults to a local Ollama server — no API key required.
 
 provider:
-  type: letta
-  model: openai/gpt-4.1
-  # fast_model: openai/gpt-4.1-mini   # Optional model for ask --fast flag
-  embedding: openai/text-embedding-3-small
+  model: qwen3-coder:30b                  # Chat model id, as the endpoint knows it
+  # base_url: http://localhost:11434/v1   # OpenAI-compatible LLM endpoint. Default: local Ollama.
+  # fallback_models: []                   # Tried in order if `model` fails (e.g. rate limit, timeout)
+  # viking_url: http://localhost:1933     # OpenViking server. Default: local OpenViking.
 
+# To point at a remote/cloud endpoint instead of local Ollama (e.g. OpenRouter):
+#
 # provider:
-#   type: viking
-#   openrouter_model: openai/gpt-4o-mini
-#   viking_url: http://localhost:1933
-#   # Note: Embedding model is configured in OpenViking's ov.conf, not here.
-#   # OpenViking typically delegates to Ollama (e.g., nomic-embed-text).
-#   # See: https://github.com/volcengine/OpenViking
+#   model: openai/gpt-4o-mini
+#   base_url: https://openrouter.ai/api/v1
+#
+# Then set LLM_API_KEY in .env — it's sent as an `Authorization: Bearer` header.
+# Local Ollama needs no key, so LLM_API_KEY can stay unset for the default setup.
+#
+# Note: OpenViking owns embeddings for archival search. Configure the embedding
+# backend in ~/.openviking/ov.conf (OpenViking typically delegates to Ollama,
+# e.g. nomic-embed-text) — there is no `embedding` field here.
 
 # Optional global defaults (all can be overridden per-repo)
 defaults:
@@ -26,8 +31,8 @@ defaults:
   # ask_timeout_ms: 60000      # Default timeout for single-agent ask requests
   chunking: tree-sitter       # Default: symbol-boundary chunking for .ts/.tsx/.js/.jsx
                                # Use "raw" for ~2KB text splits; other file types fall back to raw
-  # tools:                    # Letta tools for all agents (per-repo overrides)
-  #   - send_message_to_agents_matching_tags  # Cross-agent broadcast
+  # tools:                    # Additional tool names for all agents (per-repo overrides)
+  #   - archival_memory_search
 
 repos:
   # Each key becomes the agent name (repo-expert-<key>)
