@@ -90,9 +90,8 @@ async function chmodWorkspaceFile(filePath: string, mode: number): Promise<void>
 
 async function writeConfig(cwd: string, repoName: string, repoPath: string): Promise<void> {
   const config = [
-    "letta:",
-    "  model: openai/gpt-4.1",
-    "  embedding: openai/text-embedding-3-small",
+    "provider:",
+    "  model: qwen3-coder:30b",
     "repos:",
     `  ${repoName}:`,
     `    path: ${repoPath}`,
@@ -126,7 +125,7 @@ describe("cli contract", () => {
       -h, --help display help for command
 
       Commands:
-      init [options] Interactive setup: configure provider/API key, scan a repo, generate config.yaml
+      init [options] Interactive setup: pick model + LLM endpoint, scan a repo, generate config.yaml
       doctor [options] Check setup: API key, config, repo paths, git, state consistency
       self-check [options] Check local runtime/toolchain health (Node, pnpm, dependencies)
       setup [options] Create agents from config.yaml
@@ -138,12 +137,11 @@ describe("cli contract", () => {
       export [options] Export agent memory to markdown
       onboard <repo> Guided codebase walkthrough for new developers
       destroy [options] Delete agents
-      reconcile [options] Compare local passage state against Letta's actual state and report drift
-      sleeptime [options] Enable sleep-time memory consolidation on existing agents
+      reconcile [options] Compare local passage state against the provider's actual state and report drift
       watch [options] Watch repos and auto-sync on repo changes
       install-daemon [options] Install launchd daemon for auto-sync on macOS
       uninstall-daemon Uninstall the launchd watch daemon
-      mcp-install [options] Add MCP server entry to Claude Code config (provider-aware)
+      mcp-install [options] Add the repo-expert MCP server entry to Claude Code config
       mcp-check [options] Validate existing MCP server entry in Claude Code config
       completion [options] <shell> Print shell completion script (bash, zsh, fish)
       help [command] display help for command
@@ -203,12 +201,12 @@ describe("cli contract", () => {
       {
         args: ["--no-input", "init"] as string[],
         expectedStatus: 1,
-        expectedStderr: "API key is required in non-interactive mode.",
+        expectedStderr: "Repository path is required.",
       },
     ];
 
     for (const testCase of cases) {
-      const result = runCli(testCase.args, cwd, { LETTA_API_KEY: "" });
+      const result = runCli(testCase.args, cwd, { LLM_API_KEY: "" });
       expect(result.status).toBe(testCase.expectedStatus);
       expect(result.stderr).toContain(testCase.expectedStderr ?? "");
       expect(result.stdout).toContain(testCase.expectedStdout ?? "");
@@ -282,10 +280,12 @@ describe("cli contract", () => {
   it("supports mcp-install --local and writes config in current directory", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-local-");
     const home = await makeWorkspace("repo-expert-cli-home-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
 
     const result = runCli(["mcp-install", "--local"], cwd, {
       HOME: home,
-      LETTA_API_KEY: "test-key",
     });
 
     expect(result.status).toBe(0);
@@ -294,48 +294,47 @@ describe("cli contract", () => {
     const localConfigPath = path.join(cwd, ".claude.json");
     const homeConfigPath = path.join(home, ".claude.json");
     const localRaw = await readWorkspaceFile(localConfigPath, "utf8");
-    const localConfig = JSON.parse(localRaw) as { mcpServers?: { letta?: unknown } };
+    const localConfig = JSON.parse(localRaw) as { mcpServers?: { "repo-expert"?: { env?: Record<string, string> } } };
 
     await expect(fs.access(homeConfigPath)).rejects.toThrow();
-    expect(localConfig.mcpServers?.letta).toBeDefined();
+    expect(localConfig.mcpServers?.["repo-expert"]).toBeDefined();
+    expect(localConfig.mcpServers?.["repo-expert"]?.env?.LLM_MODEL).toBe("qwen3-coder:30b");
   });
 
-  it("writes Viking MCP env from environment variables", async () => {
-    const cwd = await makeWorkspace("repo-expert-cli-local-viking-");
-    const home = await makeWorkspace("repo-expert-cli-home-viking-");
+  it("writes LLM MCP env from environment variables when no config is present", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-local-llm-");
+    const home = await makeWorkspace("repo-expert-cli-home-llm-");
 
     const result = runCli(["mcp-install", "--local"], cwd, {
       HOME: home,
-      OPENROUTER_API_KEY: "or-test-key",
-      LETTA_API_KEY: "",
+      LLM_MODEL: "llama3.1:8b",
+      LLM_API_KEY: "sk-test-key",
     });
 
     expect(result.status).toBe(0);
     const localRaw = await readWorkspaceFile(path.join(cwd, ".claude.json"), "utf8");
     const localConfig = JSON.parse(localRaw) as {
-      mcpServers?: { letta?: { env?: Record<string, string> } };
+      mcpServers?: { "repo-expert"?: { env?: Record<string, string> } };
     };
-    expect(localConfig.mcpServers?.letta?.env?.PROVIDER_TYPE).toBe("viking");
-    expect(localConfig.mcpServers?.letta?.env?.OPENROUTER_API_KEY).toBe("or-test-key");
-    expect(localConfig.mcpServers?.letta?.env?.OPENROUTER_MODEL).toBe("openai/gpt-4o-mini");
+    expect(localConfig.mcpServers?.["repo-expert"]?.env?.LLM_MODEL).toBe("llama3.1:8b");
+    expect(localConfig.mcpServers?.["repo-expert"]?.env?.LLM_API_KEY).toBe("sk-test-key");
+    expect(localConfig.mcpServers?.["repo-expert"]?.env?.PROVIDER_TYPE).toBeUndefined();
   });
 
-  it("writes MCP config and warns when no provider keys are present", async () => {
+  it("writes MCP config and warns when config.yaml is missing", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-local-mcp-warn-");
     const home = await makeWorkspace("repo-expert-cli-home-mcp-warn-");
 
     const result = runCli(["mcp-install", "--local"], cwd, {
       HOME: home,
-      LETTA_API_KEY: "",
-      OPENROUTER_API_KEY: "",
     });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Warnings:");
-    expect(result.stdout).toContain("No provider key found");
+    expect(result.stdout).toContain("config.yaml not found");
     const localRaw = await readWorkspaceFile(path.join(cwd, ".claude.json"), "utf8");
-    const localConfig = JSON.parse(localRaw) as { mcpServers?: { letta?: unknown } };
-    expect(localConfig.mcpServers?.letta).toBeDefined();
+    const localConfig = JSON.parse(localRaw) as { mcpServers?: { "repo-expert"?: unknown } };
+    expect(localConfig.mcpServers?.["repo-expert"]).toBeDefined();
   });
 
   it("shows actionable error without stack trace when mcp-check config is malformed", async () => {
@@ -464,10 +463,9 @@ describe("cli contract", () => {
 
   it("supports doctor --fix", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-doctor-fix-");
-    await writeWorkspaceFile(path.join(cwd, "config.example.yaml"), "letta:\n  model: m\n  embedding: e\nrepos: {}\n", "utf8");
+    await writeWorkspaceFile(path.join(cwd, "config.example.yaml"), "provider:\n  model: qwen3-coder:30b\nrepos: {}\n", "utf8");
 
     const result = runCli(["doctor", "--fix", "--json"], cwd, {
-      LETTA_API_KEY: "test-key",
       REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
     });
     expect(result.status).toBe(0);
@@ -538,9 +536,8 @@ describe("cli contract", () => {
   it("reports config lint failures in JSON", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-config-lint-fail-");
     const invalidConfig = [
-      "letta:",
-      "  model: openai/gpt-4.1",
-      "  embedding: openai/text-embedding-3-small",
+      "provider:",
+      "  model: qwen3-coder:30b",
       "repos:",
       "  bad-repo:",
       "    path: /tmp/bad-repo",
