@@ -17,10 +17,11 @@ import { resolveOpenVikingBlocksDir } from "./shell/openviking-paths.js";
 import type { VikingRuntimeOptions } from "./shell/viking-provider.js";
 
 // Accept LETTA_PASSWORD as alias for LETTA_API_KEY (Codex compat)
-// Stryker disable next-line ConditionalExpression,LogicalOperator,StringLiteral -- module-level env setup, untestable in unit tests
+/* Stryker disable BlockStatement,ConditionalExpression,LogicalOperator,StringLiteral,BooleanLiteral -- import-time env alias */
 if (process.env["LETTA_PASSWORD"] && !process.env["LETTA_API_KEY"]) {
   process.env["LETTA_API_KEY"] = process.env["LETTA_PASSWORD"];
 }
+/* Stryker restore BlockStatement,ConditionalExpression,LogicalOperator,StringLiteral,BooleanLiteral */
 
 const ASK_DEFAULT_TIMEOUT_MS = 60_000;
 const PROVIDERS = ["letta", "viking"] as const;
@@ -135,7 +136,7 @@ export function buildProviderRegistry(): ProviderRegistry {
   return { providers, bootstrapErrors };
 }
 
-function selectLegacyRuntime(registry: ProviderRegistry, preferredRaw: string | undefined): ProviderRuntime {
+export function selectLegacyRuntime(registry: ProviderRegistry, preferredRaw: string | undefined): ProviderRuntime {
   const preferred = parseProviderName(preferredRaw);
   if (preferred) {
     const runtime = registry.providers[preferred];
@@ -165,14 +166,14 @@ export function parseNamespacedAgentId(raw: string): ParsedNamespacedAgentId {
   return { provider, agentId: raw.slice(separator + 1) };
 }
 
-function parseNonNegativeInt(raw: string | undefined, fallback: number): number {
+export function parseNonNegativeInt(raw: string | undefined, fallback: number): number {
   if (!raw) return fallback;
   const parsed = Number.parseInt(raw, 10);
   if (Number.isNaN(parsed) || parsed < 0) return fallback;
   return parsed;
 }
 
-function parseModelCsv(value: string | undefined): string[] {
+export function parseModelCsv(value: string | undefined): string[] {
   if (!value) return [];
   return value
     .split(",")
@@ -180,7 +181,7 @@ function parseModelCsv(value: string | undefined): string[] {
     .filter((item) => item.length > 0);
 }
 
-function getVikingRuntimeOptionsFromEnv(): VikingRuntimeOptions {
+export function getVikingRuntimeOptionsFromEnv(): VikingRuntimeOptions {
   return {
     requestTimeoutMs: parsePositiveInt(process.env["OPENROUTER_REQUEST_TIMEOUT_MS"], 20_000),
     maxRetriesPerModel: parseNonNegativeInt(process.env["OPENROUTER_MAX_RETRIES_PER_MODEL"], 1),
@@ -423,11 +424,12 @@ export async function main(): Promise<void> {
   await server.connect(transport);
 }
 
-// Stryker disable next-line ConditionalExpression,EqualityOperator -- entry-point guard is untestable in unit tests
+// Stryker disable BlockStatement,ConditionalExpression,EqualityOperator,StringLiteral -- entry-point guard is untestable in unit tests
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch((error: unknown) => {
     process.stderr.write(`letta-tools MCP server error: ${errorMessage(error)}\n`);
     process.exitCode = 1;
   });
 }
+// Stryker restore BlockStatement,ConditionalExpression,EqualityOperator,StringLiteral
 /* eslint-enable max-lines */
