@@ -1,14 +1,14 @@
 import { FILE_PREFIX, type Chunk, type ChunkingStrategy, type FileInfo } from "./types.js";
+import { treeSitterStrategy } from "./tree-sitter-chunker.js";
 
-export function chunkFile(
-  filePath: string,
+export function chunkWithHeader(
+  header: string,
   content: string,
+  sourcePath: string,
   maxChars = 2000,
 ): Chunk[] {
-  // Stryker disable next-line MethodExpression,ConditionalExpression: equivalent — whitespace-only content produces current.trim() === header after the loop (no chunk pushed), making this guard redundant
   if (!content.trim()) return [];
 
-  const header = `${FILE_PREFIX}${filePath}`;
   const sections = content.split(/\n{2,}/);
   const chunks: Chunk[] = [];
   let current = `${header}\n\n`;
@@ -18,20 +18,31 @@ export function chunkFile(
       current.length + section.length > maxChars &&
       current.length > header.length + 2
     ) {
-      chunks.push({ text: current.trim(), sourcePath: filePath });
+      chunks.push({ text: current.trim(), sourcePath });
       current = `${header} (continued)\n\n`;
     }
     current += section + "\n\n";
   }
 
-  // Stryker disable next-line EqualityOperator,ConditionalExpression,MethodExpression: equivalent — line 8 guard returns early for all whitespace inputs; for real content current always exceeds header.length
   if (current.trim().length > header.length) {
-    chunks.push({ text: current.trim(), sourcePath: filePath });
+    chunks.push({ text: current.trim(), sourcePath });
   }
 
   return chunks;
 }
 
+export function chunkFile(
+  filePath: string,
+  content: string,
+  maxChars = 2000,
+): Chunk[] {
+  return chunkWithHeader(`${FILE_PREFIX}${filePath}`, content, filePath, maxChars);
+}
+
 /** Default chunking strategy: delegates to chunkFile. */
 export const rawTextStrategy: ChunkingStrategy = (file: FileInfo): Chunk[] =>
   chunkFile(file.path, file.content);
+
+export function selectChunkingStrategy(chunking: "raw" | "tree-sitter"): ChunkingStrategy {
+  return chunking === "tree-sitter" ? treeSitterStrategy : rawTextStrategy;
+}
