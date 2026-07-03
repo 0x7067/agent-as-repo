@@ -34,6 +34,9 @@
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.20.0",
+  "engines": {
+    "node": ">=20 <21"
+  },
   "dependencies": {
     "@letta-ai/letta-client": "^1.7.8",
     "@modelcontextprotocol/sdk": "^1.26.0",
