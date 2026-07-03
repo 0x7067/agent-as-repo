@@ -1,4 +1,4 @@
-import * as path from "node:path";
+import path from "node:path";
 
 export interface TreeSitterWasmPaths {
   webTreeSitterWasm: string;

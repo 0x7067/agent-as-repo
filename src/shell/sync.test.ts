@@ -1,4 +1,4 @@
-import * as path from "node:path";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, it, expect, vi } from "vitest";
 import { syncRepo } from "./sync.js";

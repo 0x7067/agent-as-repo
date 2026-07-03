@@ -1,7 +1,7 @@
 import pLimit from "p-limit";
 import type { AgentState, ChunkingStrategy, FileInfo, PassageMap } from "../core/types.js";
 import { computeSyncPlan } from "../core/sync.js";
-import { rawTextStrategy, selectChunkingStrategy } from "../core/chunker.js";
+import { selectChunkingStrategy } from "../core/chunker.js";
 import type { AgentProvider } from "./provider.js";
 
 export interface SyncRepoParams {

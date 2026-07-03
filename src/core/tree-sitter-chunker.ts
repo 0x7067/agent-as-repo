@@ -36,12 +36,15 @@ function grammarLabelForPath(filePath: string): string {
 
 function wasmPathForLabel(options: TreeSitterInitOptions, label: string): string {
   switch (label) {
-    case "tsx":
+    case "tsx": {
       return options.tsxWasm;
-    case "javascript":
+    }
+    case "javascript": {
       return options.javascriptWasm;
-    default:
+    }
+    default: {
       return options.typescriptWasm;
+    }
   }
 }
 
@@ -67,7 +70,7 @@ function spanFromNode(node: Node, kind: SymbolKind, className?: string): SymbolS
   return {
     kind,
     name,
-    className,
+    ...(className === undefined ? {} : { className }),
     startIndex: node.startIndex,
     endIndex: node.endIndex,
   };
