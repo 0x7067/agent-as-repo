@@ -48,7 +48,7 @@ describe("parseConfig", () => {
     expect(config.defaults.chunking).toBe("raw");
   });
 
-  it("rejects chunking: tree-sitter until the strategy is implemented", () => {
+  it("accepts chunking: tree-sitter and threads it into defaults", () => {
     const raw = {
       provider: { type: "letta", model: LETTA_MODEL, embedding: LETTA_EMBEDDING },
       defaults: { chunking: "tree-sitter" },
@@ -62,8 +62,8 @@ describe("parseConfig", () => {
       },
     };
 
-    expect(() => parseConfig(raw)).toThrow(ConfigError);
-    expect(() => parseConfig(raw)).toThrow(/tree-sitter.*not yet implemented/i);
+    const config = parseConfig(raw);
+    expect(config.defaults.chunking).toBe("tree-sitter");
   });
 
   it("accepts explicit 'raw' chunking in defaults", () => {

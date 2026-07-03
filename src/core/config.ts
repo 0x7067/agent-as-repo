@@ -110,10 +110,6 @@ export function parseConfig(raw: unknown): Config {
     throw new ConfigError(semanticIssues);
   }
 
-  if (parsed.defaults?.chunking === "tree-sitter") {
-    throw new ConfigError(["defaults.chunking: \"tree-sitter\" is not yet implemented — use \"raw\" (the default) or omit this field"]);
-  }
-
   let providerConfig: ProviderConfig;
   if (parsed.provider) {
     if (parsed.provider.type === "letta") {
