@@ -3,6 +3,6 @@ export default {
   vitest: { configFile: "vitest.stryker.shell.config.ts" },
   mutate: ["src/mcp-server.ts"],
   coverageAnalysis: "perTest",
-  thresholds: { high: 97, low: 90, break: 0 },
+  thresholds: { high: 97, low: 90, break: 70 },
   reporters: ["clear-text", "progress"],
 };

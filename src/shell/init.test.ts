@@ -58,7 +58,7 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
-describe.sequential("runInit", () => {
+describe("runInit", { concurrent: false }, () => {
   it("fails when repo path is not a git repository", async () => {
     const workspace = await makeTempDir(INIT_WORKSPACE_PREFIX);
     const repoDir = path.join(workspace, "repo");

@@ -34,14 +34,25 @@
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.20.0",
+  "engines": {
+    "node": ">=20 <21"
+  },
+  "pnpm": {
+    "overrides": {
+      "hono": "^4.12.25"
+    }
+  },
   "dependencies": {
-    "@letta-ai/letta-client": "^1.7.8",
-    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@letta-ai/letta-client": "^1.12.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^14.0.3",
     "dotenv": "^17.3.1",
     "fast-glob": "^3.3.3",
-    "js-yaml": "^4.1.1",
+    "js-yaml": "^4.3.0",
     "p-limit": "^7.3.0",
+    "tree-sitter-javascript": "^0.23.1",
+    "tree-sitter-typescript": "^0.23.2",
+    "web-tree-sitter": "^0.26.10",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -52,7 +63,7 @@
     "@stryker-mutator/vitest-runner": "^9.6.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.2.3",
-    "@vitest/eslint-plugin": "^1.6.9",
+    "@vitest/eslint-plugin": "^1.6.20",
     "esbuild": "^0.27.3",
     "eslint": "^10.0.1",
     "eslint-config-prettier": "^10.1.8",
@@ -65,10 +76,10 @@
     "eslint-plugin-sonarjs": "^4.0.0",
     "eslint-plugin-unicorn": "^63.0.0",
     "globals": "^17.3.0",
+    "postject": "^1.0.0-alpha.6",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.0",
-    "postject": "^1.0.0-alpha.6",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.9"
   }
 }

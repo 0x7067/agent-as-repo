@@ -1,8 +1,36 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { parseNamespacedAgentId, registerTools, registerUnifiedTools, parsePositiveInt, withTimeout } from "./mcp-server.js";
+import {
+  buildProviderRegistry,
+  createClient,
+  getVikingRuntimeOptionsFromEnv,
+  main,
+  parseModelCsv,
+  parseNamespacedAgentId,
+  parseNonNegativeInt,
+  registerTools,
+  registerUnifiedTools,
+  parsePositiveInt,
+  selectLegacyRuntime,
+  withTimeout,
+} from "./mcp-server.js";
 import type { AgentProvider } from "./shell/provider.js";
 import type { AdminPort } from "./ports/admin.js";
+
+const lettaCtor = vi.hoisted(() => vi.fn());
+const MockLetta = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- mock must be `new`-able for createClient tests
+  return class {
+    constructor(opts: unknown) {
+      lettaCtor(opts);
+    }
+  };
+});
+
+vi.mock("@letta-ai/letta-client", () => ({
+  Letta: MockLetta,
+  default: MockLetta,
+}));
 
 function makeMockProvider(): AgentProvider {
   return {
@@ -190,6 +218,14 @@ describe("MCP Server tools", () => {
       const result = await handler({});
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toBe("API down");
+    });
+
+    it("stringifies non-Error rejections", async () => {
+      (admin.listAgents as ReturnType<typeof vi.fn>).mockRejectedValue("plain failure");
+      const handler = extractToolHandler(server, "letta_list_agents");
+      const result = await handler({});
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("plain failure");
     });
   });
 
@@ -602,5 +638,339 @@ describe("Unified MCP tools", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("not configured");
+  });
+
+  it("agent_list includes bootstrap errors when providers failed to initialize", async () => {
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    registerUnifiedTools(server, {
+      providers: {},
+      bootstrapErrors: { letta: "letta init failed", viking: "viking init failed" },
+    });
+
+    const handler = extractToolHandler(server, "agent_list");
+    const result = await handler({});
+    const data = JSON.parse(result.content[0].text) as {
+      agents: unknown[];
+      errors: Array<{ provider: string; error: string }>;
+    };
+
+    expect(data.agents).toEqual([]);
+    expect(data.errors).toEqual([
+      { provider: "letta", error: "letta init failed" },
+      { provider: "viking", error: "viking init failed" },
+    ]);
+  });
+
+  it("agent_list sorts agents by namespaced id", async () => {
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    const admin = makeMockAdmin();
+    (admin.listAgents as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: "z-last", name: "Z", description: null, model: null },
+      { id: "a-first", name: "A", description: null, model: null },
+    ]);
+    registerUnifiedTools(server, {
+      providers: { letta: { provider: makeMockProvider(), admin } },
+      bootstrapErrors: {},
+    });
+
+    const handler = extractToolHandler(server, "agent_list");
+    const result = await handler({});
+    const data = JSON.parse(result.content[0].text) as { agents: Array<{ id: string }> };
+
+    expect(data.agents.map((agent) => agent.id)).toEqual(["letta:a-first", "letta:z-last"]);
+  });
+
+  it("agent_list omits errors key when there are no errors", async () => {
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    registerUnifiedTools(server, {
+      providers: { letta: { provider: makeMockProvider(), admin: makeMockAdmin() } },
+      bootstrapErrors: {},
+    });
+
+    const handler = extractToolHandler(server, "agent_list");
+    const result = await handler({});
+    const data = JSON.parse(result.content[0].text) as { errors?: unknown };
+
+    expect(data.errors).toBeUndefined();
+  });
+
+  it("agent_call passes overrideModel and maxSteps through to provider", async () => {
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    const lettaProvider = makeMockProvider();
+    registerUnifiedTools(server, {
+      providers: { letta: { provider: lettaProvider, admin: makeMockAdmin() } },
+      bootstrapErrors: {},
+    });
+
+    const handler = extractToolHandler(server, "agent_call");
+    await handler({
+      agent_id: "letta:agent-1",
+      content: "Hi",
+      override_model: "openai/gpt-4.1-mini",
+      max_steps: 4,
+    });
+
+    expect(lettaProvider.sendMessage).toHaveBeenCalledWith("agent-1", "Hi", {
+      overrideModel: "openai/gpt-4.1-mini",
+      maxSteps: 4,
+    });
+  });
+
+  it("agent_call uses explicit timeout_ms over env default", async () => {
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    const lettaProvider = makeMockProvider();
+    vi.mocked(lettaProvider.sendMessage).mockImplementation(
+      () => new Promise<string>((resolve) => setTimeout(() => { resolve("ok"); }, 50)),
+    );
+    registerUnifiedTools(server, {
+      providers: { letta: { provider: lettaProvider, admin: makeMockAdmin() } },
+      bootstrapErrors: {},
+    });
+
+    const origEnv = process.env["LETTA_ASK_TIMEOUT_MS"];
+    process.env["LETTA_ASK_TIMEOUT_MS"] = "1";
+    try {
+      const handler = extractToolHandler(server, "agent_call");
+      const result = await handler({ agent_id: "letta:agent-1", content: "Hi", timeout_ms: 10_000 });
+      expect(result.isError).toBeFalsy();
+    } finally {
+      if (origEnv === undefined) delete process.env["LETTA_ASK_TIMEOUT_MS"];
+      else process.env["LETTA_ASK_TIMEOUT_MS"] = origEnv;
+    }
+  });
+
+  it("agent_call timeout label includes override_model when provided", async () => {
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    const lettaProvider = makeMockProvider();
+    vi.mocked(lettaProvider.sendMessage).mockImplementation(
+      () => new Promise<string>((resolve) => setTimeout(resolve, 5000)),
+    );
+    registerUnifiedTools(server, {
+      providers: { letta: { provider: lettaProvider, admin: makeMockAdmin() } },
+      bootstrapErrors: {},
+    });
+
+    const handler = extractToolHandler(server, "agent_call");
+    const result = await handler({
+      agent_id: "letta:agent-1",
+      content: "Hi",
+      override_model: "openai/gpt-4.1",
+      timeout_ms: 10,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("openai/gpt-4.1");
+    expect(result.content[0].text).toContain("agent_call letta");
+  });
+
+  it("agent_call returns stringified non-Error failures", async () => {
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    const lettaProvider = makeMockProvider();
+    vi.mocked(lettaProvider.sendMessage).mockRejectedValue("plain failure");
+    registerUnifiedTools(server, {
+      providers: { letta: { provider: lettaProvider, admin: makeMockAdmin() } },
+      bootstrapErrors: {},
+    });
+
+    const handler = extractToolHandler(server, "agent_call");
+    const result = await handler({ agent_id: "letta:agent-1", content: "Hi" });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe("plain failure");
+  });
+});
+
+describe("parseNonNegativeInt", () => {
+  it("returns fallback when raw is undefined", () => {
+    const missing: string | undefined = undefined;
+    expect(parseNonNegativeInt(missing, 1)).toBe(1);
+  });
+
+  it("returns fallback when raw is empty", () => {
+    expect(parseNonNegativeInt("", 1)).toBe(1);
+  });
+
+  it("returns fallback when raw is NaN", () => {
+    expect(parseNonNegativeInt("abc", 1)).toBe(1);
+  });
+
+  it("returns fallback when raw is negative", () => {
+    expect(parseNonNegativeInt("-1", 1)).toBe(1);
+  });
+
+  it("returns parsed value for zero and positive integers", () => {
+    expect(parseNonNegativeInt("0", 1)).toBe(0);
+    expect(parseNonNegativeInt("3", 1)).toBe(3);
+  });
+});
+
+describe("parseModelCsv", () => {
+  it("returns empty array when value is undefined", () => {
+    expect(parseModelCsv()).toEqual([]);
+  });
+
+  it("returns empty array when value is empty", () => {
+    expect(parseModelCsv("")).toEqual([]);
+  });
+
+  it("splits, trims, and drops empty entries", () => {
+    expect(parseModelCsv(" model-a , , model-b ")).toEqual(["model-a", "model-b"]);
+  });
+});
+
+describe("getVikingRuntimeOptionsFromEnv", () => {
+  const keys = [
+    "OPENROUTER_REQUEST_TIMEOUT_MS",
+    "OPENROUTER_MAX_RETRIES_PER_MODEL",
+    "OPENROUTER_RETRY_BASE_DELAY_MS",
+    "OPENROUTER_FALLBACK_MODELS",
+  ] as const;
+
+  afterEach(() => {
+    for (const key of keys) Reflect.deleteProperty(process.env, key);
+  });
+
+  it("uses defaults when env vars are absent", () => {
+    expect(getVikingRuntimeOptionsFromEnv()).toEqual({
+      requestTimeoutMs: 20_000,
+      maxRetriesPerModel: 1,
+      retryBaseDelayMs: 600,
+      fallbackModels: [],
+    });
+  });
+
+  it("reads custom env values", () => {
+    process.env["OPENROUTER_REQUEST_TIMEOUT_MS"] = "15000";
+    process.env["OPENROUTER_MAX_RETRIES_PER_MODEL"] = "2";
+    process.env["OPENROUTER_RETRY_BASE_DELAY_MS"] = "900";
+    process.env["OPENROUTER_FALLBACK_MODELS"] = "model-a, model-b";
+
+    expect(getVikingRuntimeOptionsFromEnv()).toEqual({
+      requestTimeoutMs: 15_000,
+      maxRetriesPerModel: 2,
+      retryBaseDelayMs: 900,
+      fallbackModels: ["model-a", "model-b"],
+    });
+  });
+});
+
+describe("createClient", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(process.env, "LETTA_BASE_URL");
+    lettaCtor.mockClear();
+  });
+
+  it("passes LETTA_BASE_URL to the Letta constructor", () => {
+    process.env["LETTA_BASE_URL"] = "https://api.letta.example";
+    createClient();
+    expect(lettaCtor).toHaveBeenCalledWith({ baseURL: "https://api.letta.example" });
+  });
+});
+
+describe("buildProviderRegistry", () => {
+  const envKeys = ["LETTA_API_KEY", "OPENROUTER_API_KEY", "VIKING_URL", "OPENROUTER_MODEL"] as const;
+
+  afterEach(() => {
+    for (const key of envKeys) Reflect.deleteProperty(process.env, key);
+  });
+
+  it("registers letta when LETTA_API_KEY is set", () => {
+    process.env["LETTA_API_KEY"] = "test-key";
+    const registry = buildProviderRegistry();
+    expect(registry.providers.letta).toBeDefined();
+    expect(registry.bootstrapErrors.letta).toBeUndefined();
+  });
+
+  it("registers viking when OPENROUTER_API_KEY is set", () => {
+    process.env["OPENROUTER_API_KEY"] = "or-key";
+    const registry = buildProviderRegistry();
+    expect(registry.providers.viking).toBeDefined();
+    expect(registry.bootstrapErrors.viking).toBeUndefined();
+  });
+
+  it("leaves providers empty when no credentials are configured", () => {
+    const registry = buildProviderRegistry();
+    expect(registry.providers.letta).toBeUndefined();
+    expect(registry.providers.viking).toBeUndefined();
+    expect(registry.bootstrapErrors).toEqual({});
+  });
+
+  it("records letta bootstrap errors when client construction fails", () => {
+    process.env["LETTA_API_KEY"] = "test-key";
+    lettaCtor.mockImplementationOnce(() => {
+      throw new Error("letta init failed");
+    });
+    const registry = buildProviderRegistry();
+    expect(registry.providers.letta).toBeUndefined();
+    expect(registry.bootstrapErrors.letta).toBe("letta init failed");
+  });
+});
+
+describe("selectLegacyRuntime", () => {
+  const runtime = {
+    provider: makeMockProvider(),
+    admin: makeMockAdmin(),
+  };
+
+  it("prefers configured PROVIDER_TYPE when available", () => {
+    const selected = selectLegacyRuntime(
+      { providers: { letta: runtime, viking: runtime }, bootstrapErrors: {} },
+      "viking",
+    );
+    expect(selected).toBe(runtime);
+  });
+
+  it("falls back to letta when preferred provider is missing", () => {
+    const selected = selectLegacyRuntime(
+      { providers: { letta: runtime }, bootstrapErrors: {} },
+      "viking",
+    );
+    expect(selected).toBe(runtime);
+  });
+
+  it("falls back to viking when letta is unavailable", () => {
+    const selected = selectLegacyRuntime(
+      { providers: { viking: runtime }, bootstrapErrors: {} },
+    );
+    expect(selected).toBe(runtime);
+  });
+
+  it("throws with bootstrap error details when no provider is configured", () => {
+    expect(() =>
+      selectLegacyRuntime(
+        { providers: {}, bootstrapErrors: { letta: "boom", viking: "bust" } },
+      ),
+    ).toThrow(/No provider is configured[\s\S]*Bootstrap errors:[\s\S]*letta: boom[\s\S]*viking: bust/);
+  });
+
+  it("throws without bootstrap suffix when there are no bootstrap errors", () => {
+    expect(() => selectLegacyRuntime({ providers: {}, bootstrapErrors: {} })).toThrow(
+      "No provider is configured. Set LETTA_API_KEY and/or OPENROUTER_API_KEY in the MCP server env.",
+    );
+  });
+});
+
+describe("parseNamespacedAgentId edge cases", () => {
+  it("rejects ids with separator at position zero", () => {
+    expect(() => parseNamespacedAgentId(":agent-1")).toThrow("must be namespaced");
+  });
+
+  it("includes unsupported prefix in error message", () => {
+    expect(() => parseNamespacedAgentId("aws:agent-1")).toThrow('Unsupported provider prefix "aws"');
+  });
+});
+
+describe("main", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(process.env, "LETTA_API_KEY");
+    Reflect.deleteProperty(process.env, "PROVIDER_TYPE");
+    vi.restoreAllMocks();
+  });
+
+  it("connects server to stdio transport when letta is configured", async () => {
+    process.env["LETTA_API_KEY"] = "test-key";
+    const connectSpy = vi.spyOn(McpServer.prototype, "connect").mockResolvedValue(undefined as never);
+    await main();
+    expect(connectSpy).toHaveBeenCalledOnce();
   });
 });

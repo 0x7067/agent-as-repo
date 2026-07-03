@@ -6,6 +6,7 @@ defaults:
   max_file_size_kb: 50
   memory_block_limit: 5000
   bootstrap_on_create: true
+  chunking: tree-sitter
 
 repos:
   zc-blitz-2:

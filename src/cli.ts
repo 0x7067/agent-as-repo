@@ -24,12 +24,14 @@ import { VikingProvider } from "./shell/viking-provider.js";
 import { VikingHttpClient } from "./shell/viking-http.js";
 import { FilesystemBlockStorage } from "./shell/block-storage.js";
 import { resolveOpenVikingBlocksDir } from "./shell/openviking-paths.js";
-import { rawTextStrategy } from "./core/chunker.js";
+import { selectChunkingStrategy } from "./core/chunker.js";
+import { initTreeSitterChunker } from "./core/tree-sitter-chunker.js";
 import { shouldIncludeFile } from "./core/filter.js";
 import { partitionDiffPaths } from "./core/submodule.js";
 import { listSubmodules, expandSubmoduleFiles } from "./shell/submodule-collector.js";
 import { addAgentToState, removeAgentFromState, updateAgentField, updatePassageMap } from "./core/state.js";
 import { syncRepo } from "./shell/sync.js";
+import { resolveTreeSitterWasmPaths } from "./shell/tree-sitter-paths.js";
 import { getAgentStatus, getAgentStatusData } from "./shell/status.js";
 import { exportAgent } from "./shell/export.js";
 import { onboardAgent } from "./shell/onboard.js";
@@ -305,6 +307,13 @@ async function loadConfigSafe(configPath: string): Promise<Config> {
     }
     throw error;
   }
+}
+
+async function prepareChunking(config: Config): Promise<ReturnType<typeof selectChunkingStrategy>> {
+  if (config.defaults.chunking === "tree-sitter") {
+    await initTreeSitterChunker(resolveTreeSitterWasmPaths());
+  }
+  return selectChunkingStrategy(config.defaults.chunking);
 }
 
 function resolveMcpProviderConfig(baseUrl: string): { providerConfig: McpProviderConfig; warnings: string[] } {
@@ -777,6 +786,7 @@ program
 
     const configPath = path.resolve(opts.config);
     const config = await loadConfigSafe(configPath);
+    const chunkingStrategy = await prepareChunking(config);
     const provider = createProviderForCommands(config);
     let state = await loadState(STATE_FILE);
 
@@ -858,7 +868,7 @@ program
           filesFound = files.length;
           log(`  Found ${String(files.length)} files`);
 
-          const chunks = files.flatMap((f) => rawTextStrategy(f));
+          const chunks = files.flatMap((f) => chunkingStrategy(f));
           chunksLoaded = chunks.length;
           log(`  Loading ${String(chunks.length)} passages...`);
           const loadResult = await withRetry(
@@ -1075,6 +1085,7 @@ program
     const log = opts.json ? (_: string) => {} : (line: string) => { console.log(line); };
     const configPath = path.resolve(opts.config);
     const config = await loadConfigSafe(configPath);
+    await prepareChunking(config);
     const provider = opts.dryRun ? null : createProviderForCommands(config);
     let state = await loadState(STATE_FILE);
     const syncResults: Array<Record<string, unknown>> = [];
@@ -1201,6 +1212,7 @@ program
         },
         headCommit,
         maxFileSizeKb: repoConfig.maxFileSizeKb,
+        chunking: config.defaults.chunking,
         ...(isTTY ? {
           onProgress: (completed: number, total: number, filePath: string) => {
             const label = filePath.length > 60 ? `...${filePath.slice(-57)}` : filePath;

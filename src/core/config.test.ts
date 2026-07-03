@@ -43,9 +43,27 @@ describe("parseConfig", () => {
     expect(config.defaults.askTimeoutMs).toBe(60_000);
   });
 
-  it("defaults chunking to 'raw' when omitted", () => {
+  it("defaults chunking to 'tree-sitter' when omitted", () => {
     const config = parseConfig(validRaw);
-    expect(config.defaults.chunking).toBe("raw");
+    expect(config.defaults.chunking).toBe("tree-sitter");
+  });
+
+  it("accepts chunking: tree-sitter and threads it into defaults", () => {
+    const raw = {
+      provider: { type: "letta", model: LETTA_MODEL, embedding: LETTA_EMBEDDING },
+      defaults: { chunking: "tree-sitter" },
+      repos: {
+        "my-app": {
+          path: "~/repos/my-app",
+          description: "test",
+          extensions: [".ts"],
+          ignore_dirs: ["node_modules"],
+        },
+      },
+    };
+
+    const config = parseConfig(raw);
+    expect(config.defaults.chunking).toBe("tree-sitter");
   });
 
   it("accepts explicit 'raw' chunking in defaults", () => {
@@ -54,12 +72,6 @@ describe("parseConfig", () => {
     const raw = { ...validRaw, defaults: { chunking: "raw" } };
     const config = parseConfig(raw);
     expect(config.defaults.chunking).toBe("raw");
-  });
-
-  it("accepts 'tree-sitter' chunking override", () => {
-    const raw = { ...validRaw, defaults: { chunking: "tree-sitter" } };
-    const config = parseConfig(raw);
-    expect(config.defaults.chunking).toBe("tree-sitter");
   });
 
   it("applies explicit defaults over built-in defaults", () => {

@@ -5,7 +5,7 @@ const BUILT_IN_DEFAULTS = {
   maxFileSizeKb: 50,
   memoryBlockLimit: 5000,
   bootstrapOnCreate: true,
-  chunking: "raw" as const,
+  chunking: "tree-sitter" as const,
   askTimeoutMs: 60_000,
 };
 

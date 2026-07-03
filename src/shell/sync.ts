@@ -1,7 +1,7 @@
 import pLimit from "p-limit";
 import type { AgentState, ChunkingStrategy, FileInfo, PassageMap } from "../core/types.js";
 import { computeSyncPlan } from "../core/sync.js";
-import { rawTextStrategy } from "../core/chunker.js";
+import { selectChunkingStrategy } from "../core/chunker.js";
 import type { AgentProvider } from "./provider.js";
 
 export interface SyncRepoParams {
@@ -11,6 +11,7 @@ export interface SyncRepoParams {
   collectFile: (filePath: string) => Promise<FileInfo | null>;
   headCommit: string;
   maxFileSizeKb?: number;
+  chunking?: "raw" | "tree-sitter";
   chunkingStrategy?: ChunkingStrategy;
   concurrency?: number;
   fullReIndexThreshold?: number;
@@ -59,12 +60,15 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
     collectFile,
     headCommit,
     maxFileSizeKb,
-    chunkingStrategy = rawTextStrategy,
+    chunking,
+    chunkingStrategy,
     concurrency = 20,
     fullReIndexThreshold = 500,
     onFileError,
     onProgress,
   } = params;
+
+  const effectiveChunkingStrategy = chunkingStrategy ?? selectChunkingStrategy(chunking ?? "tree-sitter");
 
   const plan = computeSyncPlan(agent.passages, changedFiles, fullReIndexThreshold);
   const limit = pLimit(concurrency);
@@ -86,7 +90,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
         updatedPassages = removeFilePassages(updatedPassages, filePath);
         filesRemoved++;
       } else {
-        const chunks = chunkingStrategy(indexableFileInfo);
+        const chunks = effectiveChunkingStrategy(indexableFileInfo);
         const passageIds: string[] = Array.from({ length: chunks.length });
 
         await Promise.all(

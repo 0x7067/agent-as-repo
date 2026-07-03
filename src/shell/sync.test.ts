@@ -1,10 +1,25 @@
-import { describe, it, expect, vi } from "vitest";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { beforeAll, describe, it, expect, vi } from "vitest";
 import { syncRepo } from "./sync.js";
 import type { AgentState } from "../core/types.js";
+import { initTreeSitterChunker, resetTreeSitterChunkerForTests } from "../core/tree-sitter-chunker.js";
 import { makeMockProvider as makeBase } from "./__test__/mock-provider.js";
+
+const ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 const NEW_CONTENT = "new content";
+
+beforeAll(async () => {
+  resetTreeSitterChunkerForTests();
+  await initTreeSitterChunker({
+    webTreeSitterWasm: path.join(ROOT, "node_modules/web-tree-sitter/web-tree-sitter.wasm"),
+    typescriptWasm: path.join(ROOT, "node_modules/tree-sitter-typescript/tree-sitter-typescript.wasm"),
+    tsxWasm: path.join(ROOT, "node_modules/tree-sitter-typescript/tree-sitter-tsx.wasm"),
+    javascriptWasm: path.join(ROOT, "node_modules/tree-sitter-javascript/tree-sitter-javascript.wasm"),
+  });
+});
 
 function makeMockProvider() {
   let passageCounter = 0;
@@ -125,7 +140,7 @@ describe("syncRepo", () => {
     expect(provider.storePassage).toHaveBeenCalledWith("agent-abc", "custom chunk");
   });
 
-  it("defaults to rawTextStrategy when chunkingStrategy is omitted", async () => {
+  it("defaults to rawTextStrategy when chunking is raw", async () => {
     const provider = makeMockProvider();
     const result = await syncRepo({
       provider,
@@ -133,6 +148,7 @@ describe("syncRepo", () => {
       changedFiles: ["src/a.ts"],
       collectFile: (path) => Promise.resolve({ path, content: "const x = 1;", sizeKb: 0.01 }),
       headCommit: "def456",
+      chunking: "raw",
     });
 
     // rawTextStrategy produces a chunk with FILE: prefix
@@ -141,6 +157,29 @@ describe("syncRepo", () => {
       expect.stringContaining("FILE: src/a.ts"),
     );
     expect(result.passages["src/a.ts"]).toBeDefined();
+  });
+
+  it("selects treeSitterStrategy when chunking is tree-sitter", async () => {
+    const provider = makeMockProvider();
+    const tsContent = [
+      "export function foo(): void {",
+      "  console.log('foo');",
+      "}",
+    ].join("\n");
+
+    await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: ["src/a.ts"],
+      collectFile: (path) => Promise.resolve({ path, content: tsContent, sizeKb: 0.1 }),
+      headCommit: "def456",
+      chunking: "tree-sitter",
+    });
+
+    expect(provider.storePassage).toHaveBeenCalledWith(
+      "agent-abc",
+      expect.stringContaining("FUNCTION: foo"),
+    );
   });
 
   it("returns unchanged state for empty changed files", async () => {

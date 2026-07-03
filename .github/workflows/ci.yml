@@ -28,6 +28,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
       - name: Prepare CI config fixture
         run: |
           cat > config.ci.yaml <<'EOF'
@@ -50,3 +56,7 @@ jobs:
 
       - name: Run tests
         run: pnpm test
+
+      - name: Dependency audit (report only)
+        if: always()
+        run: pnpm audit --prod || true
