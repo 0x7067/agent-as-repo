@@ -37,9 +37,14 @@
   "engines": {
     "node": ">=20 <21"
   },
+  "pnpm": {
+    "overrides": {
+      "hono": "^4.12.25"
+    }
+  },
   "dependencies": {
     "@letta-ai/letta-client": "^1.7.8",
-    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^14.0.3",
     "dotenv": "^17.3.1",
     "fast-glob": "^3.3.3",
