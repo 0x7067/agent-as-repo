@@ -33,17 +33,58 @@ const repoRawSchema = z.object({
   include_submodules: z.boolean().optional(),
 });
 
+const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
+const DEFAULT_VIKING_URL = "http://localhost:1933";
+
+const providerSchema = z.object({
+  model: z.string(),
+  base_url: z.string().optional(),
+  fallback_models: z.array(z.string()).optional(),
+  viking_url: z.string().optional(),
+});
+
 const rawConfigSchema = z.object({
-  // New form
-  provider: z.discriminatedUnion("type", [
-    z.object({ type: z.literal("letta"), model: z.string(), embedding: z.string(), fast_model: z.string().optional() }),
-    z.object({ type: z.literal("viking"), openrouter_model: z.string(), viking_url: z.string().optional() }),
-  ]).optional(),
-  // Old form (backwards compat)
-  letta: z.object({ model: z.string(), embedding: z.string(), fast_model: z.string().optional() }).optional(),
+  provider: providerSchema.optional(),
   defaults: defaultsSchema.optional(),
   repos: z.record(z.string(), repoRawSchema),
 });
+
+const NEW_SHAPE_HINT =
+  "Use provider: { model, base_url?, fallback_models?, viking_url? } (Viking + OpenAI-compatible LLM). See config.example.yaml.";
+
+/**
+ * Detect configs written for the old dual-provider (Letta/Viking) schema and
+ * fail fast with a message pointing at the new single-provider shape. There is
+ * no migration path — old configs are simply invalid.
+ */
+function detectLegacyConfig(raw: unknown): string[] {
+  if (typeof raw !== "object" || raw === null) return [];
+  const obj = raw as Record<string, unknown>;
+  const issues: string[] = [];
+
+  if ("letta" in obj) {
+    issues.push(`Legacy top-level 'letta:' block is no longer supported. ${NEW_SHAPE_HINT}`);
+  }
+
+  const provider = obj["provider"];
+  if (typeof provider === "object" && provider !== null) {
+    const p = provider as Record<string, unknown>;
+    if ("type" in p) {
+      issues.push(`'provider.type' is no longer supported — there is a single provider now. ${NEW_SHAPE_HINT}`);
+    }
+    if ("openrouter_model" in p) {
+      issues.push(`'provider.openrouter_model' is no longer supported; use 'provider.model'. ${NEW_SHAPE_HINT}`);
+    }
+    if ("embedding" in p) {
+      issues.push(`'provider.embedding' is no longer supported (OpenViking owns embeddings). ${NEW_SHAPE_HINT}`);
+    }
+    if ("fast_model" in p) {
+      issues.push(`'provider.fast_model' is no longer supported. ${NEW_SHAPE_HINT}`);
+    }
+  }
+
+  return issues;
+}
 
 export class ConfigError extends Error {
   constructor(public readonly issues: string[]) {
@@ -88,8 +129,12 @@ function validateSemantics(parsed: z.infer<typeof rawConfigSchema>): string[] {
   return issues;
 }
 
-// eslint-disable-next-line sonarjs/cognitive-complexity -- Centralized config normalization intentionally branches across provider and legacy schema variants.
 export function parseConfig(raw: unknown): Config {
+  const legacyIssues = detectLegacyConfig(raw);
+  if (legacyIssues.length > 0) {
+    throw new ConfigError(legacyIssues);
+  }
+
   let parsed: z.infer<typeof rawConfigSchema>;
   try {
     parsed = rawConfigSchema.parse(raw);
@@ -101,8 +146,8 @@ export function parseConfig(raw: unknown): Config {
     throw error;
   }
 
-  if (!parsed.provider && !parsed.letta) {
-    throw new ConfigError(["Must specify either 'provider' or 'letta' configuration"]);
+  if (!parsed.provider) {
+    throw new ConfigError([`Must specify a 'provider' block with a 'model'. ${NEW_SHAPE_HINT}`]);
   }
 
   const semanticIssues = validateSemantics(parsed);
@@ -110,35 +155,12 @@ export function parseConfig(raw: unknown): Config {
     throw new ConfigError(semanticIssues);
   }
 
-  let providerConfig: ProviderConfig;
-  if (parsed.provider) {
-    if (parsed.provider.type === "letta") {
-      providerConfig = {
-        type: "letta",
-        model: parsed.provider.model,
-        embedding: parsed.provider.embedding,
-        ...(parsed.provider.fast_model === undefined ? {} : { fastModel: parsed.provider.fast_model }),
-      };
-    } else {
-      providerConfig = {
-        type: "viking",
-        openrouterModel: parsed.provider.openrouter_model,
-        ...(parsed.provider.viking_url === undefined ? {} : { vikingUrl: parsed.provider.viking_url }),
-      };
-    }
-  } else {
-    // migrate old letta: format
-    const legacyLetta = parsed.letta;
-    if (!legacyLetta) {
-      throw new ConfigError(["Missing legacy letta provider settings"]);
-    }
-    providerConfig = {
-      type: "letta",
-      model: legacyLetta.model,
-      embedding: legacyLetta.embedding,
-      ...(legacyLetta.fast_model === undefined ? {} : { fastModel: legacyLetta.fast_model }),
-    };
-  }
+  const providerConfig: ProviderConfig = {
+    model: parsed.provider.model,
+    baseUrl: parsed.provider.base_url ?? DEFAULT_LLM_BASE_URL,
+    fallbackModels: parsed.provider.fallback_models ?? [],
+    vikingUrl: parsed.provider.viking_url ?? DEFAULT_VIKING_URL,
+  };
 
   const userDefaults = parsed.defaults ?? {};
   const defaults = {

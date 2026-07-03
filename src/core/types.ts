@@ -25,9 +25,16 @@ export interface RepoConfig {
   includeSubmodules?: boolean;
 }
 
-export type ProviderConfig =
-  | { type: "letta"; model: string; embedding: string; fastModel?: string }
-  | { type: "viking"; openrouterModel: string; vikingUrl?: string };
+export interface ProviderConfig {
+  /** Chat model id as the LLM endpoint knows it. */
+  model: string;
+  /** OpenAI-compatible base URL (default: local Ollama). */
+  baseUrl: string;
+  /** Models tried in order after `model` on retryable failures. */
+  fallbackModels: string[];
+  /** OpenViking storage/retrieval base URL. */
+  vikingUrl: string;
+}
 
 /** Top-level validated config. */
 export interface Config {

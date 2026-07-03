@@ -1,14 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { parseConfig, ConfigError, formatConfigError } from "./config.js";
 
-const LETTA_MODEL = "openai/gpt-4.1";
-const LETTA_EMBEDDING = "openai/text-embedding-3-small";
-const VIKING_OPENROUTER_MODEL = "openai/gpt-4o-mini";
+const MODEL = "qwen3-coder:30b";
 
 const validRaw = {
-  letta: {
-    model: LETTA_MODEL,
-    embedding: LETTA_EMBEDDING,
+  provider: {
+    model: MODEL,
   },
   repos: {
     "my-app": {
@@ -34,9 +31,10 @@ function parseConfigError(raw: unknown): ConfigError {
 describe("parseConfig", () => {
   it("parses a valid config with defaults applied", () => {
     const config = parseConfig(validRaw);
-    expect(config.provider.type).toBe("letta");
-    const provider = config.provider as Extract<typeof config.provider, { type: "letta" }>;
-    expect(provider.model).toBe(LETTA_MODEL);
+    expect(config.provider.model).toBe(MODEL);
+    expect(config.provider.baseUrl).toBe("http://localhost:11434/v1");
+    expect(config.provider.fallbackModels).toEqual([]);
+    expect(config.provider.vikingUrl).toBe("http://localhost:1933");
     expect(config.repos["my-app"].maxFileSizeKb).toBe(50);
     expect(config.repos["my-app"].memoryBlockLimit).toBe(5000);
     expect(config.repos["my-app"].bootstrapOnCreate).toBe(true);
@@ -50,7 +48,7 @@ describe("parseConfig", () => {
 
   it("accepts chunking: tree-sitter and threads it into defaults", () => {
     const raw = {
-      provider: { type: "letta", model: LETTA_MODEL, embedding: LETTA_EMBEDDING },
+      provider: { model: MODEL },
       defaults: { chunking: "tree-sitter" },
       repos: {
         "my-app": {
@@ -67,8 +65,6 @@ describe("parseConfig", () => {
   });
 
   it("accepts explicit 'raw' chunking in defaults", () => {
-    // Catches: z.enum(["raw", ...]) → z.enum(["", ...]) mutation
-    // With mutation: "raw" is not in enum ["", "tree-sitter"] → ZodError
     const raw = { ...validRaw, defaults: { chunking: "raw" } };
     const config = parseConfig(raw);
     expect(config.defaults.chunking).toBe("raw");
@@ -91,18 +87,20 @@ describe("parseConfig", () => {
     expect(config.defaults.askTimeoutMs).toBe(12_345);
   });
 
-  it("accepts optional letta.fast_model", () => {
+  it("parses provider base_url, fallback_models, and viking_url", () => {
     const raw = {
-      ...validRaw,
-      letta: {
-        ...validRaw.letta,
-        fast_model: "openai/gpt-4.1-mini",
+      provider: {
+        model: MODEL,
+        base_url: "https://openrouter.ai/api/v1",
+        fallback_models: ["moonshotai/kimi-k2.5", "deepseek/deepseek-v3.2"],
+        viking_url: "http://localhost:2000",
       },
+      repos: validRaw.repos,
     };
     const config = parseConfig(raw);
-    expect(config.provider.type).toBe("letta");
-    const provider = config.provider as Extract<typeof config.provider, { type: "letta" }>;
-    expect(provider.fastModel).toBe("openai/gpt-4.1-mini");
+    expect(config.provider.baseUrl).toBe("https://openrouter.ai/api/v1");
+    expect(config.provider.fallbackModels).toEqual(["moonshotai/kimi-k2.5", "deepseek/deepseek-v3.2"]);
+    expect(config.provider.vikingUrl).toBe("http://localhost:2000");
   });
 
   it("allows per-repo overrides of defaults", () => {
@@ -122,10 +120,10 @@ describe("parseConfig", () => {
 
   it("throws on missing required fields", () => {
     expect(() => parseConfig({})).toThrow();
-    expect(() => parseConfig({ letta: {} })).toThrow();
+    expect(() => parseConfig({ provider: {} })).toThrow();
     expect(() =>
       parseConfig({
-        letta: { model: "x", embedding: "y" },
+        provider: { model: "x" },
         repos: { app: { path: "/x" } },
       }),
     ).toThrow();
@@ -167,12 +165,12 @@ describe("parseConfig", () => {
       repos: {
         "my-app": {
           ...validRaw.repos["my-app"],
-          tools: ["send_message_to_agents_matching_tags"],
+          tools: ["archival_memory_search"],
         },
       },
     };
     const config = parseConfig(raw);
-    expect(config.repos["my-app"].tools).toEqual(["send_message_to_agents_matching_tags"]);
+    expect(config.repos["my-app"].tools).toEqual(["archival_memory_search"]);
   });
 
   it("leaves tools undefined when omitted", () => {
@@ -202,35 +200,34 @@ describe("parseConfig", () => {
   it("applies defaults.tools to repos without per-repo tools", () => {
     const raw = {
       ...validRaw,
-      defaults: { tools: ["send_message_to_agents_matching_tags"] },
+      defaults: { tools: ["archival_memory_search"] },
     };
     const config = parseConfig(raw);
-    expect(config.repos["my-app"].tools).toEqual(["send_message_to_agents_matching_tags"]);
+    expect(config.repos["my-app"].tools).toEqual(["archival_memory_search"]);
   });
 
   it("per-repo tools override defaults.tools", () => {
     const raw = {
       ...validRaw,
-      defaults: { tools: ["send_message_to_agents_matching_tags"] },
+      defaults: { tools: ["archival_memory_search"] },
       repos: {
         "my-app": {
           ...validRaw.repos["my-app"],
-          tools: ["send_message_to_agent_and_wait_for_reply"],
+          tools: ["memory_replace"],
         },
       },
     };
     const config = parseConfig(raw);
-    expect(config.repos["my-app"].tools).toEqual(["send_message_to_agent_and_wait_for_reply"]);
+    expect(config.repos["my-app"].tools).toEqual(["memory_replace"]);
   });
 
   it("throws ConfigError with formatted messages on schema violations", () => {
     const configErr = parseConfigError({
-      letta: {},
+      provider: {},
       repos: { app: { path: 123, extensions: "not-array" } },
     });
     expect(configErr.issues.length).toBeGreaterThan(0);
-    // Should have readable path-based messages
-    expect(configErr.issues.some((i) => i.includes("letta.model"))).toBe(true);
+    expect(configErr.issues.some((i) => i.includes("provider.model"))).toBe(true);
     expect(configErr.issues.some((i) => i.includes("repos.app.path"))).toBe(true);
   });
 
@@ -250,22 +247,13 @@ describe("parseConfig", () => {
 
   it("throws ConfigError when no repos defined", () => {
     const configErr = parseConfigError({
-      letta: { model: "x", embedding: "y" },
+      provider: { model: "x" },
       repos: {},
     });
     expect(configErr.issues.some((i) => i.includes("at least one repo"))).toBe(true);
   });
 
   it("re-throws non-ZodError errors as-is (not wrapped in ConfigError)", () => {
-    // Catches: if(error instanceof z.ZodError) → if(true) mutation
-    // With if(true): ALL errors get wrapped in ConfigError via zodIssuesToStrings
-    // Non-ZodError objects don't have .issues property → zodIssuesToStrings would throw or produce garbage
-    // We pass something that Zod schema will throw a ZodError for, so we can't easily trigger a non-ZodError
-    // in normal flow. But we CAN test that a valid ZodError IS caught correctly.
-    // Actually, the if(true) mutation means non-ZodErrors also get caught.
-    // The only way to trigger a non-ZodError from rawConfigSchema.parse() is if Zod itself has a bug.
-    // This might be an equivalent mutant for practical purposes.
-    // Let's verify: pass null which makes z.parse throw ZodError (not other error)
     expect(() => parseConfig(null)).toThrow(ConfigError);
   });
 
@@ -282,51 +270,44 @@ describe("parseConfig", () => {
     expect(configErr.issues.some((i) => i.includes("src/dist"))).toBe(true);
   });
 
-  it("migrates old letta: format to provider: { type: 'letta', ... }", () => {
-    const config = parseConfig(validRaw);
-    expect(config.provider.type).toBe("letta");
-    const provider = config.provider as Extract<typeof config.provider, { type: "letta" }>;
-    expect(provider.model).toBe(LETTA_MODEL);
-    expect(provider.embedding).toBe(LETTA_EMBEDDING);
-  });
-
-  it("parses new provider: { type: 'letta' } format", () => {
-    const raw = {
-      provider: { type: "letta", model: LETTA_MODEL, embedding: LETTA_EMBEDDING },
-      repos: validRaw.repos,
-    };
-    const config = parseConfig(raw);
-    expect(config.provider.type).toBe("letta");
-    const provider = config.provider as Extract<typeof config.provider, { type: "letta" }>;
-    expect(provider.model).toBe(LETTA_MODEL);
-  });
-
-  it("parses viking provider config", () => {
-    const raw = {
-      provider: { type: "viking", openrouter_model: VIKING_OPENROUTER_MODEL },
-      repos: validRaw.repos,
-    };
-    const config = parseConfig(raw);
-    expect(config.provider.type).toBe("viking");
-    const provider = config.provider as Extract<typeof config.provider, { type: "viking" }>;
-    expect(provider.openrouterModel).toBe(VIKING_OPENROUTER_MODEL);
-    expect(provider.vikingUrl).toBeUndefined();
-  });
-
-  it("parses viking provider config with optional viking_url", () => {
-    const raw = {
-      provider: { type: "viking", openrouter_model: VIKING_OPENROUTER_MODEL, viking_url: "http://localhost:1933" },
-      repos: validRaw.repos,
-    };
-    const config = parseConfig(raw);
-    expect(config.provider.type).toBe("viking");
-    const provider = config.provider as Extract<typeof config.provider, { type: "viking" }>;
-    expect(provider.vikingUrl).toBe("http://localhost:1933");
-  });
-
-  it("throws ConfigError when neither provider nor letta is specified", () => {
+  it("throws ConfigError when provider is missing", () => {
     const configErr = parseConfigError({ repos: validRaw.repos });
-    expect(configErr.issues.some((i) => i.includes("provider") || i.includes("letta"))).toBe(true);
+    expect(configErr.issues.some((i) => i.includes("provider"))).toBe(true);
+  });
+
+  describe("legacy config rejection", () => {
+    it("rejects a top-level letta: block with a helpful message", () => {
+      const configErr = parseConfigError({
+        letta: { model: "openai/gpt-4.1", embedding: "openai/text-embedding-3-small" },
+        repos: validRaw.repos,
+      });
+      expect(configErr.issues.some((i) => i.includes("letta"))).toBe(true);
+      expect(configErr.issues.some((i) => i.includes("provider"))).toBe(true);
+    });
+
+    it("rejects provider.type", () => {
+      const configErr = parseConfigError({
+        provider: { type: "viking", model: MODEL },
+        repos: validRaw.repos,
+      });
+      expect(configErr.issues.some((i) => i.includes("provider.type"))).toBe(true);
+    });
+
+    it("rejects provider.openrouter_model", () => {
+      const configErr = parseConfigError({
+        provider: { openrouter_model: "openai/gpt-4o-mini" },
+        repos: validRaw.repos,
+      });
+      expect(configErr.issues.some((i) => i.includes("openrouter_model"))).toBe(true);
+    });
+
+    it("rejects provider.embedding", () => {
+      const configErr = parseConfigError({
+        provider: { model: MODEL, embedding: "openai/text-embedding-3-small" },
+        repos: validRaw.repos,
+      });
+      expect(configErr.issues.some((i) => i.includes("embedding"))).toBe(true);
+    });
   });
 });
 
@@ -350,10 +331,10 @@ describe("include_submodules config field", () => {
 
 describe("formatConfigError", () => {
   it("formats a ConfigError into readable lines", () => {
-    const err = new ConfigError(["letta.model: Required", "repos.app.path: Expected string"]);
+    const err = new ConfigError(["provider.model: Required", "repos.app.path: Expected string"]);
     const output = formatConfigError(err);
     expect(output).toContain("Config validation failed");
-    expect(output).toContain("letta.model: Required");
+    expect(output).toContain("provider.model: Required");
     expect(output).toContain("repos.app.path: Expected string");
   });
 
@@ -383,10 +364,7 @@ describe("ConfigError", () => {
   });
 
   it("message joins issues with newline separator (not empty string)", () => {
-    // Catches: join("\n") → join("") mutation in super() call
     const err = new ConfigError(["issue-one", "issue-two"]);
-    // With join("\n"): "...  - issue-one\n  - issue-two"
-    // With join(""): "...  - issue-one  - issue-two" (no newline between)
     expect(err.message).toContain("  - issue-one\n  - issue-two");
   });
 });

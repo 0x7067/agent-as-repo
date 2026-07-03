@@ -6,9 +6,7 @@ import {
 } from "./prompts.js";
 
 const REPO_NAME = "my-app";
-const MOBILE_APP_DESCRIPTION = "A mobile app";
 const ARCHIVAL_MEMORY = "archival memory";
-const CROSS_REPO_QUERY = "query other repo-expert agents";
 
 describe("buildPersona", () => {
   it("generates persona from repo name and description", () => {
@@ -35,36 +33,6 @@ describe("buildPersona", () => {
     expect(persona).toContain("\n");
     const lines = persona.split("\n");
     expect(lines.length).toBeGreaterThan(1);
-  });
-
-  it("includes cross-repo instruction when cross-agent tools are configured", () => {
-    const persona = buildPersona(REPO_NAME, MOBILE_APP_DESCRIPTION, undefined, [
-      "send_message_to_agents_matching_tags",
-    ]);
-    expect(persona).toContain(CROSS_REPO_QUERY);
-    expect(persona).toContain("send_message_to_agents_matching_tags");
-  });
-
-  it("includes cross-repo instruction for wait_for_reply tool", () => {
-    const persona = buildPersona(REPO_NAME, MOBILE_APP_DESCRIPTION, undefined, [
-      "send_message_to_agent_and_wait_for_reply",
-    ]);
-    expect(persona).toContain(CROSS_REPO_QUERY);
-  });
-
-  it("omits cross-repo instruction when no cross-agent tools configured", () => {
-    const persona = buildPersona(REPO_NAME, MOBILE_APP_DESCRIPTION);
-    expect(persona).not.toContain(CROSS_REPO_QUERY);
-  });
-
-  it("omits cross-repo instruction when tools is empty", () => {
-    const persona = buildPersona(REPO_NAME, MOBILE_APP_DESCRIPTION, undefined, []);
-    expect(persona).not.toContain(CROSS_REPO_QUERY);
-  });
-
-  it("omits cross-repo instruction when tools has no messaging tools", () => {
-    const persona = buildPersona(REPO_NAME, MOBILE_APP_DESCRIPTION, undefined, ["some_other_tool"]);
-    expect(persona).not.toContain(CROSS_REPO_QUERY);
   });
 
   it("includes naming tools and frameworks instruction", () => {
