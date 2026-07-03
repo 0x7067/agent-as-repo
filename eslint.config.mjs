@@ -321,6 +321,27 @@ export default tseslint.config(
 	},
 
 	// ============================================================
+	// 🚪 ENTRY POINTS: CJS/tsx-compatible error handling
+	// ============================================================
+	// These files intentionally use `.catch()` chains instead of top-level
+	// await. Reasons (see .claude/napkin.md, commit 7d0cfb4):
+	//   1. `tsx` executes build scripts as CJS; top-level await breaks at runtime.
+	//   2. The SEA bundle target (scripts/build.ts `seaShared`, format: "cjs")
+	//      cannot use top-level await at all.
+	// Do not "fix" these files by introducing top-level await.
+	{
+		files: [
+			"scripts/build.ts",
+			"scripts/sea-cli-entry.ts",
+			"scripts/sea-mcp-entry.ts",
+			"src/mcp-server.ts",
+		],
+		rules: {
+			"unicorn/prefer-top-level-await": "off",
+		},
+	},
+
+	// ============================================================
 	// ⚙️ CONFIG FILES: CommonJS / untyped APIs
 	// ============================================================
 	{
