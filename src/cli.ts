@@ -11,7 +11,7 @@ import { runInit } from "./shell/init.js";
 import { runAllChecks, runDoctorFixes } from "./shell/doctor.js";
 import { formatSelfChecks, runSelfChecks } from "./shell/self-check.js";
 import { completionFileName, generateCompletionScript, type CompletionShell } from "./core/completion.js";
-import { formatDoctorReport } from "./core/doctor.js";
+import { computeDoctorExitCode, formatDoctorReport } from "./core/doctor.js";
 import { ConfigError, formatConfigError } from "./core/config.js";
 import { collectFiles } from "./shell/file-collector.js";
 import { StateFileError, loadState, saveState } from "./shell/state-store.js";
@@ -72,6 +72,7 @@ interface DoctorOpts {
   config: string;
   json?: boolean;
   fix?: boolean;
+  strict?: boolean;
 }
 
 interface SelfCheckOpts {
@@ -682,6 +683,7 @@ program
   .option("--config <path>", "Config file path", "config.yaml")
   .option("--json", "Output checks as JSON")
   .option("--fix", "Apply safe automatic remediations before checks")
+  .option("--strict", "Promote warnings to failures (non-zero exit)")
   .action(async (opts: DoctorOpts) => {
     const configPath = path.resolve(opts.config);
     let fixed: Awaited<ReturnType<typeof runDoctorFixes>> | null = null;
@@ -706,8 +708,8 @@ program
     } else {
       console.log(formatDoctorReport(results));
     }
-    const hasFailures = results.some((r) => r.status === "fail");
-    if (hasFailures) process.exitCode = 1;
+    const exitCode = computeDoctorExitCode(results, Boolean(opts.strict));
+    if (exitCode !== 0) process.exitCode = exitCode;
   });
 
 program

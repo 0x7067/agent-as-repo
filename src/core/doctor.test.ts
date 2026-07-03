@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatDoctorReport, type CheckResult } from "./doctor.js";
+import { computeDoctorExitCode, formatDoctorReport, type CheckResult } from "./doctor.js";
 
 describe("formatDoctorReport", () => {
   it("formats all-pass results", () => {
@@ -73,5 +73,31 @@ describe("formatDoctorReport", () => {
   it("handles empty results", () => {
     const report = formatDoctorReport([]);
     expect(report).toContain("No checks ran");
+  });
+});
+
+describe("computeDoctorExitCode", () => {
+  const passWarn: CheckResult[] = [
+    { name: "A", status: "pass", message: "ok" },
+    { name: "B", status: "warn", message: "meh" },
+  ];
+
+  it("returns 0 when only passes and warnings and strict is off", () => {
+    expect(computeDoctorExitCode(passWarn, false)).toBe(0);
+  });
+
+  it("returns 1 when a warning is present and strict is on", () => {
+    expect(computeDoctorExitCode(passWarn, true)).toBe(1);
+  });
+
+  it("returns 1 when a failure is present regardless of strict", () => {
+    const withFail: CheckResult[] = [{ name: "A", status: "fail", message: "bad" }];
+    expect(computeDoctorExitCode(withFail, false)).toBe(1);
+    expect(computeDoctorExitCode(withFail, true)).toBe(1);
+  });
+
+  it("returns 0 when all pass even under strict", () => {
+    const allPass: CheckResult[] = [{ name: "A", status: "pass", message: "ok" }];
+    expect(computeDoctorExitCode(allPass, true)).toBe(0);
   });
 });

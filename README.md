@@ -62,7 +62,7 @@ pnpm repo-expert mcp-install  # writes the "repo-expert" entry to ~/.claude.json
 | `mcp-install [--global\|--local]` | Write MCP server entry to Claude Code config |
 | `mcp-check [--json]` | Validate existing MCP server entry |
 | `config lint [--json]` | Validate `config.yaml` structure and semantics |
-| `doctor [--fix] [--json]` | Check config, viking/LLM endpoint reachability, repo paths, git, state consistency |
+| `doctor [--fix] [--json] [--strict]` | Check config, viking/LLM endpoint reachability, repo paths, git, state consistency; `--strict` promotes warnings to failures (non-zero exit) |
 | `self-check [--json]` | Check local runtime/toolchain health (Node, pnpm, dependencies) |
 | `completion <shell>` | Print shell completion script (bash, zsh, fish) |
 

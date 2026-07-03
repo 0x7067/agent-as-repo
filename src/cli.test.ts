@@ -476,6 +476,46 @@ describe("cli contract", () => {
     await expect(fs.access(path.join(cwd, ".repo-expert-state.json"))).resolves.toBeUndefined();
   });
 
+  async function writeWarnDoctorWorkspace(cwd: string): Promise<string> {
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    // Unreachable LLM base_url forces checkLlmEndpoint into a warning (never a failure).
+    const config = [
+      "provider:",
+      "  model: qwen3-coder:30b",
+      "  base_url: http://127.0.0.1:1",
+      "repos:",
+      "  my-app:",
+      `    path: ${repoDir}`,
+      "    description: test repo",
+      "    extensions: [.ts]",
+      "    ignore_dirs: [node_modules, .git]",
+      "    bootstrap_on_create: false",
+    ].join("\n");
+    await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
+    return repoDir;
+  }
+
+  it("doctor exits 0 on warnings without --strict", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-doctor-warn-");
+    await writeWarnDoctorWorkspace(cwd);
+
+    const result = runCli(["doctor"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("WARN");
+  });
+
+  it("doctor exits non-zero on warnings with --strict", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-doctor-strict-");
+    await writeWarnDoctorWorkspace(cwd);
+
+    const result = runCli(["doctor", "--strict"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("WARN");
+  });
+
   async function writeAskWorkspace(cwd: string, providerLines: string[]): Promise<void> {
     const repoDir = path.join(cwd, "repo");
     await mkdirWorkspaceDir(repoDir, { recursive: true });
