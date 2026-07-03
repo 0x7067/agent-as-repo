@@ -21,9 +21,8 @@ async function withTempConfig(yamlContent: string, fn: (filePath: string) => Pro
 }
 
 const validYaml = `
-letta:
-  model: openai/gpt-4.1
-  embedding: openai/text-embedding-3-small
+provider:
+  model: qwen3-coder:30b
 
 repos:
   my-app:
@@ -38,9 +37,8 @@ describe("loadConfig", () => {
   it("loads and parses a valid YAML config file", async () => {
     await withTempConfig(validYaml, async (filePath) => {
       const config = await loadConfig(filePath);
-      expect(config.provider.type).toBe("letta");
-      if (config.provider.type !== "letta") throw new Error("Expected letta provider");
-      expect(config.provider.model).toBe("openai/gpt-4.1");
+      expect(config.provider.model).toBe("qwen3-coder:30b");
+      expect(config.provider.baseUrl).toBe("http://localhost:11434/v1");
       expect(config.repos["my-app"].extensions).toEqual([".ts", ".tsx"]);
     });
   });
@@ -63,9 +61,8 @@ describe("loadConfig", () => {
 
   it("resolves tilde paths to absolute paths", async () => {
     const yamlWithTilde = `
-letta:
-  model: openai/gpt-4.1
-  embedding: openai/text-embedding-3-small
+provider:
+  model: qwen3-coder:30b
 
 repos:
   my-app:
@@ -95,17 +92,14 @@ repos:
     };
 
     const config = await loadConfig("/fake/config.yaml", mockFs);
-    expect(config.provider.type).toBe("letta");
-    if (config.provider.type !== "letta") throw new Error("Expected letta provider");
-    expect(config.provider.model).toBe("openai/gpt-4.1");
+    expect(config.provider.model).toBe("qwen3-coder:30b");
     expect(config.repos["my-app"]).toBeDefined();
   });
 
   it("does not expand non-tilde paths through homedir", async () => {
     const yamlAbsolute = `
-letta:
-  model: openai/gpt-4.1
-  embedding: openai/text-embedding-3-small
+provider:
+  model: qwen3-coder:30b
 
 repos:
   my-app:
@@ -143,9 +137,8 @@ repos:
 
   it("resolves relative paths to absolute paths", async () => {
     const yamlWithRelative = `
-letta:
-  model: openai/gpt-4.1
-  embedding: openai/text-embedding-3-small
+provider:
+  model: qwen3-coder:30b
 
 repos:
   my-app:

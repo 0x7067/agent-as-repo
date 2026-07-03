@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fixReconcileDrift, reconcileAgent } from "./reconcile.js";
-import type { AgentProvider, Passage } from "./provider.js";
+import type { AgentProvider, Passage } from "../ports/agent-provider.js";
 import type { AgentState } from "../core/types.js";
 
 function makeAgent(passages: AgentState["passages"]): AgentState {
@@ -21,7 +21,6 @@ function makeProvider(serverPassages: Passage[]): AgentProvider {
     deletePassage: vi.fn().mockResolvedValue(),
     createAgent: vi.fn(),
     deleteAgent: vi.fn(),
-    enableSleeptime: vi.fn(),
     storePassage: vi.fn(),
     getBlock: vi.fn(),
     sendMessage: vi.fn(),

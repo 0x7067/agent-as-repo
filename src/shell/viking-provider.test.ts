@@ -3,11 +3,12 @@ import { VikingProvider } from "./viking-provider.js";
 import type { VikingHttpClient } from "./viking-http.js";
 import type { BlockStorage } from "./block-storage.js";
 
-vi.mock("./openrouter-client.js", () => ({
+vi.mock("./llm-client.js", () => ({
+  DEFAULT_LLM_BASE_URL: "http://localhost:11434/v1",
   toolCallingLoop: vi.fn().mockResolvedValue("mocked response"),
 }));
 
-import { toolCallingLoop } from "./openrouter-client.js";
+import { toolCallingLoop } from "./llm-client.js";
 
 interface VikingHttpClientMethods {
   mkdir: VikingHttpClient["mkdir"];
@@ -57,9 +58,9 @@ describe("VikingProvider", () => {
     mockBlockStorage = makeMockBlockStorage();
     provider = new VikingProvider(
       mockViking as unknown as VikingHttpClient,
-      API_KEY,
       DEFAULT_MODEL,
       mockBlockStorage as unknown as BlockStorage,
+      { apiKey: API_KEY },
     );
   });
 
@@ -71,7 +72,6 @@ describe("VikingProvider", () => {
         description: "A test repo",
         tags: ["test"],
         model: "openai/gpt-4o",
-        embedding: "openai/text-embedding-3-small",
         memoryBlockLimit: 5000,
       };
 
@@ -111,7 +111,6 @@ describe("VikingProvider", () => {
         description: "A test repo",
         tags: ["test"],
         model: "openai/gpt-4o",
-        embedding: "openai/text-embedding-3-small",
         memoryBlockLimit: 5000,
       };
 
@@ -130,20 +129,6 @@ describe("VikingProvider", () => {
 
       expect(mockViking.deleteResource).toHaveBeenCalledWith("viking://resources/myrepo/");
       expect(mockBlockStorage.delete).toHaveBeenCalledWith("myrepo");
-    });
-  });
-
-  describe("enableSleeptime", () => {
-    it("resolves without error and doesn't call any viking methods", async () => {
-      await expect(provider.enableSleeptime("myrepo")).resolves.toBeUndefined();
-
-      expect(mockViking.mkdir).not.toHaveBeenCalled();
-      expect(mockViking.writeFile).not.toHaveBeenCalled();
-      expect(mockViking.readFile).not.toHaveBeenCalled();
-      expect(mockViking.deleteFile).not.toHaveBeenCalled();
-      expect(mockViking.listDirectory).not.toHaveBeenCalled();
-      expect(mockViking.deleteResource).not.toHaveBeenCalled();
-      expect(mockViking.semanticSearch).not.toHaveBeenCalled();
     });
   });
 
@@ -350,7 +335,8 @@ describe("VikingProvider", () => {
     });
 
     it("retries the same model on retryable errors", async () => {
-      provider = new VikingProvider(mockViking, API_KEY, DEFAULT_MODEL, mockBlockStorage, {
+      provider = new VikingProvider(mockViking, DEFAULT_MODEL, mockBlockStorage, {
+        apiKey: API_KEY,
         maxRetriesPerModel: 1,
         retryBaseDelayMs: 0,
       });
@@ -368,7 +354,8 @@ describe("VikingProvider", () => {
     });
 
     it("falls back to secondary model after primary retries are exhausted", async () => {
-      provider = new VikingProvider(mockViking, API_KEY, DEFAULT_MODEL, mockBlockStorage, {
+      provider = new VikingProvider(mockViking, DEFAULT_MODEL, mockBlockStorage, {
+        apiKey: API_KEY,
         fallbackModels: ["moonshotai/kimi-k2.5"],
         maxRetriesPerModel: 0,
         retryBaseDelayMs: 0,
@@ -387,7 +374,8 @@ describe("VikingProvider", () => {
     });
 
     it("does not fallback when overrideModel is explicitly provided", async () => {
-      provider = new VikingProvider(mockViking, API_KEY, DEFAULT_MODEL, mockBlockStorage, {
+      provider = new VikingProvider(mockViking, DEFAULT_MODEL, mockBlockStorage, {
+        apiKey: API_KEY,
         fallbackModels: ["moonshotai/kimi-k2.5"],
         maxRetriesPerModel: 0,
         retryBaseDelayMs: 0,

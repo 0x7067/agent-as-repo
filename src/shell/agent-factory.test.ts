@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createRepoAgent, loadPassages } from "./agent-factory.js";
 import type { RepoConfig } from "../core/types.js";
-import type { AgentProvider, CreateAgentParams } from "./provider.js";
+import type { AgentProvider, CreateAgentParams } from "../ports/agent-provider.js";
 import { makeMockProvider as makeBase } from "./__test__/mock-provider.js";
 
 const FILE_A = "src/a.ts";
@@ -35,22 +35,20 @@ const testConfig: RepoConfig = {
   bootstrapOnCreate: true,
 };
 
-const testLetta = {
-  model: "openai/gpt-4.1",
-  embedding: "openai/text-embedding-3-small",
+const testModelOptions = {
+  model: "qwen3-coder:30b",
 };
 
 describe("createRepoAgent", () => {
   it("creates an agent with correct params", async () => {
     const provider = makeMockProvider();
-    const result = await createRepoAgent(provider, "my-app", testConfig, testLetta);
+    const result = await createRepoAgent(provider, "my-app", testConfig, testModelOptions);
     expect(result.agentId).toBe("agent-abc");
     expect(result.repoName).toBe("my-app");
 
     const [params] = (provider.createAgent as ReturnType<typeof vi.fn>).mock.calls[0] as [CreateAgentParams];
     expect(params.name).toBe("repo-expert-my-app");
-    expect(params.model).toBe("openai/gpt-4.1");
-    expect(params.embedding).toBe("openai/text-embedding-3-small");
+    expect(params.model).toBe("qwen3-coder:30b");
     expect(params.tags).toEqual(["repo-expert", "frontend", "mobile"]);
     expect(params.description).toBe("Test repo");
     expect(params.memoryBlockLimit).toBe(5000);

@@ -5,7 +5,6 @@ export interface CreateAgentParams {
   persona?: string;
   tags: string[];
   model: string;
-  embedding: string;
   memoryBlockLimit: number;
   tools?: string[];
 }
@@ -33,7 +32,6 @@ export interface SendMessageOptions {
 export interface AgentProvider {
   createAgent(this: void, params: CreateAgentParams): Promise<CreateAgentResult>;
   deleteAgent(this: void, agentId: string): Promise<void>;
-  enableSleeptime(this: void, agentId: string): Promise<void>;
   storePassage(this: void, agentId: string, text: string): Promise<string>;
   deletePassage(this: void, agentId: string, passageId: string): Promise<void>;
   listPassages(this: void, agentId: string): Promise<Passage[]>;

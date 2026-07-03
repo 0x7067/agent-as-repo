@@ -16,7 +16,7 @@
  * implemented on top of `AgentProvider` without any Groups API dependency.
  */
 
-import type { AgentProvider } from "./provider.js";
+import type { AgentProvider } from "../ports/agent-provider.js";
 
 export const BROADCAST_ASK_DEFAULT_TIMEOUT_MS = 60_000;
 

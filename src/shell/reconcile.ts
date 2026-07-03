@@ -1,4 +1,4 @@
-import type { AgentProvider } from "./provider.js";
+import type { AgentProvider } from "../ports/agent-provider.js";
 import type { AgentState, PassageMap } from "../core/types.js";
 import { cleanMissingFromMap, computeReconcilePlan } from "../core/reconcile.js";
 

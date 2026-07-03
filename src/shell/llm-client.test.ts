@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
-  callOpenRouter,
+  callChatCompletions,
   toolCallingLoop,
+  DEFAULT_LLM_BASE_URL,
   type ToolDefinition,
   type ToolHandler,
-} from "./openrouter-client.js";
+} from "./llm-client.js";
 
 function makeResponse(status: number, body: unknown): Response {
   return {
@@ -14,9 +15,9 @@ function makeResponse(status: number, body: unknown): Response {
   } as unknown as Response;
 }
 
-const MODEL = "openai/gpt-4o-mini";
+const MODEL = "qwen3-coder:30b";
 const API_KEY = "test-api-key";
-const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
+const DEFAULT_BASE_URL = DEFAULT_LLM_BASE_URL;
 const HELPFUL_SYSTEM_PROMPT = "You are helpful.";
 const WEATHER_SYSTEM_PROMPT = "You are a weather assistant.";
 const PARIS_WEATHER_QUESTION = "What is the weather in Paris?";
@@ -72,7 +73,7 @@ const TOOLS: ToolDefinition[] = [
   },
 ];
 
-describe("callOpenRouter", () => {
+describe("callChatCompletions", () => {
   let mockFetch: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -80,14 +81,19 @@ describe("callOpenRouter", () => {
     vi.stubGlobal("fetch", mockFetch);
   });
 
+  it("defaults to the local Ollama base URL", () => {
+    expect(DEFAULT_LLM_BASE_URL).toBe("http://localhost:11434/v1");
+  });
+
   it("posts to the correct URL with correct headers and body", async () => {
     mockFetch.mockResolvedValue(makeResponse(200, makeChoice("Hello!")));
 
-    await callOpenRouter(
+    await callChatCompletions(
       [{ role: "user", content: "Hi" }],
       TOOLS,
       MODEL,
-      API_KEY
+      DEFAULT_BASE_URL,
+      API_KEY,
     );
 
     const firstCall = mockFetch.mock.calls[0] as [string, RequestInit];
@@ -104,10 +110,20 @@ describe("callOpenRouter", () => {
     }));
   });
 
+  it("omits the Authorization header when no apiKey is provided", async () => {
+    mockFetch.mockResolvedValue(makeResponse(200, makeChoice("Hello!")));
+
+    await callChatCompletions([{ role: "user", content: "Hi" }], [], MODEL);
+
+    const firstCall = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(firstCall[0]).toBe(`${DEFAULT_BASE_URL}/chat/completions`);
+    expect(firstCall[1].headers).not.toHaveProperty("Authorization");
+  });
+
   it("omits tools key when tools array is empty", async () => {
     mockFetch.mockResolvedValue(makeResponse(200, makeChoice("Hello!")));
 
-    await callOpenRouter([{ role: "user", content: "Hi" }], [], MODEL, API_KEY);
+    await callChatCompletions([{ role: "user", content: "Hi" }], [], MODEL, DEFAULT_BASE_URL, API_KEY);
 
     const body = getJsonRequestBody(mockFetch, 0) as Record<string, unknown>;
     expect(body).not.toHaveProperty("tools");
@@ -117,20 +133,20 @@ describe("callOpenRouter", () => {
     mockFetch.mockResolvedValue(makeResponse(429, { error: "rate limited" }));
 
     await expect(
-      callOpenRouter([{ role: "user", content: "Hi" }], [], MODEL, API_KEY)
+      callChatCompletions([{ role: "user", content: "Hi" }], [], MODEL, DEFAULT_BASE_URL, API_KEY)
     ).rejects.toThrow(/429/);
   });
 
   it("uses custom baseUrl when provided", async () => {
     mockFetch.mockResolvedValue(makeResponse(200, makeChoice("Hello!")));
-    const customBase = "http://localhost:8080/api/v1";
+    const customBase = "https://openrouter.ai/api/v1";
 
-    await callOpenRouter(
+    await callChatCompletions(
       [{ role: "user", content: "Hi" }],
       [],
       MODEL,
+      customBase,
       API_KEY,
-      customBase
     );
 
     expect(mockFetch).toHaveBeenCalledWith(
@@ -143,11 +159,12 @@ describe("callOpenRouter", () => {
     const response = makeChoice("Paris is the capital of France.");
     mockFetch.mockResolvedValue(makeResponse(200, response));
 
-    const result = await callOpenRouter(
+    const result = await callChatCompletions(
       [{ role: "user", content: "What is the capital of France?" }],
       [],
       MODEL,
-      API_KEY
+      DEFAULT_BASE_URL,
+      API_KEY,
     );
 
     expect(result).toEqual(response);
@@ -164,12 +181,12 @@ describe("callOpenRouter", () => {
       });
     vi.stubGlobal("fetch", abortingFetch);
 
-    const promise = callOpenRouter(
+    const promise = callChatCompletions(
       [{ role: "user", content: "Hi" }],
       [],
       MODEL,
-      API_KEY,
       DEFAULT_BASE_URL,
+      API_KEY,
       { signal: controller.signal },
     );
 

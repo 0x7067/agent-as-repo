@@ -8,7 +8,7 @@ import { updateAgentField } from "../core/state.js";
 import { shouldIncludeFile } from "../core/filter.js";
 import { partitionDiffPaths } from "../core/submodule.js";
 import { listSubmodules, expandSubmoduleFiles } from "./submodule-collector.js";
-import type { AgentProvider } from "./provider.js";
+import type { AgentProvider } from "../ports/agent-provider.js";
 import type { AgentState, Config, FileInfo, RepoConfig } from "../core/types.js";
 import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
 import type { GitPort } from "../ports/git.js";
