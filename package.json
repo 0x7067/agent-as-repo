@@ -5,7 +5,7 @@
   "main": "index.js",
   "bin": {
     "repo-expert": "./src/cli.ts",
-    "letta-tools": "./src/mcp-server.ts"
+    "repo-expert-mcp": "./src/mcp-server.ts"
   },
   "scripts": {
     "build": "tsx scripts/build.ts",
@@ -27,8 +27,7 @@
     "test": "vitest run",
     "repo-expert": "tsx src/cli.ts",
     "mcp-server": "tsx src/mcp-server.ts",
-    "test:mutation": "stryker run",
-    "provider:parity-stress": "tsx spikes/provider-parity-stress.ts"
+    "test:mutation": "stryker run"
   },
   "keywords": [],
   "author": "",
@@ -43,7 +42,6 @@
     }
   },
   "dependencies": {
-    "@letta-ai/letta-client": "^1.12.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^14.0.3",
     "dotenv": "^17.3.1",

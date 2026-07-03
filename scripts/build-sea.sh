@@ -81,6 +81,6 @@ package_sea() {
 }
 
 package_sea "sea-config-cli.json" "dist/sea-cli.blob" "repo-expert"
-package_sea "sea-config-mcp.json" "dist/sea-mcp.blob" "letta-tools"
+package_sea "sea-config-mcp.json" "dist/sea-mcp.blob" "repo-expert-mcp"
 
 printf 'SEA packaging complete!\n'
