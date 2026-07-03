@@ -53,6 +53,7 @@ pnpm repo-expert mcp-install  # writes the "repo-expert" entry to ~/.claude.json
 | `reconcile [--repo] [--fix]` | Compare local passage state vs the provider, detect and fix drift |
 | `list [--json] [--live]` | List all agents with passage counts |
 | `status [--repo]` | Show agent memory stats and health |
+| `consolidate [--repo]` | Rewrite the architecture/conventions memory blocks via the LLM (manual run; also runs post-sync when `consolidate_on_sync` is enabled) |
 | `export [--repo]` | Export agent memory to markdown |
 | `onboard <repo>` | Guided codebase walkthrough for new developers |
 | `destroy [--repo] [--force] [--dry-run]` | Delete agents |
@@ -95,6 +96,10 @@ provider:
 ```
 
 OpenViking owns embeddings for archival search — configure the embedding backend in `~/.openviking/ov.conf` (typically delegating to Ollama, e.g. `nomic-embed-text`), not in `config.yaml`.
+
+### Memory consolidation
+
+The agent's `architecture`/`conventions` memory blocks can improve over time instead of staying frozen at bootstrap. Run `repo-expert consolidate [--repo]` for a one-off refresh, or set `defaults.consolidate_on_sync: true` to run it automatically after any `sync` (and `watch`, which calls sync) that touches at least `consolidate_min_files_changed` files. Consolidation runs one restricted LLM turn that may only rewrite the architecture/conventions blocks — the persona block is never touched — and it is non-fatal: if it fails or returns nothing usable, the old blocks are kept and the sync still succeeds.
 
 ### Environment variables (`.env`)
 

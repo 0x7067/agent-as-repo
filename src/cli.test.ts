@@ -134,6 +134,7 @@ describe("cli contract", () => {
       sync [options] Sync file changes to agents
       list [options] List all agents
       status [options] Show agent memory stats and health
+      consolidate [options] Consolidate architecture/conventions memory blocks via the LLM
       export [options] Export agent memory to markdown
       onboard <repo> Guided codebase walkthrough for new developers
       destroy [options] Delete agents
@@ -459,6 +460,60 @@ describe("cli contract", () => {
     expect(result.status).toBe(0);
     const payload = JSON.parse(result.stdout) as Array<{ repoName: string }>;
     expect(payload[0].repoName).toBe("my-app");
+  });
+
+  it("runs the consolidate command against a repo agent", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-consolidate-");
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["consolidate", "--repo", "my-app"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Consolidating memory for "my-app"');
+    expect(result.stdout).toContain("Done.");
+  });
+
+  it("consolidate reports a skip when the provider fails, without erroring", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-consolidate-fail-");
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["consolidate", "--repo", "my-app"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_FAIL_CONSOLIDATE_ONCE: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Skipped");
   });
 
   it("supports doctor --fix", async () => {

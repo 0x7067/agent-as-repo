@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- provider keeps sendMessage and the restricted consolidateMemory turn in one module alongside their shared retry loop. */
 import { randomUUID } from "node:crypto";
 import { buildPersona } from "../core/prompts.js";
 import type {
@@ -7,9 +8,10 @@ import type {
   Passage,
   MemoryBlock,
   SendMessageOptions,
+  ConsolidateMemoryOptions,
 } from "../ports/agent-provider.js";
 import type { VikingHttpClient } from "./viking-http.js";
-import { toolCallingLoop, DEFAULT_LLM_BASE_URL, type ToolDefinition } from "./llm-client.js";
+import { toolCallingLoop, DEFAULT_LLM_BASE_URL, type ToolDefinition, type ToolHandler } from "./llm-client.js";
 import type { BlockStorage } from "./block-storage.js";
 
 export interface VikingRuntimeOptions {
@@ -227,7 +229,6 @@ export class VikingProvider implements AgentProvider {
     return Promise.resolve({ value, limit: 5000 });
   }
 
-  // eslint-disable-next-line sonarjs/cognitive-complexity
   async sendMessage(agentId: string, content: string, options?: SendMessageOptions): Promise<string> {
     const [personaBlock, archBlock, convBlock] = await Promise.all([
       this.getBlock(agentId, "persona"),
@@ -285,36 +286,119 @@ export class VikingProvider implements AgentProvider {
       },
     };
 
-    const modelCandidates = options?.overrideModel
-      ? [options.overrideModel]
+    return this.runToolCallingLoop({
+      systemPrompt,
+      userMessage: content,
+      tools,
+      toolHandlers,
+      ...(options?.overrideModel === undefined ? {} : { overrideModel: options.overrideModel }),
+      ...(options?.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }),
+      ...(options?.signal === undefined ? {} : { signal: options.signal }),
+    });
+  }
+
+  /**
+   * Consolidation turn: exposes ONLY `memory_replace`, restricted to the
+   * architecture/conventions blocks (persona rejected in the handler, not just
+   * the prompt), and caps rewrites at the block char limit. Oversized or
+   * disallowed writes are rejected so the old block is kept intact.
+   */
+  async consolidateMemory(agentId: string, prompt: string, options?: ConsolidateMemoryOptions): Promise<void> {
+    const blockCharLimit = options?.blockCharLimit ?? 5000;
+    const systemPrompt = [
+      "You maintain the architecture and conventions memory blocks for a codebase expert.",
+      "Refine only those two blocks. Never modify the persona block.",
+    ].join("\n");
+
+    const tools: ToolDefinition[] = [
+      {
+        type: "function",
+        function: {
+          name: "memory_replace",
+          description: "Update the architecture or conventions memory block with new content",
+          parameters: {
+            type: "object",
+            properties: {
+              label: { type: "string", description: "Block label (architecture or conventions)" },
+              value: { type: "string", description: "New block content" },
+            },
+            required: ["label", "value"],
+          },
+        },
+      },
+    ];
+
+    const toolHandlers = {
+      memory_replace: async (args: Record<string, unknown>): Promise<string> => {
+        const label = args["label"];
+        const value = args["value"];
+        if (label !== "architecture" && label !== "conventions") {
+          return `Error: block '${String(label)}' cannot be modified during consolidation. Only 'architecture' and 'conventions' are allowed.`;
+        }
+        if (typeof value !== "string") {
+          return `Error: value for '${label}' must be a string.`;
+        }
+        if (value.length > blockCharLimit) {
+          return `Error: value for '${label}' is ${String(value.length)} chars, over the ${String(blockCharLimit)}-char limit. Keep it shorter; the old block was left unchanged.`;
+        }
+        await this.updateBlock(agentId, label, value);
+        return `Updated block '${label}'`;
+      },
+    };
+
+    await this.runToolCallingLoop({
+      systemPrompt,
+      userMessage: prompt,
+      tools,
+      toolHandlers,
+      maxSteps: options?.maxSteps ?? 2,
+      ...(options?.overrideModel === undefined ? {} : { overrideModel: options.overrideModel }),
+      ...(options?.signal === undefined ? {} : { signal: options.signal }),
+    });
+  }
+
+  // eslint-disable-next-line sonarjs/cognitive-complexity
+  private async runToolCallingLoop(params: {
+    systemPrompt: string;
+    userMessage: string;
+    tools: ToolDefinition[];
+    toolHandlers: Partial<Record<string, ToolHandler>>;
+    overrideModel?: string;
+    maxSteps?: number;
+    signal?: AbortSignal;
+  }): Promise<string> {
+    const { systemPrompt, userMessage, tools, toolHandlers, overrideModel, maxSteps, signal } = params;
+
+    const modelCandidates = overrideModel
+      ? [overrideModel]
       : [this.model, ...this.fallbackModels.filter((candidate) => candidate !== this.model)];
     const failureMessages: string[] = [];
 
     for (const modelCandidate of modelCandidates) {
       for (let attempt = 0; attempt <= this.maxRetriesPerModel; attempt++) {
-        if (options?.signal?.aborted) {
-          const reason: unknown = options.signal.reason;
+        if (signal?.aborted) {
+          const reason: unknown = signal.reason;
           throw reason instanceof Error ? reason : new Error(unknownToMessage(reason) || "Request aborted");
         }
 
         try {
           const loopParams = {
             systemPrompt,
-            userMessage: content,
+            userMessage,
             tools,
             toolHandlers,
             model: modelCandidate,
             baseUrl: this.baseUrl,
             requestTimeoutMs: this.requestTimeoutMs,
             ...(this.apiKey === undefined ? {} : { apiKey: this.apiKey }),
-            ...(options?.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }),
-            ...(options?.signal === undefined ? {} : { signal: options.signal }),
+            ...(maxSteps === undefined ? {} : { maxSteps }),
+            ...(signal === undefined ? {} : { signal }),
           };
           return await toolCallingLoop(loopParams);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           failureMessages.push(`${modelCandidate} (attempt ${String(attempt + 1)}): ${message}`);
-          if (options?.signal?.aborted || isAbortLikeError(error)) throw error;
+          if (signal?.aborted || isAbortLikeError(error)) throw error;
           if (!isRetryableModelError(error)) throw error;
           if (attempt >= this.maxRetriesPerModel) break;
           const backoffMs = this.retryBaseDelayMs * Math.pow(2, attempt);
@@ -326,3 +410,4 @@ export class VikingProvider implements AgentProvider {
     throw new Error(`All model attempts failed:\n${failureMessages.join("\n")}`);
   }
 }
+/* eslint-enable max-lines */

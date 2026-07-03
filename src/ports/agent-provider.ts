@@ -29,6 +29,14 @@ export interface SendMessageOptions {
   signal?: AbortSignal;
 }
 
+export interface ConsolidateMemoryOptions {
+  overrideModel?: string;
+  maxSteps?: number;
+  signal?: AbortSignal;
+  /** Max characters allowed per block; oversized rewrites are rejected. */
+  blockCharLimit?: number;
+}
+
 export interface AgentProvider {
   createAgent(this: void, params: CreateAgentParams): Promise<CreateAgentResult>;
   deleteAgent(this: void, agentId: string): Promise<void>;
@@ -38,4 +46,11 @@ export interface AgentProvider {
   getBlock(this: void, agentId: string, label: string): Promise<MemoryBlock>;
   updateBlock(this: void, agentId: string, label: string, value: string): Promise<MemoryBlock>;
   sendMessage(this: void, agentId: string, content: string, options?: SendMessageOptions): Promise<string>;
+  /**
+   * Run a single restricted tool-calling turn that may rewrite ONLY the
+   * architecture/conventions blocks via `memory_replace`. The persona block is
+   * never exposed. Implementations must reject oversized or non-allowed writes
+   * so consolidation can never make memory worse.
+   */
+  consolidateMemory(this: void, agentId: string, prompt: string, options?: ConsolidateMemoryOptions): Promise<void>;
 }

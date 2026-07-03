@@ -32,6 +32,8 @@ defaults:
   # ask_timeout_ms: 60000      # Default timeout for single-agent ask requests
   chunking: tree-sitter       # Default: symbol-boundary chunking for .ts/.tsx/.js/.jsx
                                # Use "raw" for ~2KB text splits; other file types fall back to raw
+  # consolidate_on_sync: false        # Opt-in: refresh architecture/conventions blocks via the LLM after a sync
+  # consolidate_min_files_changed: 5  # Only consolidate when a sync touches at least this many files
   # tools:                    # Additional tool names for all agents (per-repo overrides)
   #   - archival_memory_search
 

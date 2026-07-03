@@ -3,6 +3,8 @@ import path from "node:path";
 import { loadState, saveState } from "./state-store.js";
 import { collectFiles } from "./file-collector.js";
 import { syncRepo } from "./sync.js";
+import { consolidateAgentMemory } from "./consolidate.js";
+import { shouldConsolidate } from "../core/consolidate.js";
 import { shouldSync, formatSyncLog, computeBackoffDelay } from "../core/watch.js";
 import { updateAgentField } from "../core/state.js";
 import { shouldIncludeFile } from "../core/filter.js";
@@ -271,6 +273,20 @@ export async function watchRepos(params: WatchParams): Promise<void> {
       });
 
       await persistSyncResult(repoName, result.passages, result.lastSyncCommit);
+
+      if (shouldConsolidate(result, config.defaults)) {
+        const consolidation = await consolidateAgentMemory({
+          provider,
+          agentId: agentInfo.agentId,
+          changedFiles,
+          syncResult: result,
+          blockCharLimit: repoConfig.memoryBlockLimit,
+          log,
+        });
+        if (consolidation.consolidated) {
+          log(`[${repoName}] consolidated architecture/conventions memory blocks`);
+        }
+      }
 
       const suffix = isEventSync ? " [event]" : "";
       const elapsedMs = Date.now() - start;

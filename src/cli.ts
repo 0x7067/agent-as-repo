@@ -29,6 +29,8 @@ import { partitionDiffPaths } from "./core/submodule.js";
 import { listSubmodules, expandSubmoduleFiles } from "./shell/submodule-collector.js";
 import { addAgentToState, removeAgentFromState, updateAgentField, updatePassageMap } from "./core/state.js";
 import { syncRepo } from "./shell/sync.js";
+import { consolidateAgentMemory } from "./shell/consolidate.js";
+import { shouldConsolidate } from "./core/consolidate.js";
 import { resolveTreeSitterWasmPaths } from "./shell/tree-sitter-paths.js";
 import { getAgentStatus, getAgentStatusData } from "./shell/status.js";
 import { exportAgent } from "./shell/export.js";
@@ -101,6 +103,11 @@ interface SyncOpts {
 interface RepoOpts {
   repo?: string;
   json?: boolean;
+}
+
+interface ConsolidateCliOpts {
+  repo?: string;
+  config: string;
 }
 
 interface DestroyOpts {
@@ -271,6 +278,15 @@ class FakeProvider implements AgentProvider {
       return `model=${options?.overrideModel ?? "default"}`;
     }
     return "ok";
+  }
+
+  async consolidateMemory(agentId: string, _prompt: string, _options?: unknown): Promise<void> {
+    if (process.env["REPO_EXPERT_TEST_FAIL_CONSOLIDATE_ONCE"] === "1") {
+      process.env["REPO_EXPERT_TEST_FAIL_CONSOLIDATE_ONCE"] = "0";
+      throw new Error("simulated consolidation failure");
+    }
+    await this.updateBlock(agentId, "architecture", "consolidated architecture");
+    await this.updateBlock(agentId, "conventions", "consolidated conventions");
   }
 }
 
@@ -1204,6 +1220,21 @@ program
 
       state = updateAgentField(state, repoName, { passages: result.passages, lastSyncCommit: result.lastSyncCommit });
       await saveState(STATE_FILE, state);
+
+      if (shouldConsolidate(result, config.defaults)) {
+        const consolidation = await consolidateAgentMemory({
+          provider,
+          agentId: agentInfo.agentId,
+          changedFiles,
+          syncResult: result,
+          blockCharLimit: repoConfig.memoryBlockLimit,
+          log,
+        });
+        if (consolidation.consolidated) {
+          log(`  Consolidated architecture/conventions memory blocks.`);
+        }
+      }
+
       log(`  Done.`);
       syncResults.push({
         repoName,
@@ -1310,6 +1341,43 @@ program
 
     if (opts.json) {
       console.log(JSON.stringify(rows, null, 2));
+    }
+  });
+
+program
+  .command("consolidate")
+  .description("Consolidate architecture/conventions memory blocks via the LLM")
+  .option("--repo <name>", "Consolidate a single repo agent")
+  .option("--config <path>", "Config file path", "config.yaml")
+  .action(async (opts: ConsolidateCliOpts) => {
+    const state = await loadState(STATE_FILE);
+    const config = await loadConfigForProvider(path.resolve(opts.config));
+    const provider = createProviderForCommands(config);
+    const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
+
+    for (const repoName of repoNames) {
+      const agentInfo = requireAgent(state, repoName);
+      if (!agentInfo) return;
+
+      const repoConfig = config ? getOwnRecordValue(config.repos, repoName) : undefined;
+      const blockCharLimit =
+        repoConfig?.memoryBlockLimit ?? config?.defaults.memoryBlockLimit ?? 5000;
+
+      console.log(`Consolidating memory for "${repoName}"...`);
+      const result = await consolidateAgentMemory({
+        provider,
+        agentId: agentInfo.agentId,
+        changedFiles: [],
+        syncResult: { filesReIndexed: 0, filesRemoved: 0 },
+        blockCharLimit,
+        log: (line: string) => { console.log(line); },
+      });
+
+      if (result.consolidated) {
+        console.log(`  Done.`);
+      } else {
+        console.log(`  Skipped: ${result.error ?? "nothing to consolidate"}.`);
+      }
     }
   });
 

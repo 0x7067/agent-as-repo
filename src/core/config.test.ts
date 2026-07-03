@@ -120,6 +120,22 @@ describe("parseConfig", () => {
     expect(config.provider.fastModel).toBeUndefined();
   });
 
+  it("defaults consolidate_on_sync to false and consolidate_min_files_changed to 5", () => {
+    const config = parseConfig(validRaw);
+    expect(config.defaults.consolidateOnSync).toBe(false);
+    expect(config.defaults.consolidateMinFilesChanged).toBe(5);
+  });
+
+  it("applies explicit consolidation defaults", () => {
+    const raw = {
+      ...validRaw,
+      defaults: { consolidate_on_sync: true, consolidate_min_files_changed: 12 },
+    };
+    const config = parseConfig(raw);
+    expect(config.defaults.consolidateOnSync).toBe(true);
+    expect(config.defaults.consolidateMinFilesChanged).toBe(12);
+  });
+
   it("allows per-repo overrides of defaults", () => {
     const raw = {
       ...validRaw,
