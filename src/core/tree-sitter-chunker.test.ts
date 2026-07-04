@@ -78,4 +78,70 @@ describe("treeSitterStrategy", () => {
     expect(chunks.some((chunk) => chunk.text.includes("CLASS: SyncOrchestrator"))).toBe(true);
     expect(chunks.some((chunk) => chunk.text.includes("METHOD: run"))).toBe(true);
   });
+
+  it("parses .mts files with the typescript grammar", () => {
+    const file: FileInfo = {
+      path: "src/example.mts",
+      content: "export function foo(): void {\n  console.log('foo');\n}\n",
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("FUNCTION: foo"))).toBe(true);
+  });
+
+  it("parses .cts files with the typescript grammar", () => {
+    const file: FileInfo = {
+      path: "src/example.cts",
+      content: "export function foo(): void {\n  console.log('foo');\n}\n",
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("FUNCTION: foo"))).toBe(true);
+  });
+
+  it("falls back to raw chunking for unsupported languages like Java, instead of misparsing with the TS grammar", () => {
+    const file: FileInfo = {
+      path: "src/Foo.java",
+      content: [
+        "public class Foo {",
+        "  void bar() {",
+        "    System.out.println(\"bar\");",
+        "  }",
+        "}",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.length).toBeGreaterThan(0);
+    for (const chunk of chunks) {
+      expect(chunk.text.startsWith("FILE: src/Foo.java")).toBe(true);
+      expect(chunk.text).not.toContain("CLASS:");
+      expect(chunk.text).not.toContain("METHOD:");
+    }
+  });
+
+  it("falls back to raw chunking for unsupported languages like Python, instead of misparsing with the TS grammar", () => {
+    const file: FileInfo = {
+      path: "src/foo.py",
+      content: [
+        "def foo():",
+        "    pass",
+        "",
+        "class Bar:",
+        "    pass",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.length).toBeGreaterThan(0);
+    for (const chunk of chunks) {
+      expect(chunk.text.startsWith("FILE: src/foo.py")).toBe(true);
+      expect(chunk.text).not.toContain("CLASS:");
+      expect(chunk.text).not.toContain("FUNCTION:");
+    }
+  });
 });

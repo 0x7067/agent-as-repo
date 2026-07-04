@@ -26,12 +26,20 @@ let initPromise: Promise<void> | null = null;
 let parser: Parser | null = null;
 const languageByLabel = new Map<string, Language>();
 
-function grammarLabelForPath(filePath: string): string {
+const GRAMMAR_LABEL_BY_EXTENSION: Record<string, string> = {
+  ".ts": "typescript",
+  ".mts": "typescript",
+  ".cts": "typescript",
+  ".tsx": "tsx",
+  ".js": "javascript",
+  ".jsx": "javascript",
+  ".mjs": "javascript",
+  ".cjs": "javascript",
+};
+
+function grammarLabelForPath(filePath: string): string | null {
   const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
-  if (ext === ".tsx") return "tsx";
-  if (ext === ".jsx") return "javascript";
-  if (ext === ".js" || ext === ".mjs" || ext === ".cjs") return "javascript";
-  return "typescript";
+  return GRAMMAR_LABEL_BY_EXTENSION[ext] ?? null;
 }
 
 function wasmPathForLabel(options: TreeSitterInitOptions, label: string): string {
@@ -183,6 +191,7 @@ function spansToChunks(filePath: string, content: string, spans: SymbolSpan[]): 
 function parseFile(file: FileInfo): Tree | null {
   if (!initialized || !parser) return null;
   const label = grammarLabelForPath(file.path);
+  if (label === null) return null;
   const language = languageByLabel.get(label);
   if (!language) return null;
   parser.setLanguage(language);
