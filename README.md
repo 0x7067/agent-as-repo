@@ -96,10 +96,6 @@ provider:
 
 Embeddings for archival search come from the same OpenAI-compatible endpoint (`POST {base_url}/embeddings`), using `provider.embedding_model` (default `nomic-embed-text`). Passages, vectors, and memory blocks live in one local SQLite database at `~/.repo-expert/store.db` (override the directory with `REPO_EXPERT_DATA_DIR`).
 
-### Migrating from OpenViking
-
-Older versions stored passages in an OpenViking server. That backend is gone: remove `viking_url` from `config.yaml` (and `VIKING_API_KEY` from `.env`), make sure the embedding model is pulled (`ollama pull nomic-embed-text`), and re-index existing agents with `repo-expert setup --reindex` — embeddings must be regenerated anyway. Memory blocks are rebuilt on the next bootstrap/consolidation; the old `~/.openviking/` directory can be deleted.
-
 ### Memory consolidation
 
 The agent's `architecture`/`conventions` memory blocks can improve over time instead of staying frozen at bootstrap. Run `repo-expert consolidate [--repo]` for a one-off refresh, or set `defaults.consolidate_on_sync: true` to run it automatically after any `sync` (and `watch`, which calls sync) that touches at least `consolidate_min_files_changed` files. Consolidation runs one restricted LLM turn that may only rewrite the architecture/conventions blocks — the persona block is never touched — and it is non-fatal: if it fails or returns nothing usable, the old blocks are kept and the sync still succeeds.

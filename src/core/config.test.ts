@@ -100,15 +100,6 @@ describe("parseConfig", () => {
     expect(config.provider.fallbackModels).toEqual(["moonshotai/kimi-k2.5", "deepseek/deepseek-v3.2"]);
   });
 
-  it("rejects provider.viking_url with a migration hint", () => {
-    const configErr = parseConfigError({
-      provider: { model: MODEL, viking_url: "http://localhost:1933" },
-      repos: validRaw.repos,
-    });
-    expect(configErr.issues.some((i) => i.includes("viking_url"))).toBe(true);
-    expect(configErr.issues.some((i) => i.includes("setup --reindex"))).toBe(true);
-  });
-
   it("parses provider.fast_model when provided", () => {
     const raw = {
       provider: {
@@ -331,48 +322,6 @@ describe("parseConfig", () => {
     expect(configErr.issues.some((i) => i.includes("provider"))).toBe(true);
   });
 
-  describe("legacy config rejection", () => {
-    it("rejects a top-level letta: block with a helpful message", () => {
-      const configErr = parseConfigError({
-        letta: { model: "openai/gpt-4.1", embedding: "openai/text-embedding-3-small" },
-        repos: validRaw.repos,
-      });
-      expect(configErr.issues.some((i) => i.includes("letta"))).toBe(true);
-      expect(configErr.issues.some((i) => i.includes("provider"))).toBe(true);
-    });
-
-    it("rejects provider.type", () => {
-      const configErr = parseConfigError({
-        provider: { type: "viking", model: MODEL },
-        repos: validRaw.repos,
-      });
-      expect(configErr.issues.some((i) => i.includes("provider.type"))).toBe(true);
-    });
-
-    it("rejects provider.openrouter_model", () => {
-      const configErr = parseConfigError({
-        provider: { openrouter_model: "openai/gpt-4o-mini" },
-        repos: validRaw.repos,
-      });
-      expect(configErr.issues.some((i) => i.includes("openrouter_model"))).toBe(true);
-    });
-
-    it("rejects provider.embedding", () => {
-      const configErr = parseConfigError({
-        provider: { model: MODEL, embedding: "openai/text-embedding-3-small" },
-        repos: validRaw.repos,
-      });
-      expect(configErr.issues.some((i) => i.includes("embedding"))).toBe(true);
-    });
-
-    it("no longer rejects provider.fast_model as legacy", () => {
-      const config = parseConfig({
-        provider: { model: MODEL, fast_model: "llama3.2:3b" },
-        repos: validRaw.repos,
-      });
-      expect(config.provider.fastModel).toBe("llama3.2:3b");
-    });
-  });
 });
 
 describe("include_submodules config field", () => {

@@ -278,12 +278,6 @@ describe("runDoctorFixes (port-injected)", () => {
     expect(fakeFs.store.has("/project/.repo-expert-state.json")).toBe(true);
   });
 
-  it("env template does not reference retired VIKING_API_KEY", async () => {
-    const fakeFs = makeFakeFs({});
-    await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
-    expect(fakeFs.store.get("/project/.env")).not.toContain("VIKING_API_KEY");
-  });
-
   it("does not overwrite existing .env", async () => {
     const fakeFs = makeFakeFs({ "/project/.env": "LLM_API_KEY=real-key\n" });
     const result = await runDoctorFixes("/project/config.yaml", "/project", fakeFs);

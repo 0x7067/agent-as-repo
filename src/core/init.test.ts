@@ -173,7 +173,6 @@ describe("generateConfigYaml", () => {
 
     expect(output).toContain("model: qwen3-coder:30b");
     expect(output).toContain("base_url: http://localhost:11434/v1");
-    expect(output).not.toContain("viking_url");
     expect(output).toContain("my-app:");
     expect(output).toContain("path: ~/repos/my-app");
     expect(output).toContain("description: React Native mobile app");

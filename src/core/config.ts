@@ -55,45 +55,8 @@ const rawConfigSchema = z.object({
   repos: z.record(z.string(), repoRawSchema),
 });
 
-const NEW_SHAPE_HINT =
+const PROVIDER_SHAPE_HINT =
   "Use provider: { model, base_url?, fallback_models?, fast_model?, embedding_model? } (embedded store + OpenAI-compatible LLM). See config.example.yaml.";
-
-/**
- * Detect configs written for retired schemas (the dual-provider Letta/Viking
- * era and the OpenViking-server era) and fail fast with a message pointing at
- * the current shape. There is no migration path — old configs are simply
- * invalid, and old agents re-index with `setup --reindex`.
- */
-function detectLegacyConfig(raw: unknown): string[] {
-  if (typeof raw !== "object" || raw === null) return [];
-  const obj = raw as Record<string, unknown>;
-  const issues: string[] = [];
-
-  if ("letta" in obj) {
-    issues.push(`Legacy top-level 'letta:' block is no longer supported. ${NEW_SHAPE_HINT}`);
-  }
-
-  const provider = obj["provider"];
-  if (typeof provider === "object" && provider !== null) {
-    const p = provider as Record<string, unknown>;
-    if ("type" in p) {
-      issues.push(`'provider.type' is no longer supported — there is a single provider now. ${NEW_SHAPE_HINT}`);
-    }
-    if ("openrouter_model" in p) {
-      issues.push(`'provider.openrouter_model' is no longer supported; use 'provider.model'. ${NEW_SHAPE_HINT}`);
-    }
-    if ("embedding" in p) {
-      issues.push(`'provider.embedding' is no longer supported; use 'provider.embedding_model'. ${NEW_SHAPE_HINT}`);
-    }
-    if ("viking_url" in p) {
-      issues.push(
-        `'provider.viking_url' is no longer supported — OpenViking was replaced by an embedded store. Remove it and re-index with "repo-expert setup --reindex". ${NEW_SHAPE_HINT}`,
-      );
-    }
-  }
-
-  return issues;
-}
 
 export class ConfigError extends Error {
   constructor(public readonly issues: string[]) {
@@ -139,11 +102,6 @@ function validateSemantics(parsed: z.infer<typeof rawConfigSchema>): string[] {
 }
 
 export function parseConfig(raw: unknown): Config {
-  const legacyIssues = detectLegacyConfig(raw);
-  if (legacyIssues.length > 0) {
-    throw new ConfigError(legacyIssues);
-  }
-
   let parsed: z.infer<typeof rawConfigSchema>;
   try {
     parsed = rawConfigSchema.parse(raw);
@@ -156,7 +114,7 @@ export function parseConfig(raw: unknown): Config {
   }
 
   if (!parsed.provider) {
-    throw new ConfigError([`Must specify a 'provider' block with a 'model'. ${NEW_SHAPE_HINT}`]);
+    throw new ConfigError([`Must specify a 'provider' block with a 'model'. ${PROVIDER_SHAPE_HINT}`]);
   }
 
   const semanticIssues = validateSemantics(parsed);
