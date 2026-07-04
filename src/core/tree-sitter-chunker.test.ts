@@ -159,6 +159,53 @@ describe("treeSitterStrategy", () => {
     }
   });
 
+  it("residue coverage: keeps top-level side-effect statements that sit alongside a function (JS)", () => {
+    // Regression for the systemic span-based chunking bug: as soon as ANY span is extracted for a
+    // file, source text not covered by a span used to be silently dropped. Here `doSetup()` sits
+    // outside the one extracted FUNCTION span and must still show up in some chunk.
+    const file: FileInfo = {
+      path: "src/init.js",
+      content: [
+        "doSetup();",
+        "",
+        "function foo() {",
+        "  return 1;",
+        "}",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("FUNCTION: foo"))).toBe(true);
+    expect(chunks.some((chunk) => chunk.text.includes("doSetup();"))).toBe(true);
+    // The residue chunk carries the plain FILE header, not a symbol header.
+    const residueChunk = chunks.find((chunk) => chunk.text.includes("doSetup();"));
+    expect(residueChunk?.text.startsWith("FILE: src/init.js")).toBe(true);
+    expect(residueChunk?.text).not.toContain("FUNCTION:");
+  });
+
+  it("residue coverage: never emits a chunk that is just leftover punctuation/whitespace", () => {
+    const file: FileInfo = {
+      path: "src/service.js",
+      content: [
+        "function foo() {",
+        "  return 1;",
+        "}",
+        "",
+        "function bar() {",
+        "  return 2;",
+        "}",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    for (const chunk of chunks) {
+      const body = chunk.text.slice(chunk.text.indexOf("\n\n") + 2);
+      expect(/[a-z0-9]/i.test(body)).toBe(true);
+    }
+  });
+
   it("falls back to raw chunking for extensionless files like Makefile/Dockerfile", () => {
     const file: FileInfo = {
       path: "Makefile",

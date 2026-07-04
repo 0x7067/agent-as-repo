@@ -1,18 +1,12 @@
 import type { Node, Tree } from "web-tree-sitter";
-import { declaratorName, spanFromNode, type SymbolSpan } from "./tree-sitter-symbols.js";
-
-/** `typedef struct Point Point;` -> the alias name is the *last* `type_identifier` direct child
- * (the struct/union/enum tag it aliases, if any, is an earlier one). */
-function typedefAliasName(node: Node): string | undefined {
-  const typeIdentifiers = node.namedChildren.filter((child) => child.type === "type_identifier");
-  return typeIdentifiers.at(-1)?.text;
-}
+import { declaratorName, spanFromNode, spanFromResolvedName, type SymbolSpan, typedefDeclaratorAlias } from "./tree-sitter-symbols.js";
 
 export function extractFromCDeclaration(node: Node): SymbolSpan[] {
   switch (node.type) {
     case "function_definition": {
-      // Name is nested inside a function_declarator, not exposed via a "name" field.
-      const fn = spanFromNode(node, "FUNCTION", undefined, undefined, declaratorName(node));
+      // Name is nested inside a function_declarator, not exposed via a "name" field. No fallback
+      // to the generic nodeName heuristic if resolution fails — it would grab the return type.
+      const fn = spanFromResolvedName(node, "FUNCTION", declaratorName(node));
       return fn ? [fn] : [];
     }
     case "struct_specifier": {
@@ -26,8 +20,21 @@ export function extractFromCDeclaration(node: Node): SymbolSpan[] {
       return en ? [en] : [];
     }
     case "type_definition": {
-      const alias = spanFromNode(node, "TYPE", undefined, undefined, typedefAliasName(node));
+      // `typedef struct Point Point;` -> alias is a direct `type_identifier` child; a
+      // function-pointer typedef (`typedef int (*FuncPtr)(int,int);`) has no such direct child, so
+      // typedefDeclaratorAlias descends the function/parenthesized/pointer declarator chain.
+      const alias = spanFromResolvedName(node, "TYPE", typedefDeclaratorAlias(node));
       return alias ? [alias] : [];
+    }
+    case "preproc_ifdef": {
+      // #ifdef/#ifndef-guarded top-level declarations (e.g. a feature-flagged function) — recurse
+      // into the guarded members as if they were ordinary top-level declarations, so they get
+      // named spans too (residue coverage already guarantees their text isn't dropped either way).
+      const spans: SymbolSpan[] = [];
+      for (const child of node.namedChildren) {
+        spans.push(...extractFromCDeclaration(child));
+      }
+      return spans;
     }
     default: {
       // Bare declarations/prototypes (`declaration` nodes) are intentionally not extracted.

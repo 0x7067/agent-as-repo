@@ -85,6 +85,29 @@ describe("extractSymbolSpansCsharp (via treeSitterStrategy)", () => {
     expect(chunks.some((chunk) => chunk.text.includes("NAMESPACE:"))).toBe(false);
   });
 
+  it("residue coverage: keeps top-level statements (Program.cs style) alongside a class", () => {
+    // Top-level statements are `global_statement` nodes with no extractor case of their own; the
+    // span-based chunker used to drop them silently once the CLASS span below existed.
+    const file: FileInfo = {
+      path: "src/Program.cs",
+      content: [
+        "Console.WriteLine(\"starting\");",
+        "",
+        "public class Foo {",
+        "    public void Bar() {}",
+        "}",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("CLASS: Foo") && chunk.text.includes("METHOD: Bar"))).toBe(true);
+    const residueChunk = chunks.find((chunk) => chunk.text.includes("Console.WriteLine"));
+    expect(residueChunk).toBeDefined();
+    expect(residueChunk?.text.startsWith("FILE: src/Program.cs")).toBe(true);
+    expect(residueChunk?.text).not.toContain("CLASS:");
+  });
+
   it("falls back to raw chunking for C# files with no extractable declarations", () => {
     const file: FileInfo = {
       path: "src/Empty.cs",

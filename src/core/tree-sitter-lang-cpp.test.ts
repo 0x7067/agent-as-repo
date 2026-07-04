@@ -95,6 +95,69 @@ describe("extractSymbolSpansCpp (via treeSitterStrategy)", () => {
     expect(identityChunk?.text).toContain("template <typename T>");
   });
 
+  it("names an out-of-class method definition with its qualified name (Foo::bar), not the return type", () => {
+    // Regression: `declaratorName` couldn't resolve `qualified_identifier` declarators, so
+    // `spanFromNode`'s buggy nodeName fallback grabbed the *return type* ("void") as the name and
+    // the method body was dropped as a span entirely (only residue coverage kept the text).
+    const file: FileInfo = {
+      path: "src/foo.cpp",
+      content: ["void Foo::bar() {", "  doSomething();", "}"].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("FUNCTION: Foo::bar") && chunk.text.includes("doSomething();"))).toBe(
+      true,
+    );
+    expect(chunks.some((chunk) => chunk.text.includes("FUNCTION: void"))).toBe(false);
+  });
+
+  it("names an out-of-class constructor and destructor with their qualified names", () => {
+    const file: FileInfo = {
+      path: "src/ctor.cpp",
+      content: ["Foo::Foo() {}", "Foo::~Foo() {}"].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("FUNCTION: Foo::Foo"))).toBe(true);
+    expect(chunks.some((chunk) => chunk.text.includes("FUNCTION: Foo::~Foo"))).toBe(true);
+  });
+
+  it("names a top-level operator overload with its operator name, not the return type", () => {
+    // Regression: `operator_name` wasn't a resolvable declarator leaf, so the fallback grabbed the
+    // return type ("Foo") as the misleading FUNCTION name.
+    const file: FileInfo = {
+      path: "src/op.cpp",
+      content: ["Foo operator+(const Foo& a, const Foo& b) {", "  return a;", "}"].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("FUNCTION: operator+"))).toBe(true);
+    expect(chunks.some((chunk) => chunk.text.includes("FUNCTION: Foo"))).toBe(false);
+  });
+
+  it("names an in-class destructor and operator overload via their own declarator leaf types", () => {
+    const file: FileInfo = {
+      path: "src/inclass.cpp",
+      content: [
+        "class Foo {",
+        "public:",
+        "    ~Foo() {}",
+        "    Foo operator+(const Foo& o) { return *this; }",
+        "};",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("CLASS: Foo") && chunk.text.includes("METHOD: ~Foo"))).toBe(true);
+    expect(
+      chunks.some((chunk) => chunk.text.includes("CLASS: Foo") && chunk.text.includes("METHOD: operator+")),
+    ).toBe(true);
+  });
+
   it("falls back to raw chunking for C++ files with no extractable declarations", () => {
     const file: FileInfo = {
       path: "src/empty.cpp",

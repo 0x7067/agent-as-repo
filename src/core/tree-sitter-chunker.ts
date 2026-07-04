@@ -1,5 +1,6 @@
 import { Language, Parser, type Node, type Tree } from "web-tree-sitter";
 import { chunkFile, chunkWithHeader, rawTextStrategy } from "./chunker.js";
+import { residueChunks } from "./tree-sitter-residue.js";
 import { extractSymbolSpansC } from "./tree-sitter-lang-c.js";
 import { extractSymbolSpansCpp } from "./tree-sitter-lang-cpp.js";
 import { extractSymbolSpansCsharp } from "./tree-sitter-lang-csharp.js";
@@ -219,6 +220,10 @@ function spansToChunks(filePath: string, content: string, spans: SymbolSpan[]): 
     const spanChunks = chunkWithHeader(header, body, filePath, MAX_CHUNK_CHARS);
     chunks.push(...spanChunks);
   }
+  // Residue coverage: spans can leave gaps (top-level statements, `use`/`const` items, macros,
+  // preprocessor-guarded declarations, ...) that would otherwise be silently dropped as soon as
+  // at least one span exists. Chunk what's left over with the plain FILE header.
+  chunks.push(...residueChunks(filePath, content, spans, MAX_CHUNK_CHARS));
   return chunks;
 }
 

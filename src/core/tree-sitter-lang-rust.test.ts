@@ -93,6 +93,59 @@ describe("extractSymbolSpansRust (via treeSitterStrategy)", () => {
     expect(chunks.some((chunk) => chunk.text.includes("TYPE: Alias"))).toBe(true);
   });
 
+  it("residue coverage: keeps top-level use/const/static/macro_rules! items alongside a struct", () => {
+    // None of these have an extractor case (no SymbolSpan is ever emitted for them); the
+    // span-based chunker used to drop them silently once the STRUCT span below existed.
+    const file: FileInfo = {
+      path: "src/lib.rs",
+      content: [
+        "use std::collections::HashMap;",
+        "const MAX: i32 = 10;",
+        "static NAME: &str = \"widget\";",
+        "macro_rules! square {",
+        "    ($x:expr) => { $x * $x };",
+        "}",
+        "",
+        "struct Point { x: i32, y: i32 }",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("STRUCT: Point"))).toBe(true);
+    const residue = chunks.filter((chunk) => !chunk.text.includes("STRUCT:"));
+    const residueText = residue.map((chunk) => chunk.text).join("\n");
+    expect(residueText).toContain("use std::collections::HashMap;");
+    expect(residueText).toContain("const MAX: i32 = 10;");
+    expect(residueText).toContain("static NAME");
+    expect(residueText).toContain("macro_rules! square");
+    for (const chunk of residue) {
+      expect(chunk.text.startsWith("FILE: src/lib.rs")).toBe(true);
+    }
+  });
+
+  it("residue coverage: keeps the impl-block wrapper text (impl Point { ... }) alongside its METHOD spans", () => {
+    // extractRustImplMethods emits no span for the impl block itself (by design, per the
+    // "without a span for the impl block itself" test above) — the `impl Point {` / trailing `}`
+    // wrapper text must still surface via residue, not vanish entirely.
+    const file: FileInfo = {
+      path: "src/point.rs",
+      content: [
+        "impl Point {",
+        "    fn new() -> Self {",
+        "        Point { x: 0, y: 0 }",
+        "    }",
+        "}",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("METHOD: new"))).toBe(true);
+    const residueText = chunks.filter((chunk) => !chunk.text.includes("METHOD:")).map((chunk) => chunk.text).join("\n");
+    expect(residueText).toContain("impl Point {");
+  });
+
   it("falls back to raw chunking for Rust files with no extractable declarations", () => {
     const file: FileInfo = {
       path: "src/empty.rs",

@@ -20,6 +20,14 @@ function extractFromPhpDeclaration(node: Node): SymbolSpan[] {
       const trait = spanFromNode(node, "TRAIT");
       return trait ? [trait] : [];
     }
+    case "enum_declaration": {
+      // PHP 8.1 backed/pure enums. Their body (`enum_declaration_list`) can also hold
+      // `method_declaration` members exactly like a class body, so collectClassMethods applies
+      // unchanged.
+      const en = spanFromNode(node, "ENUM");
+      if (!en) return [];
+      return [en, ...collectClassMethods(node, en.name, ["method_declaration"])];
+    }
     default: {
       return [];
     }

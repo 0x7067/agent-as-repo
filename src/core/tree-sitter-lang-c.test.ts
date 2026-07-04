@@ -74,6 +74,34 @@ describe("extractSymbolSpansC (via treeSitterStrategy)", () => {
     expect(functionChunks.some((chunk) => chunk.text.includes("FUNCTION: prototype_only"))).toBe(false);
   });
 
+  it("parses a #ifdef-guarded top-level function, giving it a FUNCTION span like an unguarded one", () => {
+    const file: FileInfo = {
+      path: "src/guarded.c",
+      content: [
+        "#ifdef FEATURE_FLAG",
+        "int guarded(int x) {",
+        "    return x + 1;",
+        "}",
+        "#endif",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("FUNCTION: guarded"))).toBe(true);
+  });
+
+  it("resolves a function-pointer typedef's alias name by descending the declarator chain", () => {
+    const file: FileInfo = {
+      path: "src/funcptr.c",
+      content: "typedef int (*FuncPtr)(int, int);",
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("TYPE: FuncPtr"))).toBe(true);
+  });
+
   it("falls back to raw chunking for C files with no extractable declarations", () => {
     const file: FileInfo = {
       path: "src/empty.c",
