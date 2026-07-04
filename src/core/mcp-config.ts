@@ -10,17 +10,15 @@ export interface McpProviderConfig {
   model?: string;
   /** OpenAI-compatible base URL. */
   baseUrl?: string;
-  /** OpenViking storage/retrieval base URL. */
-  vikingUrl?: string;
+  /** Embedding model id served by the same endpoint. */
+  embeddingModel?: string;
   /** Optional Bearer key for the LLM endpoint. */
   llmApiKey?: string;
-  /** Optional OpenViking API key. */
-  vikingApiKey?: string;
 }
 
 const DEFAULT_LLM_MODEL = "qwen3-coder:30b";
 const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
-const DEFAULT_VIKING_URL = "http://localhost:1933";
+const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
 
 /** MCP server entry name in the Claude Code / Cursor config. */
 export const MCP_SERVER_ENTRY_NAME = "repo-expert";
@@ -37,10 +35,9 @@ export function generateMcpEntry(
   const env: Record<string, string> = {
     LLM_MODEL: provider.model ?? DEFAULT_LLM_MODEL,
     LLM_BASE_URL: provider.baseUrl ?? DEFAULT_LLM_BASE_URL,
-    VIKING_URL: provider.vikingUrl ?? DEFAULT_VIKING_URL,
+    LLM_EMBEDDING_MODEL: provider.embeddingModel ?? DEFAULT_EMBEDDING_MODEL,
   };
   if (isNonEmpty(provider.llmApiKey)) env["LLM_API_KEY"] = provider.llmApiKey;
-  if (isNonEmpty(provider.vikingApiKey)) env["VIKING_API_KEY"] = provider.vikingApiKey;
 
   if (binaryPath) {
     return {
@@ -111,9 +108,11 @@ function checkEnv(
     issues.push(`LLM_BASE_URL mismatch: config has "${baseUrl}", expected "${provider.baseUrl}".`);
   }
 
-  const vikingUrl = env["VIKING_URL"] ?? "";
-  if (isNonEmpty(provider.vikingUrl) && vikingUrl !== provider.vikingUrl) {
-    issues.push(`VIKING_URL mismatch: config has "${vikingUrl}", expected "${provider.vikingUrl}".`);
+  const embeddingModel = env["LLM_EMBEDDING_MODEL"] ?? "";
+  if (isNonEmpty(provider.embeddingModel) && embeddingModel !== provider.embeddingModel) {
+    issues.push(
+      `LLM_EMBEDDING_MODEL mismatch: config has "${embeddingModel}", expected "${provider.embeddingModel}".`,
+    );
   }
 }
 

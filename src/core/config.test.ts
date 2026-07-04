@@ -34,7 +34,6 @@ describe("parseConfig", () => {
     expect(config.provider.model).toBe(MODEL);
     expect(config.provider.baseUrl).toBe("http://localhost:11434/v1");
     expect(config.provider.fallbackModels).toEqual([]);
-    expect(config.provider.vikingUrl).toBe("http://localhost:1933");
     expect(config.repos["my-app"].maxFileSizeKb).toBe(50);
     expect(config.repos["my-app"].memoryBlockLimit).toBe(5000);
     expect(config.repos["my-app"].bootstrapOnCreate).toBe(true);
@@ -87,20 +86,27 @@ describe("parseConfig", () => {
     expect(config.defaults.askTimeoutMs).toBe(12_345);
   });
 
-  it("parses provider base_url, fallback_models, and viking_url", () => {
+  it("parses provider base_url and fallback_models", () => {
     const raw = {
       provider: {
         model: MODEL,
         base_url: "https://openrouter.ai/api/v1",
         fallback_models: ["moonshotai/kimi-k2.5", "deepseek/deepseek-v3.2"],
-        viking_url: "http://localhost:2000",
       },
       repos: validRaw.repos,
     };
     const config = parseConfig(raw);
     expect(config.provider.baseUrl).toBe("https://openrouter.ai/api/v1");
     expect(config.provider.fallbackModels).toEqual(["moonshotai/kimi-k2.5", "deepseek/deepseek-v3.2"]);
-    expect(config.provider.vikingUrl).toBe("http://localhost:2000");
+  });
+
+  it("rejects provider.viking_url with a migration hint", () => {
+    const configErr = parseConfigError({
+      provider: { model: MODEL, viking_url: "http://localhost:1933" },
+      repos: validRaw.repos,
+    });
+    expect(configErr.issues.some((i) => i.includes("viking_url"))).toBe(true);
+    expect(configErr.issues.some((i) => i.includes("setup --reindex"))).toBe(true);
   });
 
   it("parses provider.fast_model when provided", () => {

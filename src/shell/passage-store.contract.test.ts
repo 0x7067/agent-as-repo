@@ -3,15 +3,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { PassageStore } from "../ports/passage-store.js";
-import type { SearchResult, VikingHttpClient } from "./viking-http.js";
-import { VikingPassageStore } from "./adapters/viking-passage-store.js";
 import { SqlitePassageStore } from "./sqlite-store.js";
 
 /**
  * Contract tests: every PassageStore implementation must satisfy these.
- * The Viking implementation runs against an in-memory fake of the OpenViking
- * HTTP surface; the sqlite implementation runs against a real temp-file DB
- * with a deterministic fake embedder.
+ * The sqlite implementation runs against a real temp-file DB with a
+ * deterministic fake embedder; new implementations join IMPLEMENTATIONS.
  */
 
 const MANIFEST = {
@@ -42,83 +39,12 @@ function fakeEmbed(texts: string[]): Promise<number[][]> {
   return Promise.resolve(vectors);
 }
 
-/** In-memory fake of the OpenViking HTTP surface used by VikingPassageStore. */
-class FakeVikingHttpClient {
-  private readonly files = new Map<string, string>();
-
-  mkdir(_uri: string): Promise<void> {
-    return Promise.resolve();
-  }
-
-  writeFile(uri: string, content: string): Promise<void> {
-    this.files.set(uri, content);
-    return Promise.resolve();
-  }
-
-  readFile(uri: string): Promise<string> {
-    const content = this.files.get(uri);
-    if (content === undefined) {
-      return Promise.reject(new Error(`HTTP 404 from /api/v1/content/read?uri=${uri}`));
-    }
-    return Promise.resolve(content);
-  }
-
-  deleteFile(uri: string): Promise<void> {
-    this.files.delete(uri);
-    return Promise.resolve();
-  }
-
-  listDirectory(uri: string): Promise<string[]> {
-    const entries = new Set<string>();
-    for (const key of this.files.keys()) {
-      if (!key.startsWith(uri)) continue;
-      const rest = key.slice(uri.length);
-      const firstSegment = rest.split("/")[0] ?? rest;
-      entries.add(rest.includes("/") ? `${uri}${firstSegment}/` : key);
-    }
-    const sorted = [...entries];
-    sorted.sort((a, b) => a.localeCompare(b));
-    return Promise.resolve(sorted);
-  }
-
-  deleteResource(uri: string): Promise<void> {
-    for (const key of this.files.keys()) {
-      if (key.startsWith(uri)) this.files.delete(key);
-    }
-    return Promise.resolve();
-  }
-
-  semanticSearch(query: string, targetUri: string, topK?: number): Promise<SearchResult[]> {
-    const queryTokens = new Set(tokenize(query));
-    const scored: SearchResult[] = [];
-    for (const [uri, text] of this.files.entries()) {
-      if (!uri.startsWith(targetUri)) continue;
-      const textTokens = new Set(tokenize(text));
-      let overlap = 0;
-      for (const token of queryTokens) {
-        if (textTokens.has(token)) overlap++;
-      }
-      const score = overlap / Math.max(1, Math.max(queryTokens.size, textTokens.size));
-      scored.push({ uri, text, score });
-    }
-    scored.sort((a, b) => b.score - a.score);
-    return Promise.resolve(scored.slice(0, topK ?? 10));
-  }
-}
-
 interface StoreContext {
   store: PassageStore;
   cleanup: () => void;
 }
 
 const IMPLEMENTATIONS: Array<{ name: string; create: () => StoreContext }> = [
-  {
-    name: "VikingPassageStore",
-    create: () => ({
-      store: new VikingPassageStore(new FakeVikingHttpClient() as unknown as VikingHttpClient),
-      cleanup: () => {},
-    }),
-  },
   {
     name: "SqlitePassageStore",
     create: () => {

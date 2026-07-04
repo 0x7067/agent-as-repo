@@ -18,11 +18,11 @@ import { StateFileError, loadState, saveState } from "./shell/state-store.js";
 import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
 import { bootstrapAgent } from "./shell/bootstrap.js";
 import type { AgentProvider, CreateAgentParams, SendMessageOptions } from "./ports/agent-provider.js";
-import { VikingProvider } from "./shell/viking-provider.js";
-import { VikingHttpClient } from "./shell/viking-http.js";
-import { VikingPassageStore } from "./shell/adapters/viking-passage-store.js";
-import { FilesystemBlockStorage } from "./shell/block-storage.js";
-import { resolveOpenVikingBlocksDir } from "./shell/openviking-paths.js";
+import { LocalProvider } from "./shell/local-provider.js";
+import { SqlitePassageStore } from "./shell/sqlite-store.js";
+import { SqliteBlockStorage } from "./shell/sqlite-block-storage.js";
+import { resolveStoreDbPath } from "./shell/repo-expert-paths.js";
+import { embed } from "./shell/llm-client.js";
 import { selectChunkingStrategy } from "./core/chunker.js";
 import { initTreeSitterChunker } from "./core/tree-sitter-chunker.js";
 import { shouldIncludeFile } from "./core/filter.js";
@@ -44,7 +44,7 @@ import { generateMcpEntry, checkMcpEntry, type McpProviderConfig } from "./core/
 import { buildPostSetupNextSteps, getSetupMode } from "./core/setup.js";
 import type { AgentState, AppState, Config } from "./core/types.js";
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
-import type { VikingRuntimeOptions } from "./shell/viking-provider.js";
+import type { LocalRuntimeOptions } from "./shell/local-provider.js";
 
 interface SetupOpts {
   repo?: string;
@@ -169,20 +169,22 @@ class CliUserError extends Error {
 }
 
 function createProvider(config: Config): AgentProvider {
-  const vikingUrl = config.provider.vikingUrl;
-  const vikingApiKey = process.env["VIKING_API_KEY"];
-  const viking = new VikingHttpClient(vikingUrl, vikingApiKey);
-  const store = new VikingPassageStore(viking);
-  const blockStorage = new FilesystemBlockStorage(resolveOpenVikingBlocksDir());
-  return new VikingProvider(
+  const llmApiKey = process.env["LLM_API_KEY"];
+  const dbPath = resolveStoreDbPath();
+  const store = new SqlitePassageStore({
+    dbPath,
+    embed: (texts) => embed(texts, config.provider.embeddingModel, config.provider.baseUrl, llmApiKey),
+  });
+  const blockStorage = new SqliteBlockStorage(dbPath);
+  return new LocalProvider(
     store,
     config.provider.model,
     blockStorage,
     {
       baseUrl: config.provider.baseUrl,
       fallbackModels: config.provider.fallbackModels,
-      ...(process.env["LLM_API_KEY"] === undefined ? {} : { apiKey: process.env["LLM_API_KEY"] }),
-      ...getVikingRuntimeOptionsFromEnv(),
+      ...(llmApiKey === undefined ? {} : { apiKey: llmApiKey }),
+      ...getRuntimeOptionsFromEnv(),
     },
   );
 }
@@ -332,9 +334,8 @@ function resolveMcpProviderConfig(config: Config | null): { providerConfig: McpP
   const warnings: string[] = [];
   const model = config?.provider.model ?? process.env["LLM_MODEL"];
   const baseUrl = config?.provider.baseUrl ?? process.env["LLM_BASE_URL"];
-  const vikingUrl = config?.provider.vikingUrl ?? process.env["VIKING_URL"];
+  const embeddingModel = config?.provider.embeddingModel ?? process.env["LLM_EMBEDDING_MODEL"];
   const llmApiKey = process.env["LLM_API_KEY"];
-  const vikingApiKey = process.env["VIKING_API_KEY"];
 
   if (config === null) {
     warnings.push("config.yaml not found; MCP entry uses env/default values for model and URLs.");
@@ -344,9 +345,8 @@ function resolveMcpProviderConfig(config: Config | null): { providerConfig: McpP
     providerConfig: {
       ...(model === undefined ? {} : { model }),
       ...(baseUrl === undefined ? {} : { baseUrl }),
-      ...(vikingUrl === undefined ? {} : { vikingUrl }),
+      ...(embeddingModel === undefined ? {} : { embeddingModel }),
       ...(llmApiKey === undefined ? {} : { llmApiKey }),
-      ...(vikingApiKey === undefined ? {} : { vikingApiKey }),
     },
     warnings,
   };
@@ -496,7 +496,7 @@ function parseOptionalMaxSteps(value: string | undefined): number | undefined {
   return parsed;
 }
 
-function getVikingRuntimeOptionsFromEnv(): VikingRuntimeOptions {
+function getRuntimeOptionsFromEnv(): LocalRuntimeOptions {
   const requestTimeoutMs = parseOptionalPositiveInt(process.env["LLM_REQUEST_TIMEOUT_MS"], 20_000);
   const maxRetriesPerModel = parseNonNegativeInt(process.env["LLM_MAX_RETRIES_PER_MODEL"] ?? "1", 1);
   const retryBaseDelayMs = parseOptionalPositiveInt(process.env["LLM_RETRY_BASE_DELAY_MS"], 600);

@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
-export interface OpenVikingPathOptions {
+export interface RepoExpertPathOptions {
   cwd?: string;
   homeDir?: string;
   env?: NodeJS.ProcessEnv;
@@ -17,16 +17,21 @@ function ensureWritableDirectory(directory: string): void {
   rmSync(probePath, { force: true });
 }
 
-export function resolveOpenVikingBlocksDir(options: OpenVikingPathOptions = {}): string {
+/**
+ * Resolve the writable directory that holds all repo-expert machine-local
+ * data (the sqlite store with passages, vectors, and memory blocks).
+ * Candidates: REPO_EXPERT_DATA_DIR → ~/.repo-expert → ./.repo-expert.
+ */
+export function resolveRepoExpertDataDir(options: RepoExpertPathOptions = {}): string {
   const cwd = options.cwd ?? process.cwd();
   const homeDir = options.homeDir ?? homedir();
   const env = options.env ?? process.env;
 
-  const envValue = env["OPENVIKING_BLOCKS_DIR"]?.trim();
+  const envValue = env["REPO_EXPERT_DATA_DIR"]?.trim();
   const candidates: string[] = [
     ...(envValue ? [path.isAbsolute(envValue) ? envValue : path.resolve(cwd, envValue)] : []),
-    path.join(homeDir, ".openviking", "blocks"),
-    path.join(cwd, ".openviking", "blocks"),
+    path.join(homeDir, ".repo-expert"),
+    path.join(cwd, ".repo-expert"),
   ];
 
   const errors: string[] = [];
@@ -42,9 +47,14 @@ export function resolveOpenVikingBlocksDir(options: OpenVikingPathOptions = {}):
 
   throw new Error(
     [
-      "Unable to find a writable OpenViking block storage directory.",
-      "Set OPENVIKING_BLOCKS_DIR to a writable location.",
+      "Unable to find a writable repo-expert data directory.",
+      "Set REPO_EXPERT_DATA_DIR to a writable location.",
       ...errors.map((e) => `- ${e}`),
     ].join("\n"),
   );
+}
+
+/** Location of the embedded passage/block store DB file. */
+export function resolveStoreDbPath(options: RepoExpertPathOptions = {}): string {
+  return path.join(resolveRepoExpertDataDir(options), "store.db");
 }

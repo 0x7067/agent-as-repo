@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { VikingAdminAdapter } from "./viking-admin-adapter.js";
+import { AdminAdapter } from "./admin-adapter.js";
 import type { AgentProvider } from "../../ports/agent-provider.js";
 import type { PassageStore } from "../../ports/passage-store.js";
 
@@ -13,7 +13,7 @@ function makeAdapter() {
     semanticSearch: vi.fn(),
   };
 
-  const adapter = new VikingAdminAdapter(
+  const adapter = new AdminAdapter(
     provider as unknown as AgentProvider,
     store as unknown as PassageStore,
   );
@@ -21,7 +21,7 @@ function makeAdapter() {
   return { adapter, provider, store };
 }
 
-describe("VikingAdminAdapter", () => {
+describe("AdminAdapter", () => {
   describe("listAgents", () => {
     it("maps store agent ids to agent summaries", async () => {
       const { adapter, store } = makeAdapter();

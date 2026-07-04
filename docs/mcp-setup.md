@@ -8,8 +8,7 @@ Hub-style MCP servers expose tools where a single `operation` string param multi
 
 ## Prerequisites
 
-- An [OpenViking](https://github.com/volcengine/OpenViking) server running (default `http://localhost:1933`)
-- An OpenAI-compatible chat endpoint — local [Ollama](https://ollama.com) by default, or a remote endpoint (e.g. OpenRouter) with `LLM_API_KEY` set
+- An OpenAI-compatible chat endpoint — local [Ollama](https://ollama.com) by default, or a remote endpoint (e.g. OpenRouter) with `LLM_API_KEY` set — serving both the chat model and the embedding model (default `nomic-embed-text`)
 - `tsx` installed (already a dev dependency of this repo)
 
 ## Configure for Claude Code
@@ -26,7 +25,7 @@ Add to `~/.claude.json` under the top-level `mcpServers` key (global, all projec
       "env": {
         "LLM_MODEL": "qwen3-coder:30b",
         "LLM_BASE_URL": "http://localhost:11434/v1",
-        "VIKING_URL": "http://localhost:1933"
+        "LLM_EMBEDDING_MODEL": "nomic-embed-text"
       }
     }
   }
@@ -50,7 +49,7 @@ tool_timeout_sec = 300
 [mcp_servers.repo-expert.env]
 LLM_MODEL = "qwen3-coder:30b"
 LLM_BASE_URL = "http://localhost:11434/v1"
-VIKING_URL = "http://localhost:1933"
+LLM_EMBEDDING_MODEL = "nomic-embed-text"
 ```
 
 ## Configure for Cursor
@@ -66,7 +65,7 @@ Add to `.cursor/mcp.json` in your project root:
       "env": {
         "LLM_MODEL": "qwen3-coder:30b",
         "LLM_BASE_URL": "http://localhost:11434/v1",
-        "VIKING_URL": "http://localhost:1933"
+        "LLM_EMBEDDING_MODEL": "nomic-embed-text"
       }
     }
   }
@@ -80,7 +79,7 @@ pnpm repo-expert mcp-install  # writes/overwrites the "repo-expert" entry in ~/.
 pnpm repo-expert mcp-check    # validates the existing entry
 ```
 
-Both commands read `config.yaml` (if present) for `model`, `base_url`, and `viking_url`, and pull `LLM_API_KEY`/`VIKING_API_KEY` from the environment.
+Both commands read `config.yaml` (if present) for `model`, `base_url`, and `embedding_model`, and pull `LLM_API_KEY` from the environment.
 
 ## Environment variables
 
@@ -89,8 +88,8 @@ Both commands read `config.yaml` (if present) for `model`, `base_url`, and `viki
 | `LLM_MODEL` | Chat model id (default `qwen3-coder:30b`) |
 | `LLM_BASE_URL` | OpenAI-compatible LLM endpoint (default `http://localhost:11434/v1`) |
 | `LLM_API_KEY` | Optional Bearer token for the LLM endpoint. Needed for remote endpoints (e.g. OpenRouter); local Ollama needs none |
-| `VIKING_URL` | OpenViking server URL (default `http://localhost:1933`) |
-| `VIKING_API_KEY` | Optional OpenViking API key |
+| `LLM_EMBEDDING_MODEL` | Embedding model id served by the same endpoint (default `nomic-embed-text`) |
+| `REPO_EXPERT_DATA_DIR` | Directory for the embedded store DB (default `~/.repo-expert`) |
 | `LLM_FALLBACK_MODELS` | Comma-separated fallback model list |
 | `LLM_REQUEST_TIMEOUT_MS` | Per-request LLM timeout (default 20000) |
 | `LLM_MAX_RETRIES_PER_MODEL` | Retries per model before falling back (default 1) |
@@ -124,10 +123,9 @@ Should return `serverInfo: { name: "repo-expert-mcp" }` with 8 tools.
 
 ## Troubleshooting
 
-### Connection refused to OpenViking or the LLM endpoint
+### Connection refused to the LLM endpoint
 
-- Confirm OpenViking is running and reachable at `VIKING_URL` (default `http://localhost:1933`)
-- Confirm Ollama (or your configured endpoint) is running and reachable at `LLM_BASE_URL` (default `http://localhost:11434/v1`), and that the model in `LLM_MODEL` has been pulled
+- Confirm Ollama (or your configured endpoint) is running and reachable at `LLM_BASE_URL` (default `http://localhost:11434/v1`), and that the models in `LLM_MODEL` and `LLM_EMBEDDING_MODEL` have been pulled
 - Run `pnpm repo-expert doctor` for a full connectivity + config check
 
 ### "Authentication failed" or 401

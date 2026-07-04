@@ -2,12 +2,11 @@
 
 Persistent AI agents that act as long-term memory for your git repositories. Unlike IDE tools that forget between sessions, these agents accumulate knowledge over time and answer questions about your codebase instantly.
 
-Single path: [OpenViking](https://github.com/volcengine/OpenViking) for storage/retrieval + any OpenAI-compatible chat endpoint, defaulting to a local [Ollama](https://ollama.com) server. Everything runs locally by default; point `base_url` at a remote endpoint (e.g. OpenRouter) if you'd rather not run a local model.
+Single path: an embedded sqlite-vec store for passages and semantic search + any OpenAI-compatible chat endpoint, defaulting to a local [Ollama](https://ollama.com) server. The whole stack is two processes: this CLI and Ollama. Everything runs locally by default; point `base_url` at a remote endpoint (e.g. OpenRouter) if you'd rather not run a local model.
 
 ## Prerequisites
 
-- [Ollama](https://ollama.com) running locally with a chat model pulled (default config expects `qwen3-coder:30b`; pull whatever model you configure, e.g. `ollama pull qwen3-coder:30b`)
-- An [OpenViking](https://github.com/volcengine/OpenViking) server running on `localhost:1933` (default), with an embedding backend configured in `~/.openviking/ov.conf`
+- [Ollama](https://ollama.com) running locally with a chat model pulled (default config expects `qwen3-coder:30b`) and an embedding model pulled (default `nomic-embed-text`, e.g. `ollama pull nomic-embed-text`)
 - Node.js and pnpm
 
 ## Quickstart
@@ -63,7 +62,7 @@ pnpm repo-expert mcp-install  # writes the "repo-expert" entry to ~/.claude.json
 | `mcp-install [--global\|--local]` | Write MCP server entry to Claude Code config |
 | `mcp-check [--json]` | Validate existing MCP server entry |
 | `config lint [--json]` | Validate `config.yaml` structure and semantics |
-| `doctor [--fix] [--json] [--strict]` | Check config, viking/LLM endpoint reachability, repo paths, git, state consistency; `--strict` promotes warnings to failures (non-zero exit) |
+| `doctor [--fix] [--json] [--strict]` | Check config, LLM endpoint reachability, passage store, repo paths, git, state consistency; `--strict` promotes warnings to failures (non-zero exit) |
 | `self-check [--json]` | Check local runtime/toolchain health (Node, pnpm, dependencies) |
 | `completion <shell>` | Print shell completion script (bash, zsh, fish) |
 
@@ -76,8 +75,8 @@ provider:
   model: qwen3-coder:30b                  # chat model id as the endpoint knows it
   # base_url: http://localhost:11434/v1   # optional; default local Ollama
   # fallback_models: []                   # optional; tried in order after `model`
-  # viking_url: http://localhost:1933     # optional; default local OpenViking
   # fast_model: llama3.2:3b               # optional; smaller model used by `ask --fast`
+  # embedding_model: nomic-embed-text     # optional; embedding model served by the same endpoint
 
 repos:
   my-app:
@@ -95,7 +94,11 @@ provider:
   base_url: https://openrouter.ai/api/v1
 ```
 
-OpenViking owns embeddings for archival search — configure the embedding backend in `~/.openviking/ov.conf` (typically delegating to Ollama, e.g. `nomic-embed-text`), not in `config.yaml`.
+Embeddings for archival search come from the same OpenAI-compatible endpoint (`POST {base_url}/embeddings`), using `provider.embedding_model` (default `nomic-embed-text`). Passages, vectors, and memory blocks live in one local SQLite database at `~/.repo-expert/store.db` (override the directory with `REPO_EXPERT_DATA_DIR`).
+
+### Migrating from OpenViking
+
+Older versions stored passages in an OpenViking server. That backend is gone: remove `viking_url` from `config.yaml` (and `VIKING_API_KEY` from `.env`), make sure the embedding model is pulled (`ollama pull nomic-embed-text`), and re-index existing agents with `repo-expert setup --reindex` — embeddings must be regenerated anyway. Memory blocks are rebuilt on the next bootstrap/consolidation; the old `~/.openviking/` directory can be deleted.
 
 ### Memory consolidation
 
@@ -106,13 +109,14 @@ The agent's `architecture`/`conventions` memory blocks can improve over time ins
 | Variable | Purpose |
 |---|---|
 | `LLM_API_KEY` | Optional Bearer token for the LLM endpoint. Required in practice only for remote endpoints (e.g. OpenRouter); local Ollama needs none. |
-| `VIKING_API_KEY` | Optional API key for the OpenViking server. |
 | `LLM_REQUEST_TIMEOUT_MS` | Per-request timeout for LLM calls (default 20000). |
 | `LLM_MAX_RETRIES_PER_MODEL` | Retries per model before falling back (default 1). |
 | `LLM_RETRY_BASE_DELAY_MS` | Base delay for retry backoff (default 600). |
 | `LLM_FALLBACK_MODELS` | Comma-separated fallback model list (MCP server only; CLI uses `config.provider.fallback_models`). |
 | `REPO_EXPERT_DEBUG_LLM` | Set to log LLM request/response debug info. |
 | `REPO_EXPERT_ASK_TIMEOUT_MS` | Timeout for MCP `agent_call` when not overridden per-call. |
+| `REPO_EXPERT_DATA_DIR` | Directory for the embedded store DB (default `~/.repo-expert`). |
+| `LLM_EMBEDDING_MODEL` | Embedding model id (MCP server only; CLI uses `config.provider.embedding_model`). |
 
 ## Architecture
 
@@ -120,7 +124,7 @@ See [docs/architecture.md](docs/architecture.md) for the full architecture diagr
 
 Key points:
 - **Functional core, imperative shell** — `src/core/` contains pure functions, `src/shell/` handles all I/O
-- **Provider abstraction** — `AgentProvider` interface (`src/ports/agent-provider.ts`) decouples business logic from the OpenViking/LLM implementation
+- **Provider abstraction** — `AgentProvider` (`src/ports/agent-provider.ts`) and `PassageStore` (`src/ports/passage-store.ts`) interfaces decouple business logic from the store/LLM implementation
 - **Three-tier memory** — core (always in context), archival (vector-searchable source files), recall (conversation history)
 - **Symbol-aware chunking** — `chunking: tree-sitter` (default) chunks TypeScript/JavaScript at function/class boundaries; set `chunking: raw` for legacy ~2KB text splits
 - **Incremental sync** — `git diff` detects changes; only affected passages are re-indexed
@@ -138,5 +142,5 @@ Conventions:
 - TypeScript strict mode, ES2022 target
 - TDD: write failing tests first, then implement
 - Core modules (`src/core/`) have no side effects and require no mocks in tests
-- Shell modules (`src/shell/`) mock external boundaries (OpenViking HTTP client, LLM endpoint, filesystem)
+- Shell modules (`src/shell/`) mock external boundaries (LLM endpoint, filesystem); the sqlite store is exercised against real temp-file DBs in contract tests
 - Package manager: pnpm (never npm or yarn)

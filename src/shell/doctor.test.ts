@@ -278,10 +278,10 @@ describe("runDoctorFixes (port-injected)", () => {
     expect(fakeFs.store.has("/project/.repo-expert-state.json")).toBe(true);
   });
 
-  it("env template also references VIKING_API_KEY", async () => {
+  it("env template does not reference retired VIKING_API_KEY", async () => {
     const fakeFs = makeFakeFs({});
     await runDoctorFixes("/project/config.yaml", "/project", fakeFs);
-    expect(fakeFs.store.get("/project/.env")).toContain("VIKING_API_KEY");
+    expect(fakeFs.store.get("/project/.env")).not.toContain("VIKING_API_KEY");
   });
 
   it("does not overwrite existing .env", async () => {

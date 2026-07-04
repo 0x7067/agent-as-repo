@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { VikingProvider } from "./viking-provider.js";
+import { LocalProvider } from "./local-provider.js";
 import type { PassageStore } from "../ports/passage-store.js";
 import type { BlockStorage } from "./block-storage.js";
 
@@ -38,16 +38,16 @@ type MockBlockStorage = ReturnType<typeof makeMockBlockStorage>;
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const API_KEY = "test-api-key";
 
-describe("VikingProvider", () => {
+describe("LocalProvider", () => {
   let mockStore: MockStore;
   let mockBlockStorage: MockBlockStorage;
-  let provider: VikingProvider;
+  let provider: LocalProvider;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockStore = makeMockStore();
     mockBlockStorage = makeMockBlockStorage();
-    provider = new VikingProvider(
+    provider = new LocalProvider(
       mockStore as unknown as PassageStore,
       DEFAULT_MODEL,
       mockBlockStorage as unknown as BlockStorage,
@@ -220,7 +220,7 @@ describe("VikingProvider", () => {
     });
 
     it("retries the same model on retryable errors", async () => {
-      provider = new VikingProvider(mockStore, DEFAULT_MODEL, mockBlockStorage, {
+      provider = new LocalProvider(mockStore, DEFAULT_MODEL, mockBlockStorage, {
         apiKey: API_KEY,
         maxRetriesPerModel: 1,
         retryBaseDelayMs: 0,
@@ -239,7 +239,7 @@ describe("VikingProvider", () => {
     });
 
     it("falls back to secondary model after primary retries are exhausted", async () => {
-      provider = new VikingProvider(mockStore, DEFAULT_MODEL, mockBlockStorage, {
+      provider = new LocalProvider(mockStore, DEFAULT_MODEL, mockBlockStorage, {
         apiKey: API_KEY,
         fallbackModels: ["moonshotai/kimi-k2.5"],
         maxRetriesPerModel: 0,
@@ -259,7 +259,7 @@ describe("VikingProvider", () => {
     });
 
     it("does not fallback when overrideModel is explicitly provided", async () => {
-      provider = new VikingProvider(mockStore, DEFAULT_MODEL, mockBlockStorage, {
+      provider = new LocalProvider(mockStore, DEFAULT_MODEL, mockBlockStorage, {
         apiKey: API_KEY,
         fallbackModels: ["moonshotai/kimi-k2.5"],
         maxRetriesPerModel: 0,

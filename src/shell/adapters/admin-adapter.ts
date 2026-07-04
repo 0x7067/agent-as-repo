@@ -2,7 +2,7 @@ import type { AdminPort, AgentSummary, CoreMemoryBlock, PassageResult } from "..
 import type { AgentProvider } from "../../ports/agent-provider.js";
 import type { PassageStore } from "../../ports/passage-store.js";
 
-export class VikingAdminAdapter implements AdminPort {
+export class AdminAdapter implements AdminPort {
   constructor(
     private readonly provider: AgentProvider,
     private readonly store: PassageStore,

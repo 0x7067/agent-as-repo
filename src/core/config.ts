@@ -38,7 +38,6 @@ const repoRawSchema = z.object({
 });
 
 const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
-const DEFAULT_VIKING_URL = "http://localhost:1933";
 
 const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
 
@@ -46,7 +45,6 @@ const providerSchema = z.object({
   model: z.string(),
   base_url: z.string().optional(),
   fallback_models: z.array(z.string()).optional(),
-  viking_url: z.string().optional(),
   fast_model: z.string().optional(),
   embedding_model: z.string().optional(),
 });
@@ -58,12 +56,13 @@ const rawConfigSchema = z.object({
 });
 
 const NEW_SHAPE_HINT =
-  "Use provider: { model, base_url?, fallback_models?, viking_url?, fast_model? } (Viking + OpenAI-compatible LLM). See config.example.yaml.";
+  "Use provider: { model, base_url?, fallback_models?, fast_model?, embedding_model? } (embedded store + OpenAI-compatible LLM). See config.example.yaml.";
 
 /**
- * Detect configs written for the old dual-provider (Letta/Viking) schema and
- * fail fast with a message pointing at the new single-provider shape. There is
- * no migration path — old configs are simply invalid.
+ * Detect configs written for retired schemas (the dual-provider Letta/Viking
+ * era and the OpenViking-server era) and fail fast with a message pointing at
+ * the current shape. There is no migration path — old configs are simply
+ * invalid, and old agents re-index with `setup --reindex`.
  */
 function detectLegacyConfig(raw: unknown): string[] {
   if (typeof raw !== "object" || raw === null) return [];
@@ -84,7 +83,12 @@ function detectLegacyConfig(raw: unknown): string[] {
       issues.push(`'provider.openrouter_model' is no longer supported; use 'provider.model'. ${NEW_SHAPE_HINT}`);
     }
     if ("embedding" in p) {
-      issues.push(`'provider.embedding' is no longer supported (OpenViking owns embeddings). ${NEW_SHAPE_HINT}`);
+      issues.push(`'provider.embedding' is no longer supported; use 'provider.embedding_model'. ${NEW_SHAPE_HINT}`);
+    }
+    if ("viking_url" in p) {
+      issues.push(
+        `'provider.viking_url' is no longer supported — OpenViking was replaced by an embedded store. Remove it and re-index with "repo-expert setup --reindex". ${NEW_SHAPE_HINT}`,
+      );
     }
   }
 
@@ -164,7 +168,6 @@ export function parseConfig(raw: unknown): Config {
     model: parsed.provider.model,
     baseUrl: parsed.provider.base_url ?? DEFAULT_LLM_BASE_URL,
     fallbackModels: parsed.provider.fallback_models ?? [],
-    vikingUrl: parsed.provider.viking_url ?? DEFAULT_VIKING_URL,
     embeddingModel: parsed.provider.embedding_model ?? DEFAULT_EMBEDDING_MODEL,
     ...(parsed.provider.fast_model === undefined ? {} : { fastModel: parsed.provider.fast_model }),
   };

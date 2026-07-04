@@ -52,14 +52,14 @@ export async function checkApiConnection(
     return {
       name: "API connection",
       status: "pass",
-      message: "Connected to OpenViking runtime",
+      message: "Passage store is readable",
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return {
       name: "API connection",
       status: "fail",
-      message: `Cannot reach OpenViking runtime: ${msg}`,
+      message: `Cannot read the passage store: ${msg}`,
     };
   }
 }
@@ -238,8 +238,6 @@ export interface DoctorFixResult {
 const ENV_TEMPLATE = [
   "# Optional: Bearer token for a non-local LLM endpoint (e.g. OpenRouter). Local Ollama needs none.",
   "LLM_API_KEY=",
-  "# Optional: OpenViking API key.",
-  "VIKING_API_KEY=",
   "",
 ].join("\n");
 
@@ -256,7 +254,7 @@ export async function runDoctorFixes(
     await fs.access(envPath);
   } catch {
     await fs.writeFile(envPath, ENV_TEMPLATE);
-    applied.push(`Created ${envPath} with LLM_API_KEY / VIKING_API_KEY template.`);
+    applied.push(`Created ${envPath} with LLM_API_KEY template.`);
   }
 
   try {

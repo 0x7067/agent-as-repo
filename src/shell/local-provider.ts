@@ -13,7 +13,7 @@ import type { PassageStore } from "../ports/passage-store.js";
 import { toolCallingLoop, DEFAULT_LLM_BASE_URL, type ToolDefinition, type ToolHandler } from "./llm-client.js";
 import type { BlockStorage } from "./block-storage.js";
 
-export interface VikingRuntimeOptions {
+export interface LocalRuntimeOptions {
   baseUrl?: string;
   apiKey?: string;
   fallbackModels?: string[];
@@ -72,7 +72,7 @@ function unknownToMessage(value: unknown): string {
   }
 }
 
-export class VikingProvider implements AgentProvider {
+export class LocalProvider implements AgentProvider {
   private readonly baseUrl: string;
   private readonly apiKey: string | undefined;
   private readonly fallbackModels: string[];
@@ -84,7 +84,7 @@ export class VikingProvider implements AgentProvider {
     private store: PassageStore,
     private model: string,
     private blockStorage: BlockStorage,
-    runtimeOptions: VikingRuntimeOptions = {},
+    runtimeOptions: LocalRuntimeOptions = {},
   ) {
     this.baseUrl = runtimeOptions.baseUrl ?? DEFAULT_LLM_BASE_URL;
     this.apiKey = runtimeOptions.apiKey;
