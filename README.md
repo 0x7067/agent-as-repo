@@ -118,7 +118,7 @@ Key points:
 - **Functional core, imperative shell** — `src/core/` contains pure functions, `src/shell/` handles all I/O
 - **Provider abstraction** — `AgentProvider` (`src/ports/agent-provider.ts`) and `PassageStore` (`src/ports/passage-store.ts`) interfaces decouple business logic from the store/LLM implementation
 - **Three-tier memory** — core (always in context), archival (vector-searchable source files), recall (conversation history)
-- **Symbol-aware chunking** — TypeScript/JavaScript/Python/Go/Java/Ruby are chunked at function/class boundaries via tree-sitter; other file types fall back to ~2KB text splits
+- **Symbol-aware chunking** — TypeScript/JavaScript/Python/Go/Java/Ruby/Rust/PHP/C/C++/C# are chunked at function/class boundaries via tree-sitter; other file types fall back to ~2KB text splits
 - **Incremental sync** — `git diff` detects changes; only affected passages are re-indexed
 
 ## Development

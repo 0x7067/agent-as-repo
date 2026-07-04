@@ -9,7 +9,9 @@ export type SymbolKind =
   | "CONST"
   | "METHOD"
   | "ENUM"
-  | "MODULE";
+  | "MODULE"
+  | "STRUCT"
+  | "TRAIT";
 
 /** Kind of container a METHOD span lives in, used to pick the header's KIND token (buildPrefix). */
 export type ContainerKind = "CLASS" | "MODULE";
@@ -35,13 +37,19 @@ export function nodeName(node: Node): string | undefined {
   return text.length > 0 ? text : undefined;
 }
 
+/**
+ * Build a span for `node`. Name resolution defaults to `nodeName(node)`, but callers whose
+ * grammar buries the name somewhere `nodeName` can't reach (e.g. C/C++ declarator chains) can
+ * pass an already-resolved `resolvedName` to use instead.
+ */
 export function spanFromNode(
   node: Node,
   kind: SymbolKind,
   className?: string,
   containerKind?: ContainerKind,
+  resolvedName?: string,
 ): SymbolSpan | undefined {
-  const name = nodeName(node);
+  const name = resolvedName ?? nodeName(node);
   if (!name) return undefined;
   return {
     kind,
@@ -51,6 +59,25 @@ export function spanFromNode(
     startIndex: node.startIndex,
     endIndex: node.endIndex,
   };
+}
+
+/**
+ * Resolve the identifier name buried inside a C/C++ `declarator` chain.
+ * A function's name is not exposed via a `name` field the way most grammars do it — it's nested
+ * inside `function_declarator` (itself possibly wrapped in `pointer_declarator`/`reference_declarator`
+ * for pointer/reference return types). Descend the `declarator` field chain until an `identifier`
+ * or `field_identifier` (C++ method names) leaf is found.
+ */
+export function declaratorName(node: Node): string | undefined {
+  let current: Node | undefined = node;
+  while (current) {
+    if (current.type === "identifier" || current.type === "field_identifier") {
+      const text = current.text;
+      return text.length > 0 ? text : undefined;
+    }
+    current = current.childForFieldName("declarator") ?? undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -72,6 +99,28 @@ export function collectClassMethods(
   for (const member of body.namedChildren) {
     if (!memberTypes.includes(member.type)) continue;
     const span = spanFromNode(member, "METHOD", className, containerKind);
+    if (span) methods.push(span);
+  }
+  return methods;
+}
+
+/**
+ * Like `collectClassMethods`, but for grammars (C/C++) where a member's name isn't reachable via
+ * `nodeName` and must be resolved with `declaratorName` instead (methods are `function_definition`
+ * nodes whose name is nested inside a `function_declarator`).
+ */
+export function collectDeclaratorMethods(
+  containerNode: Node,
+  className: string,
+  memberTypes: readonly string[] = ["function_definition"],
+): SymbolSpan[] {
+  const body = containerNode.childForFieldName("body");
+  if (!body) return [];
+
+  const methods: SymbolSpan[] = [];
+  for (const member of body.namedChildren) {
+    if (!memberTypes.includes(member.type)) continue;
+    const span = spanFromNode(member, "METHOD", className, undefined, declaratorName(member));
     if (span) methods.push(span);
   }
   return methods;

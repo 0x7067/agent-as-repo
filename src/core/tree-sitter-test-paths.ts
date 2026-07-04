@@ -24,4 +24,9 @@ export const GRAMMAR_WASM_BY_LABEL: Record<GrammarLabel, string> = {
   go: wasmPath("tree-sitter-go", "tree-sitter-go.wasm"),
   java: wasmPath("tree-sitter-java", "tree-sitter-java.wasm"),
   ruby: wasmPath("tree-sitter-ruby", "tree-sitter-ruby.wasm"),
+  rust: wasmPath("tree-sitter-rust", "tree-sitter-rust.wasm"),
+  php: wasmPath("tree-sitter-php", "tree-sitter-php.wasm"),
+  c: wasmPath("tree-sitter-c", "tree-sitter-c.wasm"),
+  cpp: wasmPath("tree-sitter-cpp", "tree-sitter-cpp.wasm"),
+  csharp: wasmPath("tree-sitter-c-sharp", "tree-sitter-c_sharp.wasm"),
 };

@@ -104,18 +104,56 @@ describe("treeSitterStrategy", () => {
   // comment-only fallback) lives in tree-sitter-lang-go.test.ts.
   // Ruby-specific coverage (top-level method, class/module methods, comment-only fallback,
   // the singleton_method regression) lives in tree-sitter-lang-ruby.test.ts.
+  // Rust-specific coverage (function/struct/enum/trait, impl block methods, mod recursion,
+  // type alias, comment-only fallback) lives in tree-sitter-lang-rust.test.ts.
+  // PHP-specific coverage (<?php-wrapped function, class methods, interface/trait, comment-only
+  // fallback) lives in tree-sitter-lang-php.test.ts.
+  // C-specific coverage (function_declarator name descent, struct/enum with body, typedef,
+  // bare-prototype skip, comment-only fallback) lives in tree-sitter-lang-c.test.ts.
+  // C++-specific coverage (class/struct methods, namespace recursion, template unwrapping,
+  // comment-only fallback) lives in tree-sitter-lang-cpp.test.ts.
+  // C#-specific coverage (class/interface/struct/enum/record, namespace + file-scoped namespace
+  // recursion, comment-only fallback) lives in tree-sitter-lang-csharp.test.ts.
 
-  it("falls back to raw chunking for unsupported languages like C#, instead of misparsing with the TS grammar", () => {
+  it("parses .hpp files with the C++ grammar", () => {
     const file: FileInfo = {
-      path: "src/Foo.cs",
-      content: "public class Foo { void Bar() {} }",
+      path: "src/example.hpp",
+      content: ["class Foo {", "public:", "    void bar() {}", "};"].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("CLASS: Foo") && chunk.text.includes("METHOD: bar"))).toBe(true);
+  });
+
+  it("parses .h files with the C grammar", () => {
+    const file: FileInfo = {
+      path: "src/example.h",
+      content: ["struct Point {", "    int x;", "    int y;", "};"].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("STRUCT: Point"))).toBe(true);
+  });
+
+  it("falls back to raw chunking for unsupported languages like Kotlin, instead of misparsing with the TS grammar", () => {
+    // Real-world "misparse hazard" fixture: brace-style syntax close enough to a TS/JS class body
+    // that the TypeScript grammar produces a plausible-looking class_declaration/method_definition
+    // tree for it (see the revert experiment in the Slice 2 report — temporarily letting unmapped
+    // extensions default to the "typescript" grammar makes this fixture yield CLASS:/METHOD:
+    // headers). Kotlin (like Swift) has no wasm grammar wired up yet, so it must stay on the
+    // explicit-map-returns-null -> raw-fallback path.
+    const file: FileInfo = {
+      path: "src/Foo.kt",
+      content: "class Foo { fun bar() {} }",
       sizeKb: 0.1,
     };
 
     const chunks = treeSitterStrategy(file);
     expect(chunks.length).toBeGreaterThan(0);
     for (const chunk of chunks) {
-      expect(chunk.text.startsWith("FILE: src/Foo.cs")).toBe(true);
+      expect(chunk.text.startsWith("FILE: src/Foo.kt")).toBe(true);
       expect(chunk.text).not.toContain("CLASS:");
       expect(chunk.text).not.toContain("METHOD:");
     }

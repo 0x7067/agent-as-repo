@@ -1,9 +1,14 @@
 import { Language, Parser, type Node, type Tree } from "web-tree-sitter";
 import { chunkFile, chunkWithHeader, rawTextStrategy } from "./chunker.js";
+import { extractSymbolSpansC } from "./tree-sitter-lang-c.js";
+import { extractSymbolSpansCpp } from "./tree-sitter-lang-cpp.js";
+import { extractSymbolSpansCsharp } from "./tree-sitter-lang-csharp.js";
 import { extractSymbolSpansGo } from "./tree-sitter-lang-go.js";
 import { extractSymbolSpansJava } from "./tree-sitter-lang-java.js";
+import { extractSymbolSpansPhp } from "./tree-sitter-lang-php.js";
 import { extractSymbolSpansPython } from "./tree-sitter-lang-python.js";
 import { extractSymbolSpansRuby } from "./tree-sitter-lang-ruby.js";
+import { extractSymbolSpansRust } from "./tree-sitter-lang-rust.js";
 import { spanFromNode, type SymbolSpan } from "./tree-sitter-symbols.js";
 import type { Chunk, ChunkingStrategy, FileInfo } from "./types.js";
 
@@ -16,7 +21,12 @@ export type GrammarLabel =
   | "python"
   | "go"
   | "java"
-  | "ruby";
+  | "ruby"
+  | "rust"
+  | "php"
+  | "c"
+  | "cpp"
+  | "csharp";
 
 export interface TreeSitterInitOptions {
   webTreeSitterWasm: string;
@@ -41,6 +51,13 @@ const GRAMMAR_LABEL_BY_EXTENSION: Record<string, GrammarLabel> = {
   ".go": "go",
   ".java": "java",
   ".rb": "ruby",
+  ".rs": "rust",
+  ".php": "php",
+  ".c": "c",
+  ".h": "c",
+  ".cpp": "cpp",
+  ".hpp": "cpp",
+  ".cs": "csharp",
 };
 
 function grammarLabelForPath(filePath: string): GrammarLabel | null {
@@ -175,6 +192,21 @@ function extractSymbolSpans(tree: Tree, label: GrammarLabel): SymbolSpan[] {
     }
     case "ruby": {
       return extractSymbolSpansRuby(tree);
+    }
+    case "rust": {
+      return extractSymbolSpansRust(tree);
+    }
+    case "php": {
+      return extractSymbolSpansPhp(tree);
+    }
+    case "c": {
+      return extractSymbolSpansC(tree);
+    }
+    case "cpp": {
+      return extractSymbolSpansCpp(tree);
+    }
+    case "csharp": {
+      return extractSymbolSpansCsharp(tree);
     }
   }
 }
