@@ -1,32 +1,32 @@
 import { Language, Parser, type Node, type Tree } from "web-tree-sitter";
 import { chunkFile, chunkWithHeader, rawTextStrategy } from "./chunker.js";
+import { extractSymbolSpansGo } from "./tree-sitter-lang-go.js";
+import { extractSymbolSpansJava } from "./tree-sitter-lang-java.js";
+import { extractSymbolSpansPython } from "./tree-sitter-lang-python.js";
+import { extractSymbolSpansRuby } from "./tree-sitter-lang-ruby.js";
+import { spanFromNode, type SymbolSpan } from "./tree-sitter-symbols.js";
 import type { Chunk, ChunkingStrategy, FileInfo } from "./types.js";
 
 const MAX_CHUNK_CHARS = 2000;
 
+export type GrammarLabel =
+  | "typescript"
+  | "tsx"
+  | "javascript"
+  | "python"
+  | "go"
+  | "java"
+  | "ruby";
+
 export interface TreeSitterInitOptions {
   webTreeSitterWasm: string;
-  typescriptWasm: string;
-  tsxWasm: string;
-  javascriptWasm: string;
-}
-
-type SymbolKind = "FUNCTION" | "CLASS" | "INTERFACE" | "TYPE" | "CONST" | "METHOD";
-
-interface SymbolSpan {
-  kind: SymbolKind;
-  name: string;
-  className?: string;
-  startIndex: number;
-  endIndex: number;
+  grammarWasmByLabel: Record<GrammarLabel, string>;
 }
 
 let initialized = false;
 let initPromise: Promise<void> | null = null;
 let parser: Parser | null = null;
-const languageByLabel = new Map<string, Language>();
-
-type GrammarLabel = "typescript" | "tsx" | "javascript";
+const languageByLabel = new Map<GrammarLabel, Language>();
 
 const GRAMMAR_LABEL_BY_EXTENSION: Record<string, GrammarLabel> = {
   ".ts": "typescript",
@@ -37,25 +37,15 @@ const GRAMMAR_LABEL_BY_EXTENSION: Record<string, GrammarLabel> = {
   ".jsx": "javascript",
   ".mjs": "javascript",
   ".cjs": "javascript",
+  ".py": "python",
+  ".go": "go",
+  ".java": "java",
+  ".rb": "ruby",
 };
 
 function grammarLabelForPath(filePath: string): GrammarLabel | null {
   const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
   return GRAMMAR_LABEL_BY_EXTENSION[ext] ?? null;
-}
-
-function wasmPathForLabel(options: TreeSitterInitOptions, label: GrammarLabel): string {
-  switch (label) {
-    case "tsx": {
-      return options.tsxWasm;
-    }
-    case "javascript": {
-      return options.javascriptWasm;
-    }
-    default: {
-      return options.typescriptWasm;
-    }
-  }
 }
 
 function buildPrefix(filePath: string, span: SymbolSpan): string {
@@ -65,26 +55,9 @@ function buildPrefix(filePath: string, span: SymbolSpan): string {
   return `FILE: ${filePath} | ${span.kind}: ${span.name}`;
 }
 
-function nodeName(node: Node): string | undefined {
-  const nameNode =
-    node.childForFieldName("name")
-    ?? node.namedChildren.find((child) => child.type === "identifier" || child.type === "type_identifier");
-  if (!nameNode) return undefined;
-  const text = nameNode.text;
-  return text.length > 0 ? text : undefined;
-}
-
-function spanFromNode(node: Node, kind: SymbolKind, className?: string): SymbolSpan | undefined {
-  const name = nodeName(node);
-  if (!name) return undefined;
-  return {
-    kind,
-    name,
-    ...(className === undefined ? {} : { className }),
-    startIndex: node.startIndex,
-    endIndex: node.endIndex,
-  };
-}
+// ---------------------------------------------------------------------------
+// JS / TS (existing logic, unchanged)
+// ---------------------------------------------------------------------------
 
 function collectConstArrows(node: Node): SymbolSpan[] {
   const spans: SymbolSpan[] = [];
@@ -141,7 +114,7 @@ function extractFromDeclaration(node: Node): SymbolSpan[] {
   }
 }
 
-function extractSymbolSpans(tree: Tree): SymbolSpan[] {
+function extractSymbolSpansJsTs(tree: Tree): SymbolSpan[] {
   const spans: SymbolSpan[] = [];
 
   for (const child of tree.rootNode.namedChildren) {
@@ -179,6 +152,32 @@ function extractSymbolSpans(tree: Tree): SymbolSpan[] {
   return spans;
 }
 
+// ---------------------------------------------------------------------------
+// Dispatch
+// ---------------------------------------------------------------------------
+
+function extractSymbolSpans(tree: Tree, label: GrammarLabel): SymbolSpan[] {
+  switch (label) {
+    case "typescript":
+    case "tsx":
+    case "javascript": {
+      return extractSymbolSpansJsTs(tree);
+    }
+    case "python": {
+      return extractSymbolSpansPython(tree);
+    }
+    case "go": {
+      return extractSymbolSpansGo(tree);
+    }
+    case "java": {
+      return extractSymbolSpansJava(tree);
+    }
+    case "ruby": {
+      return extractSymbolSpansRuby(tree);
+    }
+  }
+}
+
 function spansToChunks(filePath: string, content: string, spans: SymbolSpan[]): Chunk[] {
   const chunks: Chunk[] = [];
   for (const span of spans) {
@@ -190,14 +189,15 @@ function spansToChunks(filePath: string, content: string, spans: SymbolSpan[]): 
   return chunks;
 }
 
-function parseFile(file: FileInfo): Tree | null {
+function parseFile(file: FileInfo): { tree: Tree; label: GrammarLabel } | null {
   if (!initialized || !parser) return null;
   const label = grammarLabelForPath(file.path);
   if (label === null) return null;
   const language = languageByLabel.get(label);
   if (!language) return null;
   parser.setLanguage(language);
-  return parser.parse(file.content);
+  const tree = parser.parse(file.content);
+  return tree ? { tree, label } : null;
 }
 
 export async function initTreeSitterChunker(options: TreeSitterInitOptions): Promise<void> {
@@ -211,8 +211,7 @@ export async function initTreeSitterChunker(options: TreeSitterInitOptions): Pro
     await Parser.init({ locateFile: () => options.webTreeSitterWasm });
     parser = new Parser();
 
-    for (const label of ["typescript", "tsx", "javascript"] as const) {
-      const wasmPath = wasmPathForLabel(options, label);
+    for (const [label, wasmPath] of Object.entries(options.grammarWasmByLabel) as [GrammarLabel, string][]) {
       languageByLabel.set(label, await Language.load(wasmPath));
     }
 
@@ -237,10 +236,10 @@ export const treeSitterStrategy: ChunkingStrategy = (file: FileInfo): Chunk[] =>
   }
 
   try {
-    const tree = parseFile(file);
-    if (!tree) return chunkFile(file.path, file.content, MAX_CHUNK_CHARS);
+    const parsed = parseFile(file);
+    if (!parsed) return chunkFile(file.path, file.content, MAX_CHUNK_CHARS);
 
-    const spans = extractSymbolSpans(tree);
+    const spans = extractSymbolSpans(parsed.tree, parsed.label);
     if (spans.length === 0) {
       return chunkFile(file.path, file.content, MAX_CHUNK_CHARS);
     }

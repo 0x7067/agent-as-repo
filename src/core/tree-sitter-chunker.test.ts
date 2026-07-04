@@ -5,18 +5,31 @@ import {
   initTreeSitterChunker,
   resetTreeSitterChunkerForTests,
   treeSitterStrategy,
+  type GrammarLabel,
 } from "./tree-sitter-chunker.js";
 import type { FileInfo } from "./types.js";
 
 const ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
+function wasmPath(pkg: string, file: string): string {
+  return path.join(ROOT, "node_modules", pkg, file);
+}
+
+const GRAMMAR_WASM_BY_LABEL: Record<GrammarLabel, string> = {
+  typescript: wasmPath("tree-sitter-typescript", "tree-sitter-typescript.wasm"),
+  tsx: wasmPath("tree-sitter-typescript", "tree-sitter-tsx.wasm"),
+  javascript: wasmPath("tree-sitter-javascript", "tree-sitter-javascript.wasm"),
+  python: wasmPath("tree-sitter-python", "tree-sitter-python.wasm"),
+  go: wasmPath("tree-sitter-go", "tree-sitter-go.wasm"),
+  java: wasmPath("tree-sitter-java", "tree-sitter-java.wasm"),
+  ruby: wasmPath("tree-sitter-ruby", "tree-sitter-ruby.wasm"),
+};
+
 beforeAll(async () => {
   resetTreeSitterChunkerForTests();
   await initTreeSitterChunker({
-    webTreeSitterWasm: path.join(ROOT, "node_modules/web-tree-sitter/web-tree-sitter.wasm"),
-    typescriptWasm: path.join(ROOT, "node_modules/tree-sitter-typescript/tree-sitter-typescript.wasm"),
-    tsxWasm: path.join(ROOT, "node_modules/tree-sitter-typescript/tree-sitter-tsx.wasm"),
-    javascriptWasm: path.join(ROOT, "node_modules/tree-sitter-javascript/tree-sitter-javascript.wasm"),
+    webTreeSitterWasm: wasmPath("web-tree-sitter", "web-tree-sitter.wasm"),
+    grammarWasmByLabel: GRAMMAR_WASM_BY_LABEL,
   });
 });
 
@@ -101,7 +114,7 @@ describe("treeSitterStrategy", () => {
     expect(chunks.some((chunk) => chunk.text.includes("FUNCTION: foo"))).toBe(true);
   });
 
-  it("falls back to raw chunking for unsupported languages like Java, instead of misparsing with the TS grammar", () => {
+  it("parses Java class methods with CLASS | METHOD prefix (Java is now a supported grammar)", () => {
     const file: FileInfo = {
       path: "src/Foo.java",
       content: [
@@ -115,23 +128,87 @@ describe("treeSitterStrategy", () => {
     };
 
     const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("CLASS: Foo"))).toBe(true);
+    expect(chunks.some((chunk) => chunk.text.includes("METHOD: bar"))).toBe(true);
+  });
+
+  it("parses a Java interface and enum as top-level declarations", () => {
+    const file: FileInfo = {
+      path: "src/Shapes.java",
+      content: [
+        "public interface Shape {",
+        "  double area();",
+        "}",
+        "",
+        "enum Color {",
+        "  RED, GREEN, BLUE",
+        "}",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("INTERFACE: Shape"))).toBe(true);
+    expect(chunks.some((chunk) => chunk.text.includes("ENUM: Color"))).toBe(true);
+  });
+
+  it("falls back to raw chunking for Java files with no extractable declarations", () => {
+    const file: FileInfo = {
+      path: "src/Comment.java",
+      content: "// just a comment\n",
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
     expect(chunks.length).toBeGreaterThan(0);
     for (const chunk of chunks) {
-      expect(chunk.text.startsWith("FILE: src/Foo.java")).toBe(true);
+      expect(chunk.text.startsWith("FILE: src/Comment.java")).toBe(true);
       expect(chunk.text).not.toContain("CLASS:");
       expect(chunk.text).not.toContain("METHOD:");
     }
   });
 
-  it("falls back to raw chunking for Python (TS grammar extracts no spans, so this is a safe-degradation case, not a regression pin)", () => {
+  it("parses a top-level Python function", () => {
     const file: FileInfo = {
       path: "src/foo.py",
       content: [
         "def foo():",
         "    pass",
-        "",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("FUNCTION: foo"))).toBe(true);
+  });
+
+  it("parses a Python class and its methods, including a decorated method, with CLASS | METHOD prefix", () => {
+    const file: FileInfo = {
+      path: "src/bar.py",
+      content: [
         "class Bar:",
-        "    pass",
+        "    def greet(self):",
+        "        pass",
+        "",
+        "    @staticmethod",
+        "    def helper():",
+        "        pass",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("CLASS: Bar"))).toBe(true);
+    expect(chunks.some((chunk) => chunk.text.includes("CLASS: Bar") && chunk.text.includes("METHOD: greet"))).toBe(true);
+    expect(chunks.some((chunk) => chunk.text.includes("CLASS: Bar") && chunk.text.includes("METHOD: helper"))).toBe(true);
+  });
+
+  it("falls back to raw chunking for Python files that are just comments", () => {
+    const file: FileInfo = {
+      path: "src/empty_ish.py",
+      content: [
+        "# just a comment",
+        "# another comment",
       ].join("\n"),
       sizeKb: 0.1,
     };
@@ -139,9 +216,141 @@ describe("treeSitterStrategy", () => {
     const chunks = treeSitterStrategy(file);
     expect(chunks.length).toBeGreaterThan(0);
     for (const chunk of chunks) {
-      expect(chunk.text.startsWith("FILE: src/foo.py")).toBe(true);
+      expect(chunk.text.startsWith("FILE: src/empty_ish.py")).toBe(true);
       expect(chunk.text).not.toContain("CLASS:");
       expect(chunk.text).not.toContain("FUNCTION:");
+    }
+  });
+
+  it("parses a top-level Go function", () => {
+    const file: FileInfo = {
+      path: "src/foo.go",
+      content: [
+        "package main",
+        "",
+        "func Foo() {",
+        "  println(\"foo\")",
+        "}",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("FUNCTION: Foo"))).toBe(true);
+  });
+
+  it("parses a Go method with a receiver as CLASS | METHOD, and a type declaration as TYPE", () => {
+    const file: FileInfo = {
+      path: "src/server.go",
+      content: [
+        "package main",
+        "",
+        "type Server struct {",
+        "  addr string",
+        "}",
+        "",
+        "func (s *Server) Start() {",
+        "  println(s.addr)",
+        "}",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("TYPE: Server"))).toBe(true);
+    expect(chunks.some((chunk) => chunk.text.includes("CLASS: Server") && chunk.text.includes("METHOD: Start"))).toBe(true);
+  });
+
+  it("falls back to raw chunking for Go files with no extractable declarations", () => {
+    const file: FileInfo = {
+      path: "src/empty.go",
+      content: [
+        "package main",
+        "",
+        "// just a comment",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.length).toBeGreaterThan(0);
+    for (const chunk of chunks) {
+      expect(chunk.text.startsWith("FILE: src/empty.go")).toBe(true);
+      expect(chunk.text).not.toContain("CLASS:");
+      expect(chunk.text).not.toContain("FUNCTION:");
+      expect(chunk.text).not.toContain("TYPE:");
+    }
+  });
+
+  it("parses a top-level Ruby method", () => {
+    const file: FileInfo = {
+      path: "src/foo.rb",
+      content: [
+        "def foo",
+        "  puts 'foo'",
+        "end",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("FUNCTION: foo"))).toBe(true);
+  });
+
+  it("parses a Ruby module with a method as MODULE | METHOD", () => {
+    const file: FileInfo = {
+      path: "src/greeter.rb",
+      content: [
+        "module Greeter",
+        "  def self.hello",
+        "    puts 'hello'",
+        "  end",
+        "end",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("FILE: src/greeter.rb | MODULE: Greeter"))).toBe(true);
+    // Method headers keep the existing "CLASS: <container> | METHOD: <name>" format regardless of
+    // whether the container was a class or a module (buildPrefix does not special-case MODULE).
+    expect(chunks.some((chunk) => chunk.text.includes("CLASS: Greeter") && chunk.text.includes("METHOD: hello"))).toBe(true);
+  });
+
+  it("parses a Ruby class with a method as CLASS | METHOD", () => {
+    const file: FileInfo = {
+      path: "src/dog.rb",
+      content: [
+        "class Dog",
+        "  def bark",
+        "    puts 'woof'",
+        "  end",
+        "end",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.some((chunk) => chunk.text.includes("CLASS: Dog") && chunk.text.includes("METHOD: bark"))).toBe(true);
+  });
+
+  it("falls back to raw chunking for Ruby files that are just comments", () => {
+    const file: FileInfo = {
+      path: "src/empty.rb",
+      content: [
+        "# just a comment",
+        "# another comment",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.length).toBeGreaterThan(0);
+    for (const chunk of chunks) {
+      expect(chunk.text.startsWith("FILE: src/empty.rb")).toBe(true);
+      expect(chunk.text).not.toContain("CLASS:");
+      expect(chunk.text).not.toContain("FUNCTION:");
+      expect(chunk.text).not.toContain("MODULE:");
     }
   });
 

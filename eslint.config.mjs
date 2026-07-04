@@ -216,6 +216,7 @@ export default tseslint.config(
 		files: [
 			"src/cli.test.ts",
 			"src/core/config.test.ts",
+			"src/core/tree-sitter-chunker.test.ts",
 			"src/mcp-server.test.ts",
 			"src/shell/llm-client.test.ts",
 			"src/shell/self-check.test.ts",
