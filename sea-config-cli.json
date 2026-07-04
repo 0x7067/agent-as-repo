@@ -17,6 +17,8 @@
     "tree-sitter-c.wasm": "dist/wasm/tree-sitter-c.wasm",
     "tree-sitter-cpp.wasm": "dist/wasm/tree-sitter-cpp.wasm",
     "tree-sitter-c_sharp.wasm": "dist/wasm/tree-sitter-c_sharp.wasm",
+    "tree-sitter-kotlin.wasm": "dist/wasm/tree-sitter-kotlin.wasm",
+    "tree-sitter-swift.wasm": "dist/wasm/tree-sitter-swift.wasm",
     "wasm-manifest.json": "dist/wasm/wasm-manifest.json"
   }
 }

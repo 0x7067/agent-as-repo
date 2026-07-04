@@ -58,17 +58,26 @@ describe("listWasmAssets", () => {
   it("includes the web-tree-sitter runtime plus one entry per grammar, all unique", () => {
     const assets = listWasmAssets();
 
-    expect(assets).toHaveLength(13);
+    expect(assets).toHaveLength(15);
     const keys = assets.map((a) => a.assetKey);
-    expect(new Set(keys).size).toBe(13);
+    expect(new Set(keys).size).toBe(15);
     expect(keys).toContain("web-tree-sitter.wasm");
     // C# ships an underscore filename despite the hyphenated package name.
     expect(keys).toContain("tree-sitter-c_sharp.wasm");
     const csharp = assets.find((a) => a.assetKey === "tree-sitter-c_sharp.wasm");
-    expect(csharp?.nodeModulesPath).toBe(path.join("tree-sitter-c-sharp", "tree-sitter-c_sharp.wasm"));
+    expect(csharp?.relativePath).toBe(path.join("node_modules", "tree-sitter-c-sharp", "tree-sitter-c_sharp.wasm"));
     // PHP ships two variants; only the full (tags + HTML) one is used.
     expect(keys).toContain("tree-sitter-php.wasm");
     expect(keys).not.toContain("tree-sitter-php_only.wasm");
+  });
+
+  it("resolves Kotlin and Swift wasm from vendor/wasm, not node_modules", () => {
+    const assets = listWasmAssets();
+
+    const kotlin = assets.find((a) => a.assetKey === "tree-sitter-kotlin.wasm");
+    const swift = assets.find((a) => a.assetKey === "tree-sitter-swift.wasm");
+    expect(kotlin?.relativePath).toBe(path.join("vendor", "wasm", "tree-sitter-kotlin.wasm"));
+    expect(swift?.relativePath).toBe(path.join("vendor", "wasm", "tree-sitter-swift.wasm"));
   });
 });
 
@@ -83,7 +92,11 @@ describe("resolveTreeSitterWasmPaths (non-SEA)", () => {
     expect(result.grammarWasmByLabel.csharp).toBe(
       path.join(packageRoot, "node_modules/tree-sitter-c-sharp/tree-sitter-c_sharp.wasm"),
     );
-    expect(Object.keys(result.grammarWasmByLabel)).toHaveLength(12);
+    // Kotlin/Swift ship no wasm in their npm packages at all — resolved from the vendored copy
+    // under vendor/wasm/, not node_modules.
+    expect(result.grammarWasmByLabel.kotlin).toBe(path.join(packageRoot, "vendor/wasm/tree-sitter-kotlin.wasm"));
+    expect(result.grammarWasmByLabel.swift).toBe(path.join(packageRoot, "vendor/wasm/tree-sitter-swift.wasm"));
+    expect(Object.keys(result.grammarWasmByLabel)).toHaveLength(14);
   });
 
   it("defaults the package root to the real resolvePackageRoot() when omitted", () => {
@@ -109,7 +122,7 @@ describe("resolveTreeSitterWasmPaths (SEA)", () => {
     expect(readFileSync(result.webTreeSitterWasm, "utf8")).toBe("fake-bytes-for-web-tree-sitter.wasm");
 
     const wasmPaths = Object.values(result.grammarWasmByLabel);
-    expect(wasmPaths).toHaveLength(12);
+    expect(wasmPaths).toHaveLength(14);
     for (const wasmPath of wasmPaths) {
       expect(path.dirname(wasmPath)).toBe(cacheDir);
       // eslint-disable-next-line security/detect-non-literal-fs-filename -- path is a fixture built from the temp cacheDir under test
@@ -127,8 +140,8 @@ describe("resolveTreeSitterWasmPaths (SEA)", () => {
 
     resolveTreeSitterWasmPaths({ sea, cacheDir });
     const firstCallCount = getRawAsset.mock.calls.length;
-    // 13 wasm assets (web-tree-sitter + 12 grammars) plus one manifest read.
-    expect(firstCallCount).toBe(14);
+    // 15 wasm assets (web-tree-sitter + 14 grammars) plus one manifest read.
+    expect(firstCallCount).toBe(16);
 
     resolveTreeSitterWasmPaths({ sea, cacheDir });
 

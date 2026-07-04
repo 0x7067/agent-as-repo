@@ -11,25 +11,55 @@ export interface TreeSitterWasmPaths {
   grammarWasmByLabel: Record<GrammarLabel, string>;
 }
 
-/** Package name and wasm filename for each supported grammar, relative to `node_modules/`. */
-const GRAMMAR_PACKAGE_INFO: Record<GrammarLabel, { pkg: string; file: string }> = {
-  typescript: { pkg: "tree-sitter-typescript", file: "tree-sitter-typescript.wasm" },
-  tsx: { pkg: "tree-sitter-typescript", file: "tree-sitter-tsx.wasm" },
-  javascript: { pkg: "tree-sitter-javascript", file: "tree-sitter-javascript.wasm" },
-  python: { pkg: "tree-sitter-python", file: "tree-sitter-python.wasm" },
-  go: { pkg: "tree-sitter-go", file: "tree-sitter-go.wasm" },
-  java: { pkg: "tree-sitter-java", file: "tree-sitter-java.wasm" },
-  ruby: { pkg: "tree-sitter-ruby", file: "tree-sitter-ruby.wasm" },
-  rust: { pkg: "tree-sitter-rust", file: "tree-sitter-rust.wasm" },
-  php: { pkg: "tree-sitter-php", file: "tree-sitter-php.wasm" },
-  c: { pkg: "tree-sitter-c", file: "tree-sitter-c.wasm" },
-  cpp: { pkg: "tree-sitter-cpp", file: "tree-sitter-cpp.wasm" },
+/**
+ * Where a grammar's wasm comes from at build/run time. Two kinds:
+ *  - "node_modules": the grammar's own npm package ships a prebuilt wasm (resolved from
+ *    `node_modules/<pkg>/<file>`).
+ *  - "vendored": the grammar's npm package ships no wasm at all (true for Kotlin and Swift — see
+ *    docs/architecture.md's "vendored grammars" note). The wasm is checked into `vendor/wasm/`
+ *    instead, built/refreshed by `scripts/build-grammar-wasm.ts`. `version` records the upstream
+ *    grammar version for the SEA wasm manifest (`buildWasmManifest`), since there's no
+ *    `node_modules/<pkg>/package.json` to read a version from for these two.
+ */
+type GrammarSource =
+  | { kind: "node_modules"; pkg: string; file: string }
+  | { kind: "vendored"; file: string; version: string };
+
+/** Package name and wasm filename (or vendored path) for each supported grammar. */
+const GRAMMAR_PACKAGE_INFO: Record<GrammarLabel, GrammarSource> = {
+  typescript: { kind: "node_modules", pkg: "tree-sitter-typescript", file: "tree-sitter-typescript.wasm" },
+  tsx: { kind: "node_modules", pkg: "tree-sitter-typescript", file: "tree-sitter-tsx.wasm" },
+  javascript: { kind: "node_modules", pkg: "tree-sitter-javascript", file: "tree-sitter-javascript.wasm" },
+  python: { kind: "node_modules", pkg: "tree-sitter-python", file: "tree-sitter-python.wasm" },
+  go: { kind: "node_modules", pkg: "tree-sitter-go", file: "tree-sitter-go.wasm" },
+  java: { kind: "node_modules", pkg: "tree-sitter-java", file: "tree-sitter-java.wasm" },
+  ruby: { kind: "node_modules", pkg: "tree-sitter-ruby", file: "tree-sitter-ruby.wasm" },
+  rust: { kind: "node_modules", pkg: "tree-sitter-rust", file: "tree-sitter-rust.wasm" },
+  php: { kind: "node_modules", pkg: "tree-sitter-php", file: "tree-sitter-php.wasm" },
+  c: { kind: "node_modules", pkg: "tree-sitter-c", file: "tree-sitter-c.wasm" },
+  cpp: { kind: "node_modules", pkg: "tree-sitter-cpp", file: "tree-sitter-cpp.wasm" },
   // Package name uses a hyphen, but the shipped wasm filename uses an underscore.
-  csharp: { pkg: "tree-sitter-c-sharp", file: "tree-sitter-c_sharp.wasm" },
+  csharp: { kind: "node_modules", pkg: "tree-sitter-c-sharp", file: "tree-sitter-c_sharp.wasm" },
+  kotlin: { kind: "vendored", file: "tree-sitter-kotlin.wasm", version: "0.3.8" },
+  // The vendored wasm was built from upstream grammar 0.7.3 (see vendor/wasm/checksums.json's
+  // "grammarVersion") — newer than the 0.7.1 tree-sitter-swift devDependency pinned for the
+  // (currently unused-in-CI) self-build path. This version is what actually shipped, so it's what
+  // the SEA wasm manifest should record.
+  swift: { kind: "vendored", file: "tree-sitter-swift.wasm", version: "0.7.3" },
 };
 
+/** `source`'s wasm path, relative to the package root (either `node_modules/<pkg>/<file>` or
+ * `vendor/wasm/<file>`). Kept relative so both node_modules and SEA-staging callers can join it
+ * against whichever package root they resolved themselves, without either caller having to know
+ * which of the two directories a given grammar's wasm lives under. */
+function grammarSourceRelativePath(source: GrammarSource): string {
+  return source.kind === "vendored"
+    ? path.join("vendor", "wasm", source.file)
+    : path.join("node_modules", source.pkg, source.file);
+}
+
 const WEB_TREE_SITTER_ASSET_KEY = "web-tree-sitter.wasm";
-const WEB_TREE_SITTER_NODE_MODULES_PATH = path.join("web-tree-sitter", "web-tree-sitter.wasm");
+const WEB_TREE_SITTER_RELATIVE_PATH = path.join("node_modules", "web-tree-sitter", "web-tree-sitter.wasm");
 
 /**
  * Every wasm file the tree-sitter chunker needs at runtime: the web-tree-sitter
@@ -38,17 +68,22 @@ const WEB_TREE_SITTER_NODE_MODULES_PATH = path.join("web-tree-sitter", "web-tree
  * basename here is unique (including the C# underscore filename), so it
  * doubles as a stable, collision-free asset key.
  *
+ * `relativePath` is relative to the package root (repo root) — `node_modules/<pkg>/<file>` for
+ * grammars whose npm package ships its own wasm, `vendor/wasm/<file>` for the vendored ones
+ * (Kotlin, Swift). Callers join it against whichever package root they resolved themselves; no
+ * caller needs to know which of the two directories a given grammar's wasm lives under.
+ *
  * This is the single source of truth for "which wasm files does SEA need to
  * stage" — scripts/gen-sea-config.ts imports it to build the SEA asset
  * manifest, so a new grammar added to GRAMMAR_PACKAGE_INFO is automatically
  * picked up by the SEA build without a second list to keep in sync.
  */
-export function listWasmAssets(): { assetKey: string; nodeModulesPath: string }[] {
-  const grammarAssets = Object.values(GRAMMAR_PACKAGE_INFO).map(({ pkg, file }) => ({
-    assetKey: file,
-    nodeModulesPath: path.join(pkg, file),
+export function listWasmAssets(): { assetKey: string; relativePath: string }[] {
+  const grammarAssets = Object.values(GRAMMAR_PACKAGE_INFO).map((source) => ({
+    assetKey: source.file,
+    relativePath: grammarSourceRelativePath(source),
   }));
-  return [{ assetKey: WEB_TREE_SITTER_ASSET_KEY, nodeModulesPath: WEB_TREE_SITTER_NODE_MODULES_PATH }, ...grammarAssets];
+  return [{ assetKey: WEB_TREE_SITTER_ASSET_KEY, relativePath: WEB_TREE_SITTER_RELATIVE_PATH }, ...grammarAssets];
 }
 
 export function resolvePackageRoot(fromModuleUrl = import.meta.url): string {
@@ -58,7 +93,7 @@ export function resolvePackageRoot(fromModuleUrl = import.meta.url): string {
 /** SEA asset key for the version manifest (see `buildWasmManifest`). */
 export const WASM_MANIFEST_ASSET_KEY = "wasm-manifest.json";
 
-/** Maps each wasm asset key (see `listWasmAssets`) to the exact installed version of the npm package it came from. */
+/** Maps each wasm asset key (see `listWasmAssets`) to the exact version of the grammar it came from. */
 export type WasmManifest = Record<string, string>;
 
 /**
@@ -66,18 +101,25 @@ export type WasmManifest = Record<string, string>;
  * `wasm-manifest.json` SEA asset. Grammar packages are pinned with caret
  * ranges, so the wasm *filename* alone doesn't change across an upgrade —
  * without this, a filename-keyed on-disk cache (see `resolveFromSea` below)
- * would serve stale bytes from a previous install forever. Reading the
- * installed `package.json` version at build time and comparing it against
- * the cached manifest at runtime catches that case.
+ * would serve stale bytes from a previous install forever. For node_modules-sourced grammars, the
+ * installed `package.json` version is read at build time and compared against the cached manifest
+ * at runtime to catch that case. Vendored grammars (Kotlin, Swift) have no `node_modules/<pkg>/package.json`
+ * to read, so their version comes straight from `GRAMMAR_PACKAGE_INFO` (kept in sync with
+ * `vendor/wasm/checksums.json` by `scripts/build-grammar-wasm.ts`).
  */
+function nodeModulesPackageVersion(packageRoot: string, pkg: string): string {
+  const pkgJsonPath = path.join(packageRoot, "node_modules", pkg, "package.json");
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- pkgJsonPath is derived from the fixed, code-defined GRAMMAR_PACKAGE_INFO list, not external input
+  const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf8")) as { version: string };
+  return pkgJson.version;
+}
+
 export function buildWasmManifest(packageRoot = resolvePackageRoot()): WasmManifest {
-  const manifest: WasmManifest = {};
-  for (const { assetKey, nodeModulesPath } of listWasmAssets()) {
-    const pkgDir = path.dirname(nodeModulesPath);
-    const pkgJsonPath = path.join(packageRoot, "node_modules", pkgDir, "package.json");
-    // eslint-disable-next-line security/detect-non-literal-fs-filename -- pkgJsonPath is derived from the fixed, code-defined GRAMMAR_PACKAGE_INFO list, not external input
-    const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf8")) as { version: string };
-    manifest[assetKey] = pkgJson.version;
+  const manifest: WasmManifest = {
+    [WEB_TREE_SITTER_ASSET_KEY]: nodeModulesPackageVersion(packageRoot, "web-tree-sitter"),
+  };
+  for (const source of Object.values(GRAMMAR_PACKAGE_INFO)) {
+    manifest[source.file] = source.kind === "vendored" ? source.version : nodeModulesPackageVersion(packageRoot, source.pkg);
   }
   return manifest;
 }
@@ -91,15 +133,15 @@ function wasmManifestsMatch(cached: WasmManifest | undefined, current: WasmManif
   return currentKeys.every((key) => cached[key] === current[key]);
 }
 
-/** Node_modules-based resolution: plain `pnpm build` dist output and dev (`tsx`) execution. */
+/** Node_modules/vendor-based resolution: plain `pnpm build` dist output and dev (`tsx`) execution. */
 function resolveFromNodeModules(packageRoot: string): TreeSitterWasmPaths {
-  const entries = Object.entries(GRAMMAR_PACKAGE_INFO) as [GrammarLabel, { pkg: string; file: string }][];
+  const entries = Object.entries(GRAMMAR_PACKAGE_INFO) as [GrammarLabel, GrammarSource][];
   const grammarWasmByLabel = Object.fromEntries(
-    entries.map(([label, { pkg, file }]) => [label, path.join(packageRoot, "node_modules", pkg, file)]),
+    entries.map(([label, source]) => [label, path.join(packageRoot, grammarSourceRelativePath(source))]),
   ) as Record<GrammarLabel, string>;
 
   return {
-    webTreeSitterWasm: path.join(packageRoot, "node_modules", WEB_TREE_SITTER_NODE_MODULES_PATH),
+    webTreeSitterWasm: path.join(packageRoot, WEB_TREE_SITTER_RELATIVE_PATH),
     grammarWasmByLabel,
   };
 }
@@ -197,7 +239,7 @@ function resolveFromSea(sea: SeaApi, cacheDir: string): TreeSitterWasmPaths {
   };
 
   const webTreeSitterWasm = extract(WEB_TREE_SITTER_ASSET_KEY);
-  const entries = Object.entries(GRAMMAR_PACKAGE_INFO) as [GrammarLabel, { pkg: string; file: string }][];
+  const entries = Object.entries(GRAMMAR_PACKAGE_INFO) as [GrammarLabel, GrammarSource][];
   const grammarWasmByLabel = Object.fromEntries(
     entries.map(([label, { file }]) => [label, extract(file)]),
   ) as Record<GrammarLabel, string>;

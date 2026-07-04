@@ -66,6 +66,7 @@ Options, best-first:
 2. **Slice 1 (cheap wins):** Python, Go, Java, Ruby — official npm packages, small wasms (0.2–2 MB), clean declaration node sets. Data-driven refactor of init/paths lands here.
 3. **Slice 2:** Rust, PHP, C, C++, C# — official packages, but larger wasms (C++/C# are 3.4/5.4 MB) and messier node sets (`impl_item`, PHP variants, C `declaration` ambiguity). Fix SEA wasm staging before or during this slice.
 4. **Slice 3 (optional):** Kotlin + Swift via CI self-build (`tree-sitter build --wasm`, WASI SDK, no Docker) with vendored, checksummed wasms. Weigh 7–8 MB of wasm against actual demand.
+   **Status: implemented.** Self-build was attempted first but blocked in this environment — `tree-sitter-cli`'s own postinstall couldn't download its platform binary from `github.com/tree-sitter/tree-sitter/releases/...` (403, org egress policy), so the WASI SDK it would additionally need was never reached. Fell back to vendoring prebuilt wasm from `@lumis-sh/wasm-kotlin`/`@lumis-sh/wasm-swift` (ABI 15, built with tree-sitter-cli 0.26.x) after `tree-sitter-wasms` — this doc's other listed fallback — turned out to ship pre-2021-Emscripten `dylink` sections that `web-tree-sitter` 0.26.x can't load at all (needs `dylink.0`). Vendored sizes: kotlin ~3.9 MB, swift ~3.6 MB (~7.6 MB combined, in line with the estimate above). See `vendor/wasm/checksums.json` and `scripts/build-grammar-wasm.ts`.
 5. **Skip:** tree-sitter for Markdown/JSON; revisit YAML/TOML only on demand.
 
 ## Sources

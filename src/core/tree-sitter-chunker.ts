@@ -6,10 +6,12 @@ import { extractSymbolSpansCpp } from "./tree-sitter-lang-cpp.js";
 import { extractSymbolSpansCsharp } from "./tree-sitter-lang-csharp.js";
 import { extractSymbolSpansGo } from "./tree-sitter-lang-go.js";
 import { extractSymbolSpansJava } from "./tree-sitter-lang-java.js";
+import { extractSymbolSpansKotlin } from "./tree-sitter-lang-kotlin.js";
 import { extractSymbolSpansPhp } from "./tree-sitter-lang-php.js";
 import { extractSymbolSpansPython } from "./tree-sitter-lang-python.js";
 import { extractSymbolSpansRuby } from "./tree-sitter-lang-ruby.js";
 import { extractSymbolSpansRust } from "./tree-sitter-lang-rust.js";
+import { extractSymbolSpansSwift } from "./tree-sitter-lang-swift.js";
 import { spanFromNode, type SymbolSpan } from "./tree-sitter-symbols.js";
 import type { Chunk, ChunkingStrategy, FileInfo } from "./types.js";
 
@@ -27,7 +29,9 @@ export type GrammarLabel =
   | "php"
   | "c"
   | "cpp"
-  | "csharp";
+  | "csharp"
+  | "kotlin"
+  | "swift";
 
 export interface TreeSitterInitOptions {
   webTreeSitterWasm: string;
@@ -59,6 +63,13 @@ const GRAMMAR_LABEL_BY_EXTENSION: Record<string, GrammarLabel> = {
   ".cpp": "cpp",
   ".hpp": "cpp",
   ".cs": "csharp",
+  ".kt": "kotlin",
+  // .kts is a Kotlin *script* file, but it's the same grammar as .kt (fwcd's tree-sitter-kotlin
+  // parses both) — mapping it here is harmless even though .kts isn't in config.ts's
+  // DEFAULT_EXTENSIONS (a repo that opts in via its own `extensions:` list gets real Kotlin
+  // chunking instead of an accidental raw-text/misparse fallback).
+  ".kts": "kotlin",
+  ".swift": "swift",
 };
 
 function grammarLabelForPath(filePath: string): GrammarLabel | null {
@@ -208,6 +219,12 @@ function extractSymbolSpans(tree: Tree, label: GrammarLabel): SymbolSpan[] {
     }
     case "csharp": {
       return extractSymbolSpansCsharp(tree);
+    }
+    case "kotlin": {
+      return extractSymbolSpansKotlin(tree);
+    }
+    case "swift": {
+      return extractSymbolSpansSwift(tree);
     }
   }
 }

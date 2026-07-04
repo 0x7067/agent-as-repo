@@ -14,6 +14,12 @@ function wasmPath(pkg: string, file: string): string {
   return path.join(ROOT, "node_modules", pkg, file);
 }
 
+/** Kotlin/Swift ship no wasm in their npm packages at all — their wasm is vendored in-repo (see
+ * vendor/wasm/checksums.json + scripts/build-grammar-wasm.ts), not resolved from node_modules. */
+function vendoredWasmPath(file: string): string {
+  return path.join(ROOT, "vendor", "wasm", file);
+}
+
 export const WEB_TREE_SITTER_WASM = wasmPath("web-tree-sitter", "web-tree-sitter.wasm");
 
 export const GRAMMAR_WASM_BY_LABEL: Record<GrammarLabel, string> = {
@@ -29,4 +35,6 @@ export const GRAMMAR_WASM_BY_LABEL: Record<GrammarLabel, string> = {
   c: wasmPath("tree-sitter-c", "tree-sitter-c.wasm"),
   cpp: wasmPath("tree-sitter-cpp", "tree-sitter-cpp.wasm"),
   csharp: wasmPath("tree-sitter-c-sharp", "tree-sitter-c_sharp.wasm"),
+  kotlin: vendoredWasmPath("tree-sitter-kotlin.wasm"),
+  swift: vendoredWasmPath("tree-sitter-swift.wasm"),
 };

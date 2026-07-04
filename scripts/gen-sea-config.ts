@@ -64,8 +64,8 @@ function main(): void {
   mkdirSync(wasmDir, { recursive: true });
 
   const wasmAssets: Record<string, string> = {};
-  for (const { assetKey, nodeModulesPath } of listWasmAssets()) {
-    const source = path.join(packageRoot, "node_modules", nodeModulesPath);
+  for (const { assetKey, relativePath } of listWasmAssets()) {
+    const source = path.join(packageRoot, relativePath);
     const dest = path.join(wasmDir, assetKey);
     copyFileSync(source, dest);
     wasmAssets[assetKey] = path.relative(packageRoot, dest);

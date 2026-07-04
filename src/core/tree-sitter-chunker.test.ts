@@ -137,23 +137,24 @@ describe("treeSitterStrategy", () => {
     expect(chunks.some((chunk) => chunk.text.includes("STRUCT: Point"))).toBe(true);
   });
 
-  it("falls back to raw chunking for unsupported languages like Kotlin, instead of misparsing with the TS grammar", () => {
+  it("falls back to raw chunking for unsupported languages like Scala, instead of misparsing with the TS grammar", () => {
     // Real-world "misparse hazard" fixture: brace-style syntax close enough to a TS/JS class body
     // that the TypeScript grammar produces a plausible-looking class_declaration/method_definition
     // tree for it (see the revert experiment in the Slice 2 report — temporarily letting unmapped
     // extensions default to the "typescript" grammar makes this fixture yield CLASS:/METHOD:
-    // headers). Kotlin (like Swift) has no wasm grammar wired up yet, so it must stay on the
-    // explicit-map-returns-null -> raw-fallback path.
+    // headers). Kotlin used to be this regression's pin, but Slice 3 wired up a real Kotlin grammar
+    // (see tree-sitter-lang-kotlin.test.ts for its positive-case coverage) — Scala, still unmapped,
+    // takes over as the "unsupported brace-style language" pin instead.
     const file: FileInfo = {
-      path: "src/Foo.kt",
-      content: "class Foo { fun bar() {} }",
+      path: "src/Foo.scala",
+      content: "class Foo { def bar() = {} }",
       sizeKb: 0.1,
     };
 
     const chunks = treeSitterStrategy(file);
     expect(chunks.length).toBeGreaterThan(0);
     for (const chunk of chunks) {
-      expect(chunk.text.startsWith("FILE: src/Foo.kt")).toBe(true);
+      expect(chunk.text.startsWith("FILE: src/Foo.scala")).toBe(true);
       expect(chunk.text).not.toContain("CLASS:");
       expect(chunk.text).not.toContain("METHOD:");
     }
