@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { chunkFile, rawTextStrategy, selectChunkingStrategy } from "./chunker.js";
+import { chunkFile, extractSourcePath, rawTextStrategy, selectChunkingStrategy } from "./chunker.js";
 
 const SMALL_FILE_PATH = "src/index.ts";
 const SMALL_FILE_CONTENT = "const x = 1;";
@@ -161,5 +161,23 @@ describe("selectChunkingStrategy", () => {
 
   it("returns a different strategy for tree-sitter chunking", () => {
     expect(selectChunkingStrategy("tree-sitter")).not.toBe(rawTextStrategy);
+  });
+});
+
+describe("extractSourcePath", () => {
+  it("extracts the path from a FILE: header", () => {
+    expect(extractSourcePath("FILE: src/app.ts\n\nconst x = 1;")).toBe("src/app.ts");
+  });
+
+  it("extracts the path from a continued-chunk header", () => {
+    expect(extractSourcePath("FILE: src/app.ts (continued)\n\nmore code")).toBe("src/app.ts");
+  });
+
+  it("returns null when the text has no FILE: header", () => {
+    expect(extractSourcePath("just some text")).toBeNull();
+  });
+
+  it("returns null for an empty header path", () => {
+    expect(extractSourcePath("FILE: \n\nbody")).toBeNull();
   });
 });
