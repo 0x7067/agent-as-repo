@@ -67,6 +67,9 @@ export interface ChecksumEntry {
   grammarVersion: string;
   buildTool: string;
   builtAt: string;
+  /** Path (relative to this file's directory) to the MIT attribution chain covering this wasm's
+   * upstream grammar author and (for the fallback-prebuilt path) the repackaging author. */
+  notice: string;
 }
 
 export type ChecksumsManifest = Record<string, ChecksumEntry>;
@@ -139,6 +142,7 @@ function buildOne(packageRoot: string, vendorDir: string, spec: GrammarBuildSpec
       ? `tree-sitter-cli ${packageVersion(packageRoot, "tree-sitter-cli")}`
       : `${spec.fallbackPackage} ${packageVersion(packageRoot, spec.fallbackPackage)} (prebuilt with tree-sitter-cli 0.26.x, per its own provenance metadata)`,
     builtAt: new Date().toISOString(),
+    notice: "NOTICE",
   };
 }
 

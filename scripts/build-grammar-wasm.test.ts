@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -31,6 +31,22 @@ describe("vendor/wasm/checksums.json", () => {
     for (const entry of Object.values(manifest)) {
       const wasmPath = path.join(vendorDir, entry.file);
       expect(sha256OfFile(wasmPath)).toBe(entry.sha256);
+    }
+  });
+
+  it("points every entry's notice field at an MIT attribution file that actually exists under vendor/wasm/", () => {
+    // The vendored wasm are compiled derivatives of MIT-licensed grammars (fwcd/tree-sitter-kotlin,
+    // alex-pinkus/tree-sitter-swift) repackaged by @lumis-sh — MIT's notice-must-travel-with
+    // requirement means provenance (this file) and licensing (the notice file) need to live
+    // together, not just in node_modules/ which isn't shipped with the vendored wasm.
+    const checksumsPath = path.join(vendorDir, "checksums.json");
+    const manifest = JSON.parse(readFileSync(checksumsPath, "utf8")) as ChecksumsManifest;
+
+    for (const entry of Object.values(manifest)) {
+      expect(entry.notice).toBeTruthy();
+      const noticePath = path.join(vendorDir, entry.notice);
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- noticePath is built from the fixed checksums.json + vendorDir, not external input
+      expect(existsSync(noticePath)).toBe(true);
     }
   });
 });

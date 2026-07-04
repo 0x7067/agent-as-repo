@@ -17,13 +17,14 @@ export interface TreeSitterWasmPaths {
  *    `node_modules/<pkg>/<file>`).
  *  - "vendored": the grammar's npm package ships no wasm at all (true for Kotlin and Swift — see
  *    docs/architecture.md's "vendored grammars" note). The wasm is checked into `vendor/wasm/`
- *    instead, built/refreshed by `scripts/build-grammar-wasm.ts`. `version` records the upstream
- *    grammar version for the SEA wasm manifest (`buildWasmManifest`), since there's no
- *    `node_modules/<pkg>/package.json` to read a version from for these two.
+ *    instead, built/refreshed by `scripts/build-grammar-wasm.ts`. There's no
+ *    `node_modules/<pkg>/package.json` to read a version from for these two, so the SEA wasm
+ *    manifest (`buildWasmManifest`) instead derives their manifest value straight from
+ *    `vendor/wasm/checksums.json`'s sha256 — see that function for why.
  */
 type GrammarSource =
   | { kind: "node_modules"; pkg: string; file: string }
-  | { kind: "vendored"; file: string; version: string };
+  | { kind: "vendored"; file: string };
 
 /** Package name and wasm filename (or vendored path) for each supported grammar. */
 const GRAMMAR_PACKAGE_INFO: Record<GrammarLabel, GrammarSource> = {
@@ -40,12 +41,8 @@ const GRAMMAR_PACKAGE_INFO: Record<GrammarLabel, GrammarSource> = {
   cpp: { kind: "node_modules", pkg: "tree-sitter-cpp", file: "tree-sitter-cpp.wasm" },
   // Package name uses a hyphen, but the shipped wasm filename uses an underscore.
   csharp: { kind: "node_modules", pkg: "tree-sitter-c-sharp", file: "tree-sitter-c_sharp.wasm" },
-  kotlin: { kind: "vendored", file: "tree-sitter-kotlin.wasm", version: "0.3.8" },
-  // The vendored wasm was built from upstream grammar 0.7.3 (see vendor/wasm/checksums.json's
-  // "grammarVersion") — newer than the 0.7.1 tree-sitter-swift devDependency pinned for the
-  // (currently unused-in-CI) self-build path. This version is what actually shipped, so it's what
-  // the SEA wasm manifest should record.
-  swift: { kind: "vendored", file: "tree-sitter-swift.wasm", version: "0.7.3" },
+  kotlin: { kind: "vendored", file: "tree-sitter-kotlin.wasm" },
+  swift: { kind: "vendored", file: "tree-sitter-swift.wasm" },
 };
 
 /** `source`'s wasm path, relative to the package root (either `node_modules/<pkg>/<file>` or
@@ -103,9 +100,10 @@ export type WasmManifest = Record<string, string>;
  * without this, a filename-keyed on-disk cache (see `resolveFromSea` below)
  * would serve stale bytes from a previous install forever. For node_modules-sourced grammars, the
  * installed `package.json` version is read at build time and compared against the cached manifest
- * at runtime to catch that case. Vendored grammars (Kotlin, Swift) have no `node_modules/<pkg>/package.json`
- * to read, so their version comes straight from `GRAMMAR_PACKAGE_INFO` (kept in sync with
- * `vendor/wasm/checksums.json` by `scripts/build-grammar-wasm.ts`).
+ * at runtime to catch that case. Vendored grammars (Kotlin, Swift) have no
+ * `node_modules/<pkg>/package.json` to read, so their manifest value is derived from
+ * `vendor/wasm/checksums.json`'s sha256 instead (see `vendoredWasmManifestVersion`) — bytes-derived,
+ * so it can never go stale the way a hand-maintained version literal could.
  */
 function nodeModulesPackageVersion(packageRoot: string, pkg: string): string {
   const pkgJsonPath = path.join(packageRoot, "node_modules", pkg, "package.json");
@@ -114,12 +112,47 @@ function nodeModulesPackageVersion(packageRoot: string, pkg: string): string {
   return pkgJson.version;
 }
 
+/** The subset of a vendor/wasm/checksums.json entry (see scripts/build-grammar-wasm.ts's
+ * `ChecksumEntry`) that `buildWasmManifest` needs. */
+interface VendoredWasmChecksumEntry {
+  file: string;
+  sha256: string;
+}
+type VendoredWasmChecksums = Record<string, VendoredWasmChecksumEntry>;
+
+function readVendoredWasmChecksums(packageRoot: string): VendoredWasmChecksums {
+  const checksumsPath = path.join(packageRoot, "vendor", "wasm", "checksums.json");
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- checksumsPath is derived from the fixed vendor/wasm/checksums.json location, not external input
+  return JSON.parse(readFileSync(checksumsPath, "utf8")) as VendoredWasmChecksums;
+}
+
+/**
+ * The SEA wasm-manifest value for a vendored grammar's `file`, derived from `checksums`'s sha256
+ * for that file. Using the sha256 — rather than a hand-maintained grammar-version literal — means
+ * this can never go stale relative to the bytes actually shipped: if `vendor/wasm/<file>` is
+ * rebuilt with different content, its checksums.json sha256 changes, and so does this, regardless
+ * of whether anyone remembered to bump a version literal elsewhere. Exported for testing.
+ */
+export function vendoredWasmManifestVersion(checksums: VendoredWasmChecksums, file: string): string {
+  const entry = Object.values(checksums).find((candidate) => candidate.file === file);
+  if (!entry) {
+    throw new Error(`vendor/wasm/checksums.json has no entry for ${file}`);
+  }
+  return entry.sha256;
+}
+
 export function buildWasmManifest(packageRoot = resolvePackageRoot()): WasmManifest {
   const manifest: WasmManifest = {
     [WEB_TREE_SITTER_ASSET_KEY]: nodeModulesPackageVersion(packageRoot, "web-tree-sitter"),
   };
+  let vendoredChecksums: VendoredWasmChecksums | undefined;
   for (const source of Object.values(GRAMMAR_PACKAGE_INFO)) {
-    manifest[source.file] = source.kind === "vendored" ? source.version : nodeModulesPackageVersion(packageRoot, source.pkg);
+    if (source.kind === "vendored") {
+      vendoredChecksums ??= readVendoredWasmChecksums(packageRoot);
+      manifest[source.file] = vendoredWasmManifestVersion(vendoredChecksums, source.file);
+    } else {
+      manifest[source.file] = nodeModulesPackageVersion(packageRoot, source.pkg);
+    }
   }
   return manifest;
 }

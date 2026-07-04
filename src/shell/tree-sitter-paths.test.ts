@@ -1,8 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildWasmManifest,
   listWasmAssets,
   resolvePackageRoot,
   resolveTreeSitterWasmPaths,
@@ -248,5 +249,80 @@ describe("resolveTreeSitterWasmPaths (SEA)", () => {
     expect(readFileSync(result.grammarWasmByLabel.python, "utf8")).toBe("fake-bytes-for-tree-sitter-python.wasm");
     // eslint-disable-next-line security/detect-non-literal-fs-filename -- path is a fixture built from the temp cacheDir under test
     expect(existsSync(path.join(cacheDir, "manifest.json"))).toBe(true);
+  });
+});
+
+/** Builds a fake package root: real node_modules (symlinked, so `nodeModulesPackageVersion` can
+ * still resolve every non-vendored grammar's real installed version) plus a fixture
+ * vendor/wasm/checksums.json controlling what the vendored (Kotlin/Swift) entries report. */
+function makeFixturePackageRoot(checksums: Record<string, { file: string; sha256: string }>): string {
+  const root = makeTempDir("tree-sitter-wasm-manifest-");
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- both paths are fixtures built from the real repo root and a temp dir under test
+  symlinkSync(path.join(resolvePackageRoot(), "node_modules"), path.join(root, "node_modules"));
+  const vendorDir = path.join(root, "vendor", "wasm");
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- path is a fixture built from the temp root under test
+  mkdirSync(vendorDir, { recursive: true });
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- path is a fixture built from the temp root under test
+  writeFileSync(path.join(vendorDir, "checksums.json"), JSON.stringify(checksums));
+  return root;
+}
+
+describe("buildWasmManifest (vendored grammar versioning)", () => {
+  it("derives the vendored grammars' manifest version from checksums.json's sha256, not a hand-written literal", () => {
+    const root = makeFixturePackageRoot({
+      kotlin: { file: "tree-sitter-kotlin.wasm", sha256: "a".repeat(64) },
+      swift: { file: "tree-sitter-swift.wasm", sha256: "b".repeat(64) },
+    });
+
+    const manifest = buildWasmManifest(root);
+
+    expect(manifest["tree-sitter-kotlin.wasm"]).toBe("a".repeat(64));
+    expect(manifest["tree-sitter-swift.wasm"]).toBe("b".repeat(64));
+  });
+
+  it("changes the manifest value when checksums.json's sha256 changes (regression: a hand-written version literal would not have)", () => {
+    const rootBefore = makeFixturePackageRoot({
+      kotlin: { file: "tree-sitter-kotlin.wasm", sha256: "a".repeat(64) },
+      swift: { file: "tree-sitter-swift.wasm", sha256: "b".repeat(64) },
+    });
+    const before = buildWasmManifest(rootBefore);
+
+    // Simulates rebuilding the vendored wasm with different bytes but no corresponding bump to any
+    // hand-written version literal (the exact failure mode a dead literal can't detect).
+    const rootAfter = makeFixturePackageRoot({
+      kotlin: { file: "tree-sitter-kotlin.wasm", sha256: "c".repeat(64) },
+      swift: { file: "tree-sitter-swift.wasm", sha256: "b".repeat(64) },
+    });
+    const after = buildWasmManifest(rootAfter);
+
+    expect(after["tree-sitter-kotlin.wasm"]).not.toBe(before["tree-sitter-kotlin.wasm"]);
+    expect(after["tree-sitter-swift.wasm"]).toBe(before["tree-sitter-swift.wasm"]);
+  });
+
+  it("throws a clear error when checksums.json has no entry for a vendored grammar's wasm file", () => {
+    const root = makeFixturePackageRoot({
+      kotlin: { file: "tree-sitter-kotlin.wasm", sha256: "a".repeat(64) },
+      // swift entry missing entirely.
+    });
+
+    expect(() => buildWasmManifest(root)).toThrow(/tree-sitter-swift\.wasm/);
+  });
+});
+
+describe("vendor/wasm/checksums.json vs GRAMMAR_PACKAGE_INFO", () => {
+  it("has a checksums.json entry for every vendored grammar's wasm file", () => {
+    const checksumsPath = path.join(resolvePackageRoot(), "vendor", "wasm", "checksums.json");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- checksumsPath is derived from the fixed real repo root, not external input
+    const checksums = JSON.parse(readFileSync(checksumsPath, "utf8")) as Record<string, { file: string }>;
+    const checksummedFiles = new Set(Object.values(checksums).map((entry) => entry.file));
+
+    const vendoredAssetKeys = listWasmAssets()
+      .filter(({ relativePath }) => relativePath.startsWith(path.join("vendor", "wasm")))
+      .map(({ assetKey }) => assetKey);
+
+    expect(vendoredAssetKeys.length).toBeGreaterThan(0);
+    for (const assetKey of vendoredAssetKeys) {
+      expect(checksummedFiles.has(assetKey)).toBe(true);
+    }
   });
 });

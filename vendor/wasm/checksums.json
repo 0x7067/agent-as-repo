@@ -7,7 +7,8 @@
     "sourcePackageVersion": "0.26.3",
     "grammarVersion": "0.3.8",
     "buildTool": "@lumis-sh/wasm-kotlin 0.26.3 (prebuilt with tree-sitter-cli 0.26.x, per its own provenance metadata)",
-    "builtAt": "2026-07-04T14:34:43.919Z"
+    "builtAt": "2026-07-04T14:34:43.919Z",
+    "notice": "NOTICE"
   },
   "swift": {
     "file": "tree-sitter-swift.wasm",
@@ -17,6 +18,7 @@
     "sourcePackageVersion": "0.26.1",
     "grammarVersion": "0.7.3",
     "buildTool": "@lumis-sh/wasm-swift 0.26.1 (prebuilt with tree-sitter-cli 0.26.x, per its own provenance metadata)",
-    "builtAt": "2026-07-04T14:34:43.978Z"
+    "builtAt": "2026-07-04T14:34:43.978Z",
+    "notice": "NOTICE"
   }
 }
