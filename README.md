@@ -7,7 +7,7 @@ Single path: an embedded sqlite-vec store for passages and semantic search + any
 ## Prerequisites
 
 - [Ollama](https://ollama.com) running locally with a chat model pulled (default config expects `qwen3-coder:30b`) and an embedding model pulled (default `nomic-embed-text`, e.g. `ollama pull nomic-embed-text`)
-- Node.js and pnpm
+- Node.js 22 (see `.nvmrc`; better-sqlite3's native addon is ABI-locked to this major) and pnpm
 
 ## Quickstart
 

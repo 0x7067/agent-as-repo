@@ -3,7 +3,7 @@ import * as esbuild from "esbuild";
 const shared: esbuild.BuildOptions = {
   bundle: true,
   platform: "node",
-  target: "node18",
+  target: "node22",
   format: "esm",
   sourcemap: false,
   external: [
@@ -19,7 +19,7 @@ const shared: esbuild.BuildOptions = {
 const seaShared: esbuild.BuildOptions = {
   bundle: true,
   platform: "node",
-  target: "node18",
+  target: "node22",
   format: "cjs",
   sourcemap: false,
   // Disable the import.meta.url guard so it never fires in CJS/SEA context.

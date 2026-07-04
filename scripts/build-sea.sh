@@ -60,7 +60,7 @@ NODE_BIN=""
 NODE_FUSE=""
 if ! find_node_with_sea_fuse; then
     printf 'Error: could not find a Node.js binary with NODE_SEA_FUSE support.\n' >&2
-    printf 'Hint: set NODE_SEA_BIN to a compatible Node (e.g. a Node 24.x binary with SEA fuse).\n' >&2
+    printf 'Hint: set NODE_SEA_BIN to a compatible Node (e.g. a Node 22.x binary with SEA fuse).\n' >&2
     exit 1
 fi
 printf 'Using SEA Node: %s\n' "${NODE_BIN}"
