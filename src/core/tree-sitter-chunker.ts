@@ -26,7 +26,9 @@ let initPromise: Promise<void> | null = null;
 let parser: Parser | null = null;
 const languageByLabel = new Map<string, Language>();
 
-const GRAMMAR_LABEL_BY_EXTENSION: Record<string, string> = {
+type GrammarLabel = "typescript" | "tsx" | "javascript";
+
+const GRAMMAR_LABEL_BY_EXTENSION: Record<string, GrammarLabel> = {
   ".ts": "typescript",
   ".mts": "typescript",
   ".cts": "typescript",
@@ -37,12 +39,12 @@ const GRAMMAR_LABEL_BY_EXTENSION: Record<string, string> = {
   ".cjs": "javascript",
 };
 
-function grammarLabelForPath(filePath: string): string | null {
+function grammarLabelForPath(filePath: string): GrammarLabel | null {
   const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
   return GRAMMAR_LABEL_BY_EXTENSION[ext] ?? null;
 }
 
-function wasmPathForLabel(options: TreeSitterInitOptions, label: string): string {
+function wasmPathForLabel(options: TreeSitterInitOptions, label: GrammarLabel): string {
   switch (label) {
     case "tsx": {
       return options.tsxWasm;

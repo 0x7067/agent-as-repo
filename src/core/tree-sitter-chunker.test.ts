@@ -123,7 +123,7 @@ describe("treeSitterStrategy", () => {
     }
   });
 
-  it("falls back to raw chunking for unsupported languages like Python, instead of misparsing with the TS grammar", () => {
+  it("falls back to raw chunking for Python (TS grammar extracts no spans, so this is a safe-degradation case, not a regression pin)", () => {
     const file: FileInfo = {
       path: "src/foo.py",
       content: [
@@ -141,6 +141,45 @@ describe("treeSitterStrategy", () => {
     for (const chunk of chunks) {
       expect(chunk.text.startsWith("FILE: src/foo.py")).toBe(true);
       expect(chunk.text).not.toContain("CLASS:");
+      expect(chunk.text).not.toContain("FUNCTION:");
+    }
+  });
+
+  it("falls back to raw chunking for unsupported languages like C#, instead of misparsing with the TS grammar", () => {
+    const file: FileInfo = {
+      path: "src/Foo.cs",
+      content: "public class Foo { void Bar() {} }",
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.length).toBeGreaterThan(0);
+    for (const chunk of chunks) {
+      expect(chunk.text.startsWith("FILE: src/Foo.cs")).toBe(true);
+      expect(chunk.text).not.toContain("CLASS:");
+      expect(chunk.text).not.toContain("METHOD:");
+    }
+  });
+
+  it("falls back to raw chunking for extensionless files like Makefile/Dockerfile", () => {
+    const file: FileInfo = {
+      path: "Makefile",
+      content: [
+        "build:",
+        "\techo building",
+        "",
+        "test:",
+        "\techo testing",
+      ].join("\n"),
+      sizeKb: 0.1,
+    };
+
+    const chunks = treeSitterStrategy(file);
+    expect(chunks.length).toBeGreaterThan(0);
+    for (const chunk of chunks) {
+      expect(chunk.text.startsWith("FILE: Makefile")).toBe(true);
+      expect(chunk.text).not.toContain("CLASS:");
+      expect(chunk.text).not.toContain("METHOD:");
       expect(chunk.text).not.toContain("FUNCTION:");
     }
   });
