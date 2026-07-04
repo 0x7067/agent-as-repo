@@ -5,7 +5,8 @@ const RUBY_METHOD_TYPES = ["method", "singleton_method"] as const;
 
 function extractFromRubyDeclaration(node: Node): SymbolSpan[] {
   switch (node.type) {
-    case "method": {
+    case "method":
+    case "singleton_method": {
       const fn = spanFromNode(node, "FUNCTION");
       return fn ? [fn] : [];
     }
@@ -17,7 +18,7 @@ function extractFromRubyDeclaration(node: Node): SymbolSpan[] {
     case "module": {
       const mod = spanFromNode(node, "MODULE");
       if (!mod) return [];
-      return [mod, ...collectClassMethods(node, mod.name, RUBY_METHOD_TYPES)];
+      return [mod, ...collectClassMethods(node, mod.name, RUBY_METHOD_TYPES, "MODULE")];
     }
     default: {
       return [];

@@ -1,30 +1,12 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { beforeAll, describe, it, expect, vi } from "vitest";
 import { syncRepo } from "./sync.js";
 import type { AgentState } from "../core/types.js";
 import {
   initTreeSitterChunker,
   resetTreeSitterChunkerForTests,
-  type GrammarLabel,
 } from "../core/tree-sitter-chunker.js";
+import { GRAMMAR_WASM_BY_LABEL, WEB_TREE_SITTER_WASM } from "../core/tree-sitter-test-paths.js";
 import { makeMockProvider as makeBase } from "./__test__/mock-provider.js";
-
-const ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
-
-function wasmPath(pkg: string, file: string): string {
-  return path.join(ROOT, "node_modules", pkg, file);
-}
-
-const GRAMMAR_WASM_BY_LABEL: Record<GrammarLabel, string> = {
-  typescript: wasmPath("tree-sitter-typescript", "tree-sitter-typescript.wasm"),
-  tsx: wasmPath("tree-sitter-typescript", "tree-sitter-tsx.wasm"),
-  javascript: wasmPath("tree-sitter-javascript", "tree-sitter-javascript.wasm"),
-  python: wasmPath("tree-sitter-python", "tree-sitter-python.wasm"),
-  go: wasmPath("tree-sitter-go", "tree-sitter-go.wasm"),
-  java: wasmPath("tree-sitter-java", "tree-sitter-java.wasm"),
-  ruby: wasmPath("tree-sitter-ruby", "tree-sitter-ruby.wasm"),
-};
 
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 const NEW_CONTENT = "new content";
@@ -32,7 +14,7 @@ const NEW_CONTENT = "new content";
 beforeAll(async () => {
   resetTreeSitterChunkerForTests();
   await initTreeSitterChunker({
-    webTreeSitterWasm: wasmPath("web-tree-sitter", "web-tree-sitter.wasm"),
+    webTreeSitterWasm: WEB_TREE_SITTER_WASM,
     grammarWasmByLabel: GRAMMAR_WASM_BY_LABEL,
   });
 });

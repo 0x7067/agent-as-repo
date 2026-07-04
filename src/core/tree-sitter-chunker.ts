@@ -50,7 +50,8 @@ function grammarLabelForPath(filePath: string): GrammarLabel | null {
 
 function buildPrefix(filePath: string, span: SymbolSpan): string {
   if (span.kind === "METHOD" && span.className) {
-    return `FILE: ${filePath} | CLASS: ${span.className} | METHOD: ${span.name}`;
+    const containerKind = span.containerKind ?? "CLASS";
+    return `FILE: ${filePath} | ${containerKind}: ${span.className} | METHOD: ${span.name}`;
   }
   return `FILE: ${filePath} | ${span.kind}: ${span.name}`;
 }
