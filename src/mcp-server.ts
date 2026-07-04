@@ -10,7 +10,7 @@ import { AdminAdapter } from "./shell/adapters/admin-adapter.js";
 import { SqlitePassageStore } from "./shell/sqlite-store.js";
 import { SqliteBlockStorage } from "./shell/sqlite-block-storage.js";
 import { resolveStoreDbPath } from "./shell/repo-expert-paths.js";
-import { embed } from "./shell/llm-client.js";
+import { createEmbedder, parseEmbeddingEngine } from "./shell/embedder-factory.js";
 
 const ASK_DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_LLM_MODEL = "qwen3-coder:30b";
@@ -73,11 +73,17 @@ export function buildRuntime(): Runtime {
   const model = process.env["LLM_MODEL"] ?? DEFAULT_LLM_MODEL;
   const baseUrl = process.env["LLM_BASE_URL"] ?? DEFAULT_LLM_BASE_URL;
   const embeddingModel = process.env["LLM_EMBEDDING_MODEL"] ?? DEFAULT_EMBEDDING_MODEL;
+  const embeddingEngine = parseEmbeddingEngine(process.env["LLM_EMBEDDING_ENGINE"]);
   const apiKey = process.env["LLM_API_KEY"];
   const dbPath = resolveStoreDbPath();
   const store = new SqlitePassageStore({
     dbPath,
-    embed: (texts) => embed(texts, embeddingModel, baseUrl, apiKey),
+    embed: createEmbedder({
+      engine: embeddingEngine,
+      model: embeddingModel,
+      baseUrl,
+      ...(apiKey === undefined ? {} : { apiKey }),
+    }),
   });
   const blockStorage = new SqliteBlockStorage(dbPath);
   const provider = new LocalProvider(store, model, blockStorage, {

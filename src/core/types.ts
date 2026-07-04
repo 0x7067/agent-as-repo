@@ -26,6 +26,12 @@ export interface RepoConfig {
   includeSubmodules?: boolean;
 }
 
+/**
+ * Where embeddings come from: the OpenAI-compatible HTTP endpoint ("http")
+ * or an in-process transformers.js pipeline ("transformersjs").
+ */
+export type EmbeddingEngine = "http" | "transformersjs";
+
 export interface ProviderConfig {
   /** Chat model id as the LLM endpoint knows it. */
   model: string;
@@ -33,7 +39,9 @@ export interface ProviderConfig {
   baseUrl: string;
   /** Models tried in order after `model` on retryable failures. */
   fallbackModels: string[];
-  /** Embedding model id served by the OpenAI-compatible endpoint. */
+  /** Embedding engine (default "http": the OpenAI-compatible endpoint). */
+  embeddingEngine: EmbeddingEngine;
+  /** Embedding model id, as the selected embedding engine knows it. */
   embeddingModel: string;
   /** Smaller/faster chat model used when `ask --fast` is requested. No default. */
   fastModel?: string;

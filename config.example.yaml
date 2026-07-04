@@ -5,7 +5,8 @@
 provider:
   model: qwen3-coder:30b                  # Chat model id, as the endpoint knows it
   # base_url: http://localhost:11434/v1   # OpenAI-compatible endpoint. Default: local Ollama.
-  # embedding_model: nomic-embed-text     # Embedding model on the same endpoint (`ollama pull nomic-embed-text`)
+  # embedding_engine: transformersjs      # In-process embeddings via transformers.js — no Ollama embedding model needed
+  # embedding_model: nomic-embed-text     # http: model id on the same endpoint (`ollama pull nomic-embed-text`). transformersjs: HF model id, default nomic-ai/nomic-embed-text-v1.5
   # fast_model: llama3.2:3b               # Smaller/faster model used by `ask --fast`
   # fallback_models: []                   # Tried in order when `model` fails (rate limit, timeout, ...)
 

@@ -8,7 +8,7 @@ Hub-style MCP servers expose tools where a single `operation` string param multi
 
 ## Prerequisites
 
-- An OpenAI-compatible chat endpoint — local [Ollama](https://ollama.com) by default, or a remote endpoint (e.g. OpenRouter) with `LLM_API_KEY` set — serving both the chat model and the embedding model (default `nomic-embed-text`)
+- An OpenAI-compatible chat endpoint — local [Ollama](https://ollama.com) by default, or a remote endpoint (e.g. OpenRouter) with `LLM_API_KEY` set — serving the chat model, and (with the default `LLM_EMBEDDING_ENGINE=http`) the embedding model too (default `nomic-embed-text`). Set `LLM_EMBEDDING_ENGINE=transformersjs` to compute embeddings in-process instead — no embedding model needs to be served.
 - `tsx` installed (already a dev dependency of this repo)
 
 ## Configure for Claude Code
@@ -79,7 +79,7 @@ pnpm repo-expert mcp-install  # writes/overwrites the "repo-expert" entry in ~/.
 pnpm repo-expert mcp-check    # validates the existing entry
 ```
 
-Both commands read `config.yaml` (if present) for `model`, `base_url`, and `embedding_model`, and pull `LLM_API_KEY` from the environment.
+Both commands read `config.yaml` (if present) for `model`, `base_url`, `embedding_engine`, and `embedding_model`, and pull `LLM_API_KEY` from the environment.
 
 ## Environment variables
 
@@ -88,7 +88,8 @@ Both commands read `config.yaml` (if present) for `model`, `base_url`, and `embe
 | `LLM_MODEL` | Chat model id (default `qwen3-coder:30b`) |
 | `LLM_BASE_URL` | OpenAI-compatible LLM endpoint (default `http://localhost:11434/v1`) |
 | `LLM_API_KEY` | Optional Bearer token for the LLM endpoint. Needed for remote endpoints (e.g. OpenRouter); local Ollama needs none |
-| `LLM_EMBEDDING_MODEL` | Embedding model id served by the same endpoint (default `nomic-embed-text`) |
+| `LLM_EMBEDDING_MODEL` | Embedding model id (default `nomic-embed-text` for `http`; a Hugging Face model id, default `nomic-ai/nomic-embed-text-v1.5`, for `transformersjs`) |
+| `LLM_EMBEDDING_ENGINE` | `http` (default, embeddings via the endpoint above) or `transformersjs` (in-process, no embedding model served — first run downloads and caches the HF model) |
 | `REPO_EXPERT_DATA_DIR` | Directory for the embedded store DB (default `~/.repo-expert`) |
 | `LLM_FALLBACK_MODELS` | Comma-separated fallback model list |
 | `LLM_REQUEST_TIMEOUT_MS` | Per-request LLM timeout (default 20000) |
@@ -125,7 +126,7 @@ Should return `serverInfo: { name: "repo-expert-mcp" }` with 8 tools.
 
 ### Connection refused to the LLM endpoint
 
-- Confirm Ollama (or your configured endpoint) is running and reachable at `LLM_BASE_URL` (default `http://localhost:11434/v1`), and that the models in `LLM_MODEL` and `LLM_EMBEDDING_MODEL` have been pulled
+- Confirm Ollama (or your configured endpoint) is running and reachable at `LLM_BASE_URL` (default `http://localhost:11434/v1`), and that `LLM_MODEL` has been pulled — plus `LLM_EMBEDDING_MODEL` too, if `LLM_EMBEDDING_ENGINE` is `http` (the default)
 - Run `pnpm repo-expert doctor` for a full connectivity + config check
 
 ### "Authentication failed" or 401

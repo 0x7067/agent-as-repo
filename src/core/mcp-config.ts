@@ -12,6 +12,8 @@ export interface McpProviderConfig {
   baseUrl?: string;
   /** Embedding model id served by the same endpoint. */
   embeddingModel?: string;
+  /** Embedding engine ("http" or "transformersjs"). */
+  embeddingEngine?: string;
   /** Optional Bearer key for the LLM endpoint. */
   llmApiKey?: string;
 }
@@ -36,6 +38,7 @@ export function generateMcpEntry(
     LLM_MODEL: provider.model ?? DEFAULT_LLM_MODEL,
     LLM_BASE_URL: provider.baseUrl ?? DEFAULT_LLM_BASE_URL,
     LLM_EMBEDDING_MODEL: provider.embeddingModel ?? DEFAULT_EMBEDDING_MODEL,
+    LLM_EMBEDDING_ENGINE: provider.embeddingEngine ?? "http",
   };
   if (isNonEmpty(provider.llmApiKey)) env["LLM_API_KEY"] = provider.llmApiKey;
 
@@ -112,6 +115,13 @@ function checkEnv(
   if (isNonEmpty(provider.embeddingModel) && embeddingModel !== provider.embeddingModel) {
     issues.push(
       `LLM_EMBEDDING_MODEL mismatch: config has "${embeddingModel}", expected "${provider.embeddingModel}".`,
+    );
+  }
+
+  const embeddingEngine = env["LLM_EMBEDDING_ENGINE"] ?? "";
+  if (isNonEmpty(provider.embeddingEngine) && embeddingEngine !== provider.embeddingEngine) {
+    issues.push(
+      `LLM_EMBEDDING_ENGINE mismatch: config has "${embeddingEngine}", expected "${provider.embeddingEngine}".`,
     );
   }
 }
