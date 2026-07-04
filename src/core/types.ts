@@ -34,6 +34,8 @@ export interface ProviderConfig {
   fallbackModels: string[];
   /** OpenViking storage/retrieval base URL. */
   vikingUrl: string;
+  /** Embedding model id served by the OpenAI-compatible endpoint. */
+  embeddingModel: string;
   /** Smaller/faster chat model used when `ask --fast` is requested. No default. */
   fastModel?: string;
 }

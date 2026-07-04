@@ -84,24 +84,16 @@ function normalizeAbortError(error: unknown, signal: AbortSignal): Error {
 }
 
 /**
- * Call an OpenAI-compatible chat-completions endpoint.
- * Sends `Authorization: Bearer <apiKey>` only when an API key is provided
- * (local endpoints like Ollama need none).
+ * POST a JSON body to an OpenAI-compatible endpoint with timeout/abort
+ * handling. Sends `Authorization: Bearer <apiKey>` only when an API key is
+ * provided (local endpoints like Ollama need none). Throws on non-OK status.
  */
-export async function callChatCompletions(
-  messages: Message[],
-  tools: ToolDefinition[],
-  model: string,
-  baseUrl = DEFAULT_LLM_BASE_URL,
-  apiKey?: string,
-  options: ChatCompletionsRequestOptions = {},
-): Promise<ChatCompletionResponse> {
-  const url = `${baseUrl}/chat/completions`;
-  const body: Record<string, unknown> = { model, messages };
-  if (tools.length > 0) {
-    body["tools"] = tools;
-  }
-
+async function postJson(
+  url: string,
+  body: Record<string, unknown>,
+  apiKey: string | undefined,
+  options: ChatCompletionsRequestOptions,
+): Promise<Response> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey !== undefined && apiKey.length > 0) {
     headers["Authorization"] = `Bearer ${apiKey}`;
@@ -118,19 +110,67 @@ export async function callChatCompletions(
       signal: request.signal,
     });
   } catch (error) {
-    request.cleanup();
     if (request.signal.aborted) {
       throw normalizeAbortError(error, request.signal);
     }
     throw error;
+  } finally {
+    request.cleanup();
   }
-  request.cleanup();
 
   if (!res.ok) {
     throw new Error(`HTTP ${String(res.status)} from ${url}`);
   }
 
+  return res;
+}
+
+/** Call an OpenAI-compatible chat-completions endpoint. */
+export async function callChatCompletions(
+  messages: Message[],
+  tools: ToolDefinition[],
+  model: string,
+  baseUrl = DEFAULT_LLM_BASE_URL,
+  apiKey?: string,
+  options: ChatCompletionsRequestOptions = {},
+): Promise<ChatCompletionResponse> {
+  const body: Record<string, unknown> = { model, messages };
+  if (tools.length > 0) {
+    body["tools"] = tools;
+  }
+
+  const res = await postJson(`${baseUrl}/chat/completions`, body, apiKey, options);
   return res.json() as Promise<ChatCompletionResponse>;
+}
+
+/**
+ * Call an OpenAI-compatible embeddings endpoint (Ollama serves it too).
+ * Returns one vector per input text, in input order.
+ */
+export async function embed(
+  texts: string[],
+  model: string,
+  baseUrl = DEFAULT_LLM_BASE_URL,
+  apiKey?: string,
+  options: ChatCompletionsRequestOptions = {},
+): Promise<number[][]> {
+  if (texts.length === 0) return [];
+
+  const res = await postJson(`${baseUrl}/embeddings`, { model, input: texts }, apiKey, options);
+  const payload = await res.json() as { data: Array<{ index: number; embedding: number[] }> };
+
+  const vectors: Array<number[] | undefined> = Array.from({ length: texts.length });
+  for (const entry of payload.data) {
+    vectors[entry.index] = entry.embedding;
+  }
+
+  if (vectors.includes(undefined)) {
+    throw new Error(
+      `Embeddings endpoint returned an embedding count mismatch: expected ${String(texts.length)}, got ${String(payload.data.length)}`,
+    );
+  }
+
+  return vectors as number[][];
 }
 
 export type ToolHandler = (args: Record<string, unknown>) => Promise<string>;

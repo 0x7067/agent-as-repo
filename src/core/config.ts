@@ -40,12 +40,15 @@ const repoRawSchema = z.object({
 const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
 const DEFAULT_VIKING_URL = "http://localhost:1933";
 
+const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
+
 const providerSchema = z.object({
   model: z.string(),
   base_url: z.string().optional(),
   fallback_models: z.array(z.string()).optional(),
   viking_url: z.string().optional(),
   fast_model: z.string().optional(),
+  embedding_model: z.string().optional(),
 });
 
 const rawConfigSchema = z.object({
@@ -162,6 +165,7 @@ export function parseConfig(raw: unknown): Config {
     baseUrl: parsed.provider.base_url ?? DEFAULT_LLM_BASE_URL,
     fallbackModels: parsed.provider.fallback_models ?? [],
     vikingUrl: parsed.provider.viking_url ?? DEFAULT_VIKING_URL,
+    embeddingModel: parsed.provider.embedding_model ?? DEFAULT_EMBEDDING_MODEL,
     ...(parsed.provider.fast_model === undefined ? {} : { fastModel: parsed.provider.fast_model }),
   };
 

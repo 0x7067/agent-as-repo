@@ -120,6 +120,23 @@ describe("parseConfig", () => {
     expect(config.provider.fastModel).toBeUndefined();
   });
 
+  it("parses provider.embedding_model when provided", () => {
+    const raw = {
+      provider: {
+        model: MODEL,
+        embedding_model: "mxbai-embed-large",
+      },
+      repos: validRaw.repos,
+    };
+    const config = parseConfig(raw);
+    expect(config.provider.embeddingModel).toBe("mxbai-embed-large");
+  });
+
+  it("defaults provider.embeddingModel to nomic-embed-text when omitted", () => {
+    const config = parseConfig(validRaw);
+    expect(config.provider.embeddingModel).toBe("nomic-embed-text");
+  });
+
   it("defaults consolidate_on_sync to false and consolidate_min_files_changed to 5", () => {
     const config = parseConfig(validRaw);
     expect(config.defaults.consolidateOnSync).toBe(false);

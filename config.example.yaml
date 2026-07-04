@@ -10,6 +10,7 @@ provider:
   # fallback_models: []                   # Tried in order if `model` fails (e.g. rate limit, timeout)
   # viking_url: http://localhost:1933     # OpenViking server. Default: local OpenViking.
   # fast_model: llama3.2:3b               # Smaller/faster model used by `ask --fast` (e.g. an Ollama small-instruct model)
+  # embedding_model: nomic-embed-text     # Embedding model id served by the same endpoint. Default: nomic-embed-text.
 
 # To point at a remote/cloud endpoint instead of local Ollama (e.g. OpenRouter):
 #
