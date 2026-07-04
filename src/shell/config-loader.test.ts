@@ -30,7 +30,6 @@ repos:
     description: My application
     extensions: [.ts, .tsx]
     ignore_dirs: [node_modules, .git]
-    tags: [frontend]
 `;
 
 describe("loadConfig", () => {

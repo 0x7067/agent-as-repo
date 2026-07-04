@@ -74,7 +74,7 @@ function makeFakeFs(overrides: Partial<FileSystemPort> = {}): FileSystemPort {
 }
 
 const testConfig: Config = {
-  provider: { model: "qwen3-coder:30b", baseUrl: "http://localhost:11434/v1", fallbackModels: [], vikingUrl: "http://localhost:1933" },
+  provider: { model: "qwen3-coder:30b", baseUrl: "http://localhost:11434/v1", fallbackModels: [], embeddingModel: "nomic-embed-text" },
   defaults: { maxFileSizeKb: 50, memoryBlockLimit: 5000, bootstrapOnCreate: false, chunking: "raw" },
   repos: {
     [WATCH_REPO_NAME]: {

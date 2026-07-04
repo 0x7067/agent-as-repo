@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { VikingProvider } from "./viking-provider.js";
-import type { VikingHttpClient } from "./viking-http.js";
+import { LocalProvider } from "./local-provider.js";
+import type { PassageStore } from "../ports/passage-store.js";
 import type { BlockStorage } from "./block-storage.js";
 
 vi.mock("./llm-client.js", () => ({
@@ -10,26 +10,17 @@ vi.mock("./llm-client.js", () => ({
 
 import { toolCallingLoop } from "./llm-client.js";
 
-interface VikingHttpClientMethods {
-  mkdir: VikingHttpClient["mkdir"];
-  writeFile: VikingHttpClient["writeFile"];
-  readFile: VikingHttpClient["readFile"];
-  deleteFile: VikingHttpClient["deleteFile"];
-  listDirectory: VikingHttpClient["listDirectory"];
-  deleteResource: VikingHttpClient["deleteResource"];
-  semanticSearch: VikingHttpClient["semanticSearch"];
-}
-
-function makeMockViking() {
+function makeMockStore() {
   return {
-    mkdir: vi.fn().mockResolvedValue(),
-    writeFile: vi.fn().mockResolvedValue(),
-    readFile: vi.fn().mockResolvedValue(""),
-    deleteFile: vi.fn().mockResolvedValue(),
-    listDirectory: vi.fn().mockResolvedValue([]),
-    deleteResource: vi.fn().mockResolvedValue(),
+    initAgent: vi.fn().mockResolvedValue(),
+    deleteAgent: vi.fn().mockResolvedValue(),
+    listAgents: vi.fn().mockResolvedValue([]),
+    writePassage: vi.fn().mockResolvedValue(),
+    readPassage: vi.fn().mockResolvedValue(""),
+    deletePassage: vi.fn().mockResolvedValue(),
+    listPassages: vi.fn().mockResolvedValue([]),
     semanticSearch: vi.fn().mockResolvedValue([]),
-  } satisfies VikingHttpClientMethods;
+  } satisfies Record<keyof PassageStore, ReturnType<typeof vi.fn>>;
 }
 
 function makeMockBlockStorage() {
@@ -41,23 +32,23 @@ function makeMockBlockStorage() {
   } satisfies BlockStorage;
 }
 
-type MockViking = ReturnType<typeof makeMockViking>;
+type MockStore = ReturnType<typeof makeMockStore>;
 type MockBlockStorage = ReturnType<typeof makeMockBlockStorage>;
 
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const API_KEY = "test-api-key";
 
-describe("VikingProvider", () => {
-  let mockViking: MockViking;
+describe("LocalProvider", () => {
+  let mockStore: MockStore;
   let mockBlockStorage: MockBlockStorage;
-  let provider: VikingProvider;
+  let provider: LocalProvider;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockViking = makeMockViking();
+    mockStore = makeMockStore();
     mockBlockStorage = makeMockBlockStorage();
-    provider = new VikingProvider(
-      mockViking as unknown as VikingHttpClient,
+    provider = new LocalProvider(
+      mockStore as unknown as PassageStore,
       DEFAULT_MODEL,
       mockBlockStorage as unknown as BlockStorage,
       { apiKey: API_KEY },
@@ -65,36 +56,28 @@ describe("VikingProvider", () => {
   });
 
   describe("createAgent", () => {
-    it("calls mkdir for root and passages, writes manifest, inits blocks, returns { agentId: repoName }", async () => {
+    it("initializes the store with a manifest, inits blocks, returns { agentId: repoName }", async () => {
       const params = {
         name: "My Repo",
         repoName: "myrepo",
         description: "A test repo",
-        tags: ["test"],
         model: "openai/gpt-4o",
-        memoryBlockLimit: 5000,
       };
 
       const result = await provider.createAgent(params);
 
       expect(result).toEqual({ agentId: "myrepo" });
 
-      // mkdir calls (no blocks/ dir — blocks live on filesystem now)
-      expect(mockViking.mkdir).toHaveBeenCalledWith("viking://resources/myrepo/");
-      expect(mockViking.mkdir).toHaveBeenCalledWith("viking://resources/myrepo/passages/");
-      expect(mockViking.mkdir).not.toHaveBeenCalledWith("viking://resources/myrepo/blocks/");
-
-      // manifest write
-      expect(mockViking.writeFile).toHaveBeenCalledWith(
-        "viking://resources/myrepo/manifest.json",
-        expect.stringContaining('"agentId":"myrepo"'),
+      expect(mockStore.initAgent).toHaveBeenCalledWith(
+        "myrepo",
+        expect.objectContaining({
+          agentId: "myrepo",
+          name: "My Repo",
+          model: "openai/gpt-4o",
+          tags: ["repo-expert"],
+        }),
       );
 
-      // blocks go to blockStorage, not viking
-      expect(mockViking.writeFile).not.toHaveBeenCalledWith(
-        "viking://resources/myrepo/blocks/architecture",
-        expect.anything(),
-      );
       expect(mockBlockStorage.init).toHaveBeenCalledWith(
         "myrepo",
         expect.objectContaining({
@@ -109,9 +92,7 @@ describe("VikingProvider", () => {
         name: "My Repo",
         repoName: "myrepo",
         description: "A test repo",
-        tags: ["test"],
         model: "openai/gpt-4o",
-        memoryBlockLimit: 5000,
       };
 
       await provider.createAgent(params);
@@ -124,151 +105,53 @@ describe("VikingProvider", () => {
   });
 
   describe("deleteAgent", () => {
-    it("calls deleteResource with correct URI and deletes blocks", async () => {
+    it("deletes the agent from the store and deletes blocks", async () => {
       await provider.deleteAgent("myrepo");
 
-      expect(mockViking.deleteResource).toHaveBeenCalledWith("viking://resources/myrepo/");
+      expect(mockStore.deleteAgent).toHaveBeenCalledWith("myrepo");
       expect(mockBlockStorage.delete).toHaveBeenCalledWith("myrepo");
     });
   });
 
   describe("storePassage", () => {
-    it("calls writeFile with a UUID path under passages/ and returns the UUID", async () => {
+    it("writes the passage under a generated UUID and returns the UUID", async () => {
       const passageId = await provider.storePassage("myrepo", "some passage text");
 
       expect(typeof passageId).toBe("string");
       expect(passageId.length).toBeGreaterThan(0);
 
-      expect(mockViking.writeFile).toHaveBeenCalledWith(
-        `viking://resources/myrepo/passages/${passageId}.txt`,
-        "some passage text",
-      );
+      expect(mockStore.writePassage).toHaveBeenCalledWith("myrepo", passageId, "some passage text");
     });
   });
 
   describe("deletePassage", () => {
-    it("calls deleteFile with correct passage URI", async () => {
+    it("delegates to the store", async () => {
       await provider.deletePassage("myrepo", "abc-123");
 
-      expect(mockViking.deleteFile).toHaveBeenCalledWith(
-        "viking://resources/myrepo/passages/abc-123.txt",
-      );
+      expect(mockStore.deletePassage).toHaveBeenCalledWith("myrepo", "abc-123");
     });
 
-    it("treats ambiguous 500 as idempotent when passage no longer exists", async () => {
-      (mockViking.deleteFile as ReturnType<typeof vi.fn>).mockRejectedValue(
-        new Error("HTTP 500 from http://localhost:1933/api/v1/fs?uri=viking%3A%2F%2Fresources%2Fmyrepo%2Fpassages%2Fabc-123.txt"),
-      );
-      (mockViking.listDirectory as ReturnType<typeof vi.fn>).mockResolvedValue([
-        "viking://resources/myrepo/passages/other.txt",
-      ]);
-
-      await expect(provider.deletePassage("myrepo", "abc-123")).resolves.toBeUndefined();
-      expect(mockViking.listDirectory).toHaveBeenCalledWith("viking://resources/myrepo/passages/");
-    });
-
-    it("retries delete once when ambiguous 500 and target still exists", async () => {
-      (mockViking.deleteFile as ReturnType<typeof vi.fn>)
-        .mockRejectedValueOnce(new Error("HTTP 500 from http://localhost:1933/api/v1/fs?uri=viking%3A%2F%2Fresources%2Fmyrepo%2Fpassages%2Fabc-123.txt"))
-        .mockResolvedValueOnce();
-      (mockViking.listDirectory as ReturnType<typeof vi.fn>).mockResolvedValue([
-        "viking://resources/myrepo/passages/abc-123.txt",
-      ]);
-
-      await expect(provider.deletePassage("myrepo", "abc-123")).resolves.toBeUndefined();
-      expect(mockViking.deleteFile).toHaveBeenCalledTimes(2);
-    });
-
-    it("rethrows ambiguous 500 when passage is still listed", async () => {
-      (mockViking.deleteFile as ReturnType<typeof vi.fn>).mockRejectedValue(
-        new Error("HTTP 500 from http://localhost:1933/api/v1/fs?uri=viking%3A%2F%2Fresources%2Fmyrepo%2Fpassages%2Fabc-123.txt"),
-      );
-      (mockViking.listDirectory as ReturnType<typeof vi.fn>).mockResolvedValue([
-        "viking://resources/myrepo/passages/abc-123.txt",
-      ]);
-
-      await expect(provider.deletePassage("myrepo", "abc-123")).rejects.toThrow("HTTP 500");
-    });
-
-    it("rethrows non-ambiguous errors from deleteFile", async () => {
-      (mockViking.deleteFile as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("HTTP 404 from x"));
+    it("propagates store errors", async () => {
+      mockStore.deletePassage.mockRejectedValue(new Error("HTTP 404 from x"));
 
       await expect(provider.deletePassage("myrepo", "abc-123")).rejects.toThrow("HTTP 404");
-      expect(mockViking.listDirectory).not.toHaveBeenCalled();
     });
   });
 
   describe("listPassages", () => {
-    it("calls listDirectory, reads each file, returns passages with correct ids and text", async () => {
-      (mockViking.listDirectory as ReturnType<typeof vi.fn>).mockResolvedValue([
-        "viking://resources/myrepo/passages/uuid-1.txt",
-        "viking://resources/myrepo/passages/uuid-2.txt",
+    it("delegates to the store and returns its passages", async () => {
+      mockStore.listPassages.mockResolvedValue([
+        { id: "uuid-1", text: "passage one" },
+        { id: "uuid-2", text: "passage two" },
       ]);
-      (mockViking.readFile as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce("passage one")
-        .mockResolvedValueOnce("passage two");
 
       const passages = await provider.listPassages("myrepo");
 
-      expect(mockViking.listDirectory).toHaveBeenCalledWith(
-        "viking://resources/myrepo/passages/",
-      );
-      expect(mockViking.readFile).toHaveBeenCalledWith(
-        "viking://resources/myrepo/passages/uuid-1.txt",
-      );
-      expect(mockViking.readFile).toHaveBeenCalledWith(
-        "viking://resources/myrepo/passages/uuid-2.txt",
-      );
+      expect(mockStore.listPassages).toHaveBeenCalledWith("myrepo");
       expect(passages).toEqual([
         { id: "uuid-1", text: "passage one" },
         { id: "uuid-2", text: "passage two" },
       ]);
-    });
-
-    it("retries failed reads and returns recovered passages", async () => {
-      (mockViking.listDirectory as ReturnType<typeof vi.fn>).mockResolvedValue([
-        "viking://resources/myrepo/passages/uuid-1.txt",
-        "viking://resources/myrepo/passages/uuid-2.txt",
-      ]);
-      (mockViking.readFile as ReturnType<typeof vi.fn>)
-        .mockRejectedValueOnce(new Error("HTTP 500 from /api/v1/content/read"))
-        .mockResolvedValueOnce("passage two")
-        .mockResolvedValueOnce("passage one");
-
-      const passages = await provider.listPassages("myrepo");
-
-      expect(passages).toEqual([
-        { id: "uuid-2", text: "passage two" },
-        { id: "uuid-1", text: "passage one" },
-      ]);
-      expect(mockViking.readFile).toHaveBeenCalledTimes(3);
-    });
-
-    it("returns partial results when one read still fails after retry", async () => {
-      (mockViking.listDirectory as ReturnType<typeof vi.fn>).mockResolvedValue([
-        "viking://resources/myrepo/passages/uuid-1.txt",
-        "viking://resources/myrepo/passages/uuid-2.txt",
-      ]);
-      (mockViking.readFile as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce("passage one")
-        .mockRejectedValueOnce(new Error("HTTP 500 from /api/v1/content/read"))
-        .mockRejectedValueOnce(new Error("HTTP 500 from /api/v1/content/read"));
-
-      const passages = await provider.listPassages("myrepo");
-
-      expect(passages).toEqual([{ id: "uuid-1", text: "passage one" }]);
-    });
-
-    it("throws when all reads fail", async () => {
-      (mockViking.listDirectory as ReturnType<typeof vi.fn>).mockResolvedValue([
-        "viking://resources/myrepo/passages/uuid-1.txt",
-        "viking://resources/myrepo/passages/uuid-2.txt",
-      ]);
-      (mockViking.readFile as ReturnType<typeof vi.fn>).mockRejectedValue(
-        new Error("HTTP 500 from /api/v1/content/read"),
-      );
-
-      await expect(provider.listPassages("myrepo")).rejects.toThrow("HTTP 500");
     });
   });
 
@@ -279,7 +162,6 @@ describe("VikingProvider", () => {
       const block = await provider.getBlock("myrepo", "persona");
 
       expect(mockBlockStorage.get).toHaveBeenCalledWith("myrepo", "persona");
-      expect(mockViking.readFile).not.toHaveBeenCalled();
       expect(block).toEqual({ value: "block content", limit: 5000 });
     });
   });
@@ -289,7 +171,6 @@ describe("VikingProvider", () => {
       const block = await provider.updateBlock("myrepo", "architecture", "new architecture");
 
       expect(mockBlockStorage.set).toHaveBeenCalledWith("myrepo", "architecture", "new architecture");
-      expect(mockViking.writeFile).not.toHaveBeenCalled();
       expect(block).toEqual({ value: "new architecture", limit: 5000 });
     });
   });
@@ -335,7 +216,7 @@ describe("VikingProvider", () => {
     });
 
     it("retries the same model on retryable errors", async () => {
-      provider = new VikingProvider(mockViking, DEFAULT_MODEL, mockBlockStorage, {
+      provider = new LocalProvider(mockStore, DEFAULT_MODEL, mockBlockStorage, {
         apiKey: API_KEY,
         maxRetriesPerModel: 1,
         retryBaseDelayMs: 0,
@@ -354,7 +235,7 @@ describe("VikingProvider", () => {
     });
 
     it("falls back to secondary model after primary retries are exhausted", async () => {
-      provider = new VikingProvider(mockViking, DEFAULT_MODEL, mockBlockStorage, {
+      provider = new LocalProvider(mockStore, DEFAULT_MODEL, mockBlockStorage, {
         apiKey: API_KEY,
         fallbackModels: ["moonshotai/kimi-k2.5"],
         maxRetriesPerModel: 0,
@@ -374,7 +255,7 @@ describe("VikingProvider", () => {
     });
 
     it("does not fallback when overrideModel is explicitly provided", async () => {
-      provider = new VikingProvider(mockViking, DEFAULT_MODEL, mockBlockStorage, {
+      provider = new LocalProvider(mockStore, DEFAULT_MODEL, mockBlockStorage, {
         apiKey: API_KEY,
         fallbackModels: ["moonshotai/kimi-k2.5"],
         maxRetriesPerModel: 0,
@@ -392,23 +273,19 @@ describe("VikingProvider", () => {
       expect(vi.mocked(toolCallingLoop).mock.calls[0][0].model).toBe("z-ai/glm-5");
     });
 
-    it("archival_memory_search handler calls semanticSearch and returns JSON", async () => {
+    it("archival_memory_search handler calls store.semanticSearch and returns JSON", async () => {
       await provider.sendMessage("myrepo", "hello");
 
       const callArgs = vi.mocked(toolCallingLoop).mock.calls[0][0];
       const searchHandler = callArgs.toolHandlers["archival_memory_search"];
 
-      (mockViking.semanticSearch as ReturnType<typeof vi.fn>).mockResolvedValue([
-        { uri: "u", text: "t", score: 0.9 },
+      mockStore.semanticSearch.mockResolvedValue([
+        { id: "p-1", text: "t", score: 0.9 },
       ]);
       const result = await searchHandler({ query: "test query" });
 
-      expect(mockViking.semanticSearch).toHaveBeenCalledWith(
-        "test query",
-        "viking://resources/myrepo/passages/",
-        10,
-      );
-      expect(result).toBe(JSON.stringify([{ uri: "u", text: "t", score: 0.9 }]));
+      expect(mockStore.semanticSearch).toHaveBeenCalledWith("myrepo", "test query", 10);
+      expect(result).toBe(JSON.stringify([{ id: "p-1", text: "t", score: 0.9 }]));
     });
 
     it("memory_replace handler calls blockStorage.set via updateBlock and returns confirmation", async () => {
@@ -422,7 +299,6 @@ describe("VikingProvider", () => {
       const result = await replaceHandler({ label: "architecture", value: "new arch" });
 
       expect(mockBlockStorage.set).toHaveBeenCalledWith("myrepo", "architecture", "new arch");
-      expect(mockViking.writeFile).not.toHaveBeenCalled();
       expect(result).toBe("Updated block 'architecture'");
     });
   });

@@ -1,19 +1,16 @@
 import type { AdminPort, AgentSummary, CoreMemoryBlock, PassageResult } from "../../ports/admin.js";
-import type { VikingProvider } from "../viking-provider.js";
-import type { VikingHttpClient } from "../viking-http.js";
+import type { AgentProvider } from "../../ports/agent-provider.js";
+import type { PassageStore } from "../../ports/passage-store.js";
 
-export class VikingAdminAdapter implements AdminPort {
+export class AdminAdapter implements AdminPort {
   constructor(
-    private readonly provider: VikingProvider,
-    private readonly viking: VikingHttpClient,
+    private readonly provider: AgentProvider,
+    private readonly store: PassageStore,
   ) {}
 
   async listAgents(): Promise<AgentSummary[]> {
-    const uris = await this.viking.listDirectory("viking://resources/");
-    return uris.map((uri) => {
-      const name = uri.replace(/^viking:\/\/resources\//, "").replace(/\/$/, "");
-      return { id: name, name };
-    });
+    const ids = await this.store.listAgents();
+    return ids.map((id) => ({ id, name: id }));
   }
 
   async getAgent(agentId: string): Promise<Record<string, unknown>> {
@@ -36,15 +33,7 @@ export class VikingAdminAdapter implements AdminPort {
   }
 
   async searchPassages(agentId: string, query: string, limit?: number): Promise<PassageResult[]> {
-    const results = await this.viking.semanticSearch(
-      query,
-      `viking://resources/${agentId}/passages/`,
-      limit ?? 10,
-    );
-    return results.map((r) => {
-      const filename = r.uri.slice(r.uri.lastIndexOf("/") + 1);
-      const id = filename.endsWith(".txt") ? filename.slice(0, -4) : filename;
-      return { id, text: r.text };
-    });
+    const results = await this.store.semanticSearch(agentId, query, limit ?? 10);
+    return results.map((r) => ({ id: r.id, text: r.text }));
   }
 }

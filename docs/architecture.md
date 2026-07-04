@@ -1,6 +1,6 @@
 # Repo Expert Agents — Architecture Overview
 
-A CLI framework that creates **persistent AI agents** (OpenViking for storage/retrieval + any OpenAI-compatible chat endpoint, defaulting to local Ollama) that act as long-term memory for git repositories. Unlike IDE tools that forget between sessions, these agents accumulate and refine knowledge over time.
+A CLI framework that creates **persistent AI agents** (an embedded sqlite-vec store for storage/retrieval + any OpenAI-compatible chat endpoint, defaulting to local Ollama) that act as long-term memory for git repositories. Unlike IDE tools that forget between sessions, these agents accumulate and refine knowledge over time.
 
 ---
 
@@ -17,14 +17,14 @@ graph TB
     subgraph "External Systems"
         FS["Filesystem (node:fs)"]
         GIT["Git (execFileSync)"]
-        VIKING["OpenViking server (HTTP)"]
+        SQLITE["Embedded sqlite store\n(better-sqlite3 + sqlite-vec)"]
         LLM["OpenAI-compatible LLM endpoint\n(Ollama by default)"]
     end
 
     subgraph "src/shell/adapters/ — Port Implementations"
         NFS["NodeFilesystem\nimplements FileSystemPort"]
         NGIT["NodeGit\nimplements GitPort"]
-        VAA["VikingAdminAdapter\nimplements AdminPort"]
+        VAA["AdminAdapter\nimplements AdminPort"]
     end
 
     subgraph "src/ports/ — Interfaces (boundary)"
@@ -38,7 +38,7 @@ graph TB
     end
 
     subgraph "src/shell/ — Imperative Shell"
-        SHELL["config-loader\nfile-collector\nstate-store\nagent-factory\nviking-provider · llm-client"]
+        SHELL["config-loader\nfile-collector\nstate-store\nagent-factory\nlocal-provider · sqlite-store · llm-client"]
     end
 
     subgraph "User Interfaces"
@@ -57,7 +57,7 @@ graph TB
     VAA -->|implements| AP
     NFS --> FS
     NGIT --> GIT
-    VAA --> VIKING
+    VAA --> SQLITE
     SHELL --> LLM
     CORE -.->|depends on types only| FP
     CORE -.->|depends on types only| GP
@@ -114,9 +114,11 @@ pnpm test   # architecture.test.ts catches violations at the file content level
 | Port: admin | `src/ports/admin.ts` |
 | Adapter: filesystem | `src/shell/adapters/node-filesystem.ts` |
 | Adapter: git | `src/shell/adapters/node-git.ts` |
-| Adapter: admin | `src/shell/adapters/viking-admin-adapter.ts` |
+| Adapter: admin | `src/shell/adapters/admin-adapter.ts` |
 | Provider port | `src/ports/agent-provider.ts` |
-| Viking provider | `src/shell/viking-provider.ts` |
+| Passage-store port | `src/ports/passage-store.ts` |
+| Local provider | `src/shell/local-provider.ts` |
+| Sqlite store | `src/shell/sqlite-store.ts` |
 | LLM client | `src/shell/llm-client.ts` |
 | Tree-sitter chunker | `src/core/tree-sitter-chunker.ts` |
 | Architecture tests | `src/__tests__/architecture.test.ts` |
@@ -129,7 +131,7 @@ pnpm test   # architecture.test.ts catches violations at the file content level
  ┌──────────────────────────────────────────────────────────────────┐
  │                         LIFECYCLE                                │
  │                                                                  │
- │  config.yaml          setup           OpenViking + LLM endpoint  │
+ │  config.yaml          setup           sqlite store + LLM endpoint │
  │  ┌──────────┐    ┌─────────────┐    ┌─────────────────────┐     │
  │  │ repos:   │───▶│ collect     │───▶│  Agent per repo     │     │
  │  │  mobile  │    │ files       │    │  ┌───────────────┐  │     │
@@ -148,7 +150,7 @@ pnpm test   # architecture.test.ts catches violations at the file content level
  └──────────────────────────────────────────────────────────────────┘
 ```
 
-The chunk step supports two strategies, selected via `config.defaults.chunking`: **`tree-sitter`** (default, symbol-boundary chunking for `.ts`/`.tsx`/`.js`/`.jsx`) and **`raw`** (~2KB text splits on paragraph boundaries). Non-JS/TS file types automatically fall back to raw chunking when using tree-sitter. Implementation lives in `src/core/tree-sitter-chunker.ts`.
+The chunk step uses **tree-sitter** symbol-boundary chunking for `.ts`/`.tsx`/`.js`/`.jsx`; other file types automatically fall back to ~2KB raw text splits on paragraph boundaries. Implementation lives in `src/core/tree-sitter-chunker.ts`.
 
 ---
 

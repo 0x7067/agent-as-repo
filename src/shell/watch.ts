@@ -7,11 +7,11 @@ import { consolidateAgentMemory } from "./consolidate.js";
 import { shouldConsolidate } from "../core/consolidate.js";
 import { shouldSync, formatSyncLog, computeBackoffDelay } from "../core/watch.js";
 import { updateAgentField } from "../core/state.js";
-import { shouldIncludeFile } from "../core/filter.js";
+import { repoFilterOptions, shouldIncludeFile } from "../core/filter.js";
 import { partitionDiffPaths } from "../core/submodule.js";
 import { listSubmodules, expandSubmoduleFiles } from "./submodule-collector.js";
 import type { AgentProvider } from "../ports/agent-provider.js";
-import type { AgentState, Config, FileInfo, RepoConfig } from "../core/types.js";
+import { MEMORY_BLOCK_LIMIT, type AgentState, type Config, type FileInfo, type RepoConfig } from "../core/types.js";
 import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
 import type { GitPort } from "../ports/git.js";
 import { nodeFileSystem } from "./adapters/node-filesystem.js";
@@ -81,7 +81,7 @@ function toAgentPath(repoConfig: RepoConfig, repoRelativePath: string): string |
 async function filterChangedFiles(repoConfig: RepoConfig, changedFiles: string[]): Promise<string[]> {
   const regularFiles = changedFiles
     .map((filePath) => toAgentPath(repoConfig, filePath))
-    .filter((filePath): filePath is string => filePath !== null && shouldIncludeFile(filePath, 0, repoConfig));
+    .filter((filePath): filePath is string => filePath !== null && shouldIncludeFile(filePath, 0, repoFilterOptions(repoConfig)));
 
   if (!repoConfig.includeSubmodules) return regularFiles;
 
@@ -168,7 +168,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     } = params_;
 
     if (isEventSync) {
-      return (eventChangedFiles ?? []).filter((filePath) => shouldIncludeFile(filePath, 0, repoConfig));
+      return (eventChangedFiles ?? []).filter((filePath) => shouldIncludeFile(filePath, 0, repoFilterOptions(repoConfig)));
     }
 
     if (agentInfo.lastSyncCommit) {
@@ -200,7 +200,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     const repoConfig = getRepoConfig(repoName);
     if (repoConfig === undefined) return;
     if (ignoredEventFilesByRepo.get(repoName)?.has(filePath)) return;
-    if (!shouldIncludeFile(filePath, 0, repoConfig)) return;
+    if (!shouldIncludeFile(filePath, 0, repoFilterOptions(repoConfig))) return;
 
     const pending = pendingFilesByRepo.get(repoName) ?? new Set<string>();
     pending.add(filePath);
@@ -269,18 +269,17 @@ export async function watchRepos(params: WatchParams): Promise<void> {
             fs,
           ),
         headCommit: currentHead,
-        maxFileSizeKb: repoConfig.maxFileSizeKb,
       });
 
       await persistSyncResult(repoName, result.passages, result.lastSyncCommit);
 
-      if (shouldConsolidate(result, config.defaults)) {
+      if (shouldConsolidate(result, config.consolidateOnSync)) {
         const consolidation = await consolidateAgentMemory({
           provider,
           agentId: agentInfo.agentId,
           changedFiles,
           syncResult: result,
-          blockCharLimit: repoConfig.memoryBlockLimit,
+          blockCharLimit: MEMORY_BLOCK_LIMIT,
           log,
         });
         if (consolidation.consolidated) {

@@ -60,7 +60,7 @@ describe("shouldConsolidate", () => {
   it("returns false when the flag is off, regardless of file count", () => {
     const decision = shouldConsolidate(
       { filesReIndexed: 100, filesRemoved: 100 },
-      { consolidateOnSync: false, consolidateMinFilesChanged: 5 },
+      false,
     );
     expect(decision).toBe(false);
   });
@@ -68,7 +68,7 @@ describe("shouldConsolidate", () => {
   it("returns false when files changed is below the threshold", () => {
     const decision = shouldConsolidate(
       { filesReIndexed: 2, filesRemoved: 1 },
-      { consolidateOnSync: true, consolidateMinFilesChanged: 5 },
+      true,
     );
     expect(decision).toBe(false);
   });
@@ -76,7 +76,7 @@ describe("shouldConsolidate", () => {
   it("returns true when re-indexed + removed meets the threshold", () => {
     const decision = shouldConsolidate(
       { filesReIndexed: 3, filesRemoved: 2 },
-      { consolidateOnSync: true, consolidateMinFilesChanged: 5 },
+      true,
     );
     expect(decision).toBe(true);
   });
@@ -84,7 +84,7 @@ describe("shouldConsolidate", () => {
   it("counts removed files toward the threshold", () => {
     const decision = shouldConsolidate(
       { filesReIndexed: 0, filesRemoved: 5 },
-      { consolidateOnSync: true, consolidateMinFilesChanged: 5 },
+      true,
     );
     expect(decision).toBe(true);
   });

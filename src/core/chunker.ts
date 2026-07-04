@@ -31,6 +31,24 @@ export function chunkWithHeader(
   return chunks;
 }
 
+const CONTINUED_SUFFIX = " (continued)";
+
+/**
+ * Recover the source file path from a chunk's `FILE: <path>` header.
+ * Returns null when the text carries no header (e.g. manually inserted passages).
+ */
+export function extractSourcePath(chunkText: string): string | null {
+  if (!chunkText.startsWith(FILE_PREFIX)) return null;
+  const newlineIndex = chunkText.indexOf("\n");
+  const headerLine = newlineIndex === -1 ? chunkText : chunkText.slice(0, newlineIndex);
+  let rawPath = headerLine.slice(FILE_PREFIX.length);
+  if (rawPath.endsWith(CONTINUED_SUFFIX)) {
+    rawPath = rawPath.slice(0, -CONTINUED_SUFFIX.length);
+  }
+  const trimmed = rawPath.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export function chunkFile(
   filePath: string,
   content: string,

@@ -5,16 +5,17 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod/v4";
 import type { AgentProvider, SendMessageOptions } from "./ports/agent-provider.js";
 import type { AdminPort } from "./ports/admin.js";
-import { VikingProvider, type VikingRuntimeOptions } from "./shell/viking-provider.js";
-import { VikingHttpClient } from "./shell/viking-http.js";
-import { VikingAdminAdapter } from "./shell/adapters/viking-admin-adapter.js";
-import { FilesystemBlockStorage } from "./shell/block-storage.js";
-import { resolveOpenVikingBlocksDir } from "./shell/openviking-paths.js";
+import { LocalProvider, type LocalRuntimeOptions } from "./shell/local-provider.js";
+import { AdminAdapter } from "./shell/adapters/admin-adapter.js";
+import { SqlitePassageStore } from "./shell/sqlite-store.js";
+import { SqliteBlockStorage } from "./shell/sqlite-block-storage.js";
+import { resolveStoreDbPath } from "./shell/repo-expert-paths.js";
+import { embed } from "./shell/llm-client.js";
 
 const ASK_DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_LLM_MODEL = "qwen3-coder:30b";
 const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
-const DEFAULT_VIKING_URL = "http://localhost:1933";
+const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
 
 export interface Runtime {
   provider: AgentProvider;
@@ -59,7 +60,7 @@ export function parseModelCsv(value?: string): string[] {
     .filter((item) => item.length > 0);
 }
 
-export function getVikingRuntimeOptionsFromEnv(): VikingRuntimeOptions {
+export function getRuntimeOptionsFromEnv(): LocalRuntimeOptions {
   return {
     requestTimeoutMs: parsePositiveInt(process.env["LLM_REQUEST_TIMEOUT_MS"], 20_000),
     maxRetriesPerModel: parseNonNegativeInt(process.env["LLM_MAX_RETRIES_PER_MODEL"], 1),
@@ -69,19 +70,22 @@ export function getVikingRuntimeOptionsFromEnv(): VikingRuntimeOptions {
 }
 
 export function buildRuntime(): Runtime {
-  const vikingUrl = process.env["VIKING_URL"] ?? DEFAULT_VIKING_URL;
-  const vikingApiKey = process.env["VIKING_API_KEY"];
   const model = process.env["LLM_MODEL"] ?? DEFAULT_LLM_MODEL;
   const baseUrl = process.env["LLM_BASE_URL"] ?? DEFAULT_LLM_BASE_URL;
+  const embeddingModel = process.env["LLM_EMBEDDING_MODEL"] ?? DEFAULT_EMBEDDING_MODEL;
   const apiKey = process.env["LLM_API_KEY"];
-  const viking = new VikingHttpClient(vikingUrl, vikingApiKey);
-  const blockStorage = new FilesystemBlockStorage(resolveOpenVikingBlocksDir());
-  const provider = new VikingProvider(viking, model, blockStorage, {
+  const dbPath = resolveStoreDbPath();
+  const store = new SqlitePassageStore({
+    dbPath,
+    embed: (texts) => embed(texts, embeddingModel, baseUrl, apiKey),
+  });
+  const blockStorage = new SqliteBlockStorage(dbPath);
+  const provider = new LocalProvider(store, model, blockStorage, {
     baseUrl,
     ...(apiKey === undefined ? {} : { apiKey }),
-    ...getVikingRuntimeOptionsFromEnv(),
+    ...getRuntimeOptionsFromEnv(),
   });
-  return { provider, admin: new VikingAdminAdapter(provider, viking) };
+  return { provider, admin: new AdminAdapter(provider, store) };
 }
 
 export async function withTimeout<T>(label: string, timeoutMs: number, fn: () => Promise<T>): Promise<T> {

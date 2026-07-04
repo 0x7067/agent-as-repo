@@ -1,8 +1,11 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   buildRuntime,
-  getVikingRuntimeOptionsFromEnv,
+  getRuntimeOptionsFromEnv,
   main,
   parseModelCsv,
   parseNonNegativeInt,
@@ -141,7 +144,7 @@ describe("withTimeout", () => {
   });
 });
 
-describe("getVikingRuntimeOptionsFromEnv", () => {
+describe("getRuntimeOptionsFromEnv", () => {
   const keys = [
     "LLM_REQUEST_TIMEOUT_MS",
     "LLM_MAX_RETRIES_PER_MODEL",
@@ -154,7 +157,7 @@ describe("getVikingRuntimeOptionsFromEnv", () => {
   });
 
   it("uses defaults when env vars are absent", () => {
-    expect(getVikingRuntimeOptionsFromEnv()).toEqual({
+    expect(getRuntimeOptionsFromEnv()).toEqual({
       requestTimeoutMs: 20_000,
       maxRetriesPerModel: 1,
       retryBaseDelayMs: 600,
@@ -168,7 +171,7 @@ describe("getVikingRuntimeOptionsFromEnv", () => {
     process.env["LLM_RETRY_BASE_DELAY_MS"] = "900";
     process.env["LLM_FALLBACK_MODELS"] = "model-a, model-b";
 
-    expect(getVikingRuntimeOptionsFromEnv()).toEqual({
+    expect(getRuntimeOptionsFromEnv()).toEqual({
       requestTimeoutMs: 15_000,
       maxRetriesPerModel: 2,
       retryBaseDelayMs: 900,
@@ -178,10 +181,18 @@ describe("getVikingRuntimeOptionsFromEnv", () => {
 });
 
 describe("buildRuntime", () => {
-  const envKeys = ["LLM_MODEL", "LLM_BASE_URL", "LLM_API_KEY", "VIKING_URL", "VIKING_API_KEY"] as const;
+  const envKeys = ["LLM_MODEL", "LLM_BASE_URL", "LLM_API_KEY", "LLM_EMBEDDING_MODEL"] as const;
+  let dataDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(path.join(tmpdir(), "repo-expert-mcp-runtime-"));
+    process.env["REPO_EXPERT_DATA_DIR"] = dataDir;
+  });
 
   afterEach(() => {
     for (const key of envKeys) Reflect.deleteProperty(process.env, key);
+    Reflect.deleteProperty(process.env, "REPO_EXPERT_DATA_DIR");
+    rmSync(dataDir, { recursive: true, force: true });
   });
 
   it("builds a provider and admin from env/defaults", () => {

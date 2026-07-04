@@ -75,7 +75,6 @@ export interface InitConfig {
 
 const DEFAULT_MODEL = "qwen3-coder:30b";
 const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
-const DEFAULT_VIKING_URL = "http://localhost:1933";
 
 /**
  * Generate config.yaml content from init parameters.
@@ -85,7 +84,6 @@ export function generateConfigYaml(config: InitConfig): string {
     provider: {
       model: config.model ?? DEFAULT_MODEL,
       base_url: config.baseUrl ?? DEFAULT_LLM_BASE_URL,
-      viking_url: DEFAULT_VIKING_URL,
     },
     repos: {
       [config.repoName]: {

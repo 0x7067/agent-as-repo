@@ -3,24 +3,30 @@ import * as esbuild from "esbuild";
 const shared: esbuild.BuildOptions = {
   bundle: true,
   platform: "node",
-  target: "node18",
+  target: "node22",
   format: "esm",
   sourcemap: false,
   external: [
     "@modelcontextprotocol/sdk",
     "@modelcontextprotocol/sdk/*",
     "readline/promises",
+    // Native-addon packages resolve from node_modules at runtime.
+    "better-sqlite3",
+    "sqlite-vec",
   ],
 };
 
 const seaShared: esbuild.BuildOptions = {
   bundle: true,
   platform: "node",
-  target: "node18",
+  target: "node22",
   format: "cjs",
   sourcemap: false,
   // Disable the import.meta.url guard so it never fires in CJS/SEA context.
   // The SEA entry wrappers call main() directly instead.
+  // better-sqlite3's JS wrapper is intentionally bundled here: the SEA
+  // runtime dlopens the addon extracted from blob assets and passes it via
+  // `nativeBinding` (see src/shell/sqlite-native.ts).
   define: { "import.meta.url": '"file:///sea-bundle"' },
 };
 

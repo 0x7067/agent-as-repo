@@ -29,10 +29,6 @@ const testConfig: RepoConfig = {
   description: "Test repo",
   extensions: [".ts"],
   ignoreDirs: ["node_modules"],
-  tags: ["frontend", "mobile"],
-  maxFileSizeKb: 50,
-  memoryBlockLimit: 5000,
-  bootstrapOnCreate: true,
 };
 
 const testModelOptions = {
@@ -49,9 +45,7 @@ describe("createRepoAgent", () => {
     const [params] = (provider.createAgent as ReturnType<typeof vi.fn>).mock.calls[0] as [CreateAgentParams];
     expect(params.name).toBe("repo-expert-my-app");
     expect(params.model).toBe("qwen3-coder:30b");
-    expect(params.tags).toEqual(["repo-expert", "frontend", "mobile"]);
     expect(params.description).toBe("Test repo");
-    expect(params.memoryBlockLimit).toBe(5000);
   });
 });
 

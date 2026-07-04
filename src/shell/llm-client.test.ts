@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   callChatCompletions,
+  embed,
   toolCallingLoop,
   DEFAULT_LLM_BASE_URL,
   type ToolDefinition,
@@ -379,5 +380,96 @@ describe("toolCallingLoop", () => {
     };
     const toolMsg = secondBody.messages.find((m: { role: string }) => m.role === "tool");
     expect(toolMsg.content).toContain("Error: invalid arguments for tool get_weather");
+  });
+});
+
+describe("embed", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+
+  it("posts texts to {base_url}/embeddings with the embedding model", async () => {
+    mockFetch.mockResolvedValue(
+      makeResponse(200, {
+        data: [
+          { index: 0, embedding: [0.1, 0.2] },
+          { index: 1, embedding: [0.3, 0.4] },
+        ],
+      }),
+    );
+
+    const vectors = await embed(["alpha", "beta"], "nomic-embed-text", DEFAULT_BASE_URL, API_KEY);
+
+    const firstCall = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(firstCall[0]).toBe(`${DEFAULT_BASE_URL}/embeddings`);
+    expect(firstCall[1].method).toBe("POST");
+    const headers = firstCall[1].headers as Record<string, string>;
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers["Authorization"]).toBe(`Bearer ${API_KEY}`);
+    expect(getJsonRequestBody(mockFetch, 0)).toEqual({
+      model: "nomic-embed-text",
+      input: ["alpha", "beta"],
+    });
+    expect(vectors).toEqual([
+      [0.1, 0.2],
+      [0.3, 0.4],
+    ]);
+  });
+
+  it("omits the Authorization header without an API key", async () => {
+    mockFetch.mockResolvedValue(
+      makeResponse(200, { data: [{ index: 0, embedding: [1] }] }),
+    );
+
+    await embed(["alpha"], "nomic-embed-text");
+
+    const firstCall = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(firstCall[0]).toBe(`${DEFAULT_LLM_BASE_URL}/embeddings`);
+    const headers = firstCall[1].headers as Record<string, string>;
+    expect(headers["Authorization"]).toBeUndefined();
+  });
+
+  it("returns embeddings in input order even when the response is out of order", async () => {
+    mockFetch.mockResolvedValue(
+      makeResponse(200, {
+        data: [
+          { index: 1, embedding: [0.3, 0.4] },
+          { index: 0, embedding: [0.1, 0.2] },
+        ],
+      }),
+    );
+
+    const vectors = await embed(["alpha", "beta"], "nomic-embed-text");
+
+    expect(vectors).toEqual([
+      [0.1, 0.2],
+      [0.3, 0.4],
+    ]);
+  });
+
+  it("returns an empty array without calling the endpoint for empty input", async () => {
+    const vectors = await embed([], "nomic-embed-text");
+
+    expect(vectors).toEqual([]);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("throws on non-OK responses", async () => {
+    mockFetch.mockResolvedValue(makeResponse(500, {}));
+
+    await expect(embed(["alpha"], "nomic-embed-text")).rejects.toThrow("HTTP 500");
+  });
+
+  it("throws when the response is missing an embedding for an input", async () => {
+    mockFetch.mockResolvedValue(
+      makeResponse(200, { data: [{ index: 0, embedding: [1] }] }),
+    );
+
+    await expect(embed(["alpha", "beta"], "nomic-embed-text")).rejects.toThrow(
+      "embedding count mismatch",
+    );
   });
 });

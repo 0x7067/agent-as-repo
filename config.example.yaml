@@ -1,61 +1,29 @@
-# Repo Expert Agents — Configuration
-# Copy to config.yaml and customize for your repos.
-#
-# Single provider path: OpenViking for storage/retrieval + any OpenAI-compatible
-# chat endpoint. Defaults to a local Ollama server — no API key required.
+# repo-expert configuration
+# Copy to config.yaml. Only three fields are required: the chat model and,
+# per repo, a path + description. Everything else has sensible defaults.
 
 provider:
   model: qwen3-coder:30b                  # Chat model id, as the endpoint knows it
-  # base_url: http://localhost:11434/v1   # OpenAI-compatible LLM endpoint. Default: local Ollama.
-  # fallback_models: []                   # Tried in order if `model` fails (e.g. rate limit, timeout)
-  # viking_url: http://localhost:1933     # OpenViking server. Default: local OpenViking.
-  # fast_model: llama3.2:3b               # Smaller/faster model used by `ask --fast` (e.g. an Ollama small-instruct model)
+  # base_url: http://localhost:11434/v1   # OpenAI-compatible endpoint. Default: local Ollama.
+  # embedding_model: nomic-embed-text     # Embedding model on the same endpoint (`ollama pull nomic-embed-text`)
+  # fast_model: llama3.2:3b               # Smaller/faster model used by `ask --fast`
+  # fallback_models: []                   # Tried in order when `model` fails (rate limit, timeout, ...)
 
-# To point at a remote/cloud endpoint instead of local Ollama (e.g. OpenRouter):
+# consolidate_on_sync: true               # Refresh the agent's memory blocks after syncs that touch 5+ files
+
+repos:
+  my-app:
+    path: ~/repos/my-app
+    description: "React Native mobile app"
+    # extensions: [.ts, .tsx]             # Default: common code/doc extensions (.ts .js .py .go .rs .md ...)
+    # ignore_dirs: [node_modules, .git]   # Default: node_modules, .git, dist, build, vendor, ...
+    # persona: "You are the expert on my-app."
+    # base_path: packages/frontend        # Monorepo: index only this subtree
+    # include_submodules: true            # Also index files inside git submodules
+
+# Remote endpoint instead of local Ollama (e.g. OpenRouter): set base_url and
+# put LLM_API_KEY in .env — it's sent as an `Authorization: Bearer` header.
 #
 # provider:
 #   model: openai/gpt-4o-mini
 #   base_url: https://openrouter.ai/api/v1
-#
-# Then set LLM_API_KEY in .env — it's sent as an `Authorization: Bearer` header.
-# Local Ollama needs no key, so LLM_API_KEY can stay unset for the default setup.
-#
-# Note: OpenViking owns embeddings for archival search. Configure the embedding
-# backend in ~/.openviking/ov.conf (OpenViking typically delegates to Ollama,
-# e.g. nomic-embed-text) — there is no `embedding` field here.
-
-# Optional global defaults (all can be overridden per-repo)
-defaults:
-  max_file_size_kb: 50        # Skip files larger than this
-  memory_block_limit: 5000    # Max chars per core memory block
-  bootstrap_on_create: true   # Auto-analyze codebase on setup
-  # ask_timeout_ms: 60000      # Default timeout for single-agent ask requests
-  chunking: tree-sitter       # Default: symbol-boundary chunking for .ts/.tsx/.js/.jsx
-                               # Use "raw" for ~2KB text splits; other file types fall back to raw
-  # consolidate_on_sync: false        # Opt-in: refresh architecture/conventions blocks via the LLM after a sync
-  # consolidate_min_files_changed: 5  # Only consolidate when a sync touches at least this many files
-  # tools:                    # Additional tool names for all agents (per-repo overrides)
-  #   - archival_memory_search
-
-repos:
-  # Each key becomes the agent name (repo-expert-<key>)
-  my-app:
-    path: ~/repos/my-app                       # Absolute or ~ path to repo
-    description: "React Native mobile app"     # Used in agent persona
-    extensions: [.ts, .tsx, .js, .jsx, .json]  # File types to index
-    ignore_dirs: [node_modules, .git, dist]    # Directories to skip
-    tags: [frontend, mobile]                   # For cross-agent discovery
-    # include_submodules: false     # Set to true to index git submodule contents.
-    #                               # Requires submodules to be initialized first
-    #                               # (`git submodule update --init`).
-    # Optional: custom persona (auto-generated from description if omitted)
-    # persona: |
-    #   I am an expert on the mobile app.
-    #   I know every screen, component, and navigation flow.
-
-  # backend:
-  #   path: ~/repos/backend
-  #   description: "Node.js backend API"
-  #   extensions: [.ts, .js, .sql, .yaml, .json]
-  #   ignore_dirs: [node_modules, .git, dist]
-  #   tags: [backend, api]

@@ -3,10 +3,7 @@ export interface CreateAgentParams {
   repoName: string;
   description: string;
   persona?: string;
-  tags: string[];
   model: string;
-  memoryBlockLimit: number;
-  tools?: string[];
 }
 
 export interface CreateAgentResult {

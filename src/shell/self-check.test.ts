@@ -3,7 +3,7 @@ import * as os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
-import { formatSelfChecks, runSelfChecks } from "./self-check.js";
+import { MIN_NODE_MAJOR, formatSelfChecks, runSelfChecks } from "./self-check.js";
 
 async function withTempDir(prefix: string, fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -428,5 +428,18 @@ describe("runSelfChecks (port-injected)", () => {
     const results = await runSelfChecks(PROJECT_DIR, 18, fakeFs, fakeRunCommand);
     const pkg = results.find((r) => r.name === PACKAGE_JSON_CHECK);
     expect(pkg?.status).toBe("warn");
+  });
+});
+
+describe("MIN_NODE_MAJOR", () => {
+  it("pins the standardized Node major (engines, CI, .nvmrc, SEA all use it)", () => {
+    expect(MIN_NODE_MAJOR).toBe(22);
+  });
+
+  it("is the default minimum for runSelfChecks", async () => {
+    const results = await runSelfChecks(process.cwd());
+    const nodeResult = results.find((r) => r.name === "Node.js");
+    // The suite itself runs on the standardized major, so the check passes.
+    expect(nodeResult?.status).toBe("pass");
   });
 });

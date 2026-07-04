@@ -18,13 +18,14 @@ import { StateFileError, loadState, saveState } from "./shell/state-store.js";
 import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
 import { bootstrapAgent } from "./shell/bootstrap.js";
 import type { AgentProvider, CreateAgentParams, SendMessageOptions } from "./ports/agent-provider.js";
-import { VikingProvider } from "./shell/viking-provider.js";
-import { VikingHttpClient } from "./shell/viking-http.js";
-import { FilesystemBlockStorage } from "./shell/block-storage.js";
-import { resolveOpenVikingBlocksDir } from "./shell/openviking-paths.js";
+import { LocalProvider } from "./shell/local-provider.js";
+import { SqlitePassageStore } from "./shell/sqlite-store.js";
+import { SqliteBlockStorage } from "./shell/sqlite-block-storage.js";
+import { resolveStoreDbPath } from "./shell/repo-expert-paths.js";
+import { embed } from "./shell/llm-client.js";
 import { selectChunkingStrategy } from "./core/chunker.js";
 import { initTreeSitterChunker } from "./core/tree-sitter-chunker.js";
-import { shouldIncludeFile } from "./core/filter.js";
+import { repoFilterOptions, shouldIncludeFile } from "./core/filter.js";
 import { partitionDiffPaths } from "./core/submodule.js";
 import { listSubmodules, expandSubmoduleFiles } from "./shell/submodule-collector.js";
 import { addAgentToState, removeAgentFromState, updateAgentField, updatePassageMap } from "./core/state.js";
@@ -41,15 +42,16 @@ import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
 import { generateMcpEntry, checkMcpEntry, type McpProviderConfig } from "./core/mcp-config.js";
 import { buildPostSetupNextSteps, getSetupMode } from "./core/setup.js";
-import type { AgentState, AppState, Config } from "./core/types.js";
+import { MAX_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Config } from "./core/types.js";
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
-import type { VikingRuntimeOptions } from "./shell/viking-provider.js";
+import type { LocalRuntimeOptions } from "./shell/local-provider.js";
 
 interface SetupOpts {
   repo?: string;
   config: string;
   resume?: boolean;
   reindex?: boolean;
+  bootstrap: boolean;
   json?: boolean;
   loadRetries: string;
   bootstrapRetries: string;
@@ -168,19 +170,22 @@ class CliUserError extends Error {
 }
 
 function createProvider(config: Config): AgentProvider {
-  const vikingUrl = config.provider.vikingUrl;
-  const vikingApiKey = process.env["VIKING_API_KEY"];
-  const viking = new VikingHttpClient(vikingUrl, vikingApiKey);
-  const blockStorage = new FilesystemBlockStorage(resolveOpenVikingBlocksDir());
-  return new VikingProvider(
-    viking,
+  const llmApiKey = process.env["LLM_API_KEY"];
+  const dbPath = resolveStoreDbPath();
+  const store = new SqlitePassageStore({
+    dbPath,
+    embed: (texts) => embed(texts, config.provider.embeddingModel, config.provider.baseUrl, llmApiKey),
+  });
+  const blockStorage = new SqliteBlockStorage(dbPath);
+  return new LocalProvider(
+    store,
     config.provider.model,
     blockStorage,
     {
       baseUrl: config.provider.baseUrl,
       fallbackModels: config.provider.fallbackModels,
-      ...(process.env["LLM_API_KEY"] === undefined ? {} : { apiKey: process.env["LLM_API_KEY"] }),
-      ...getVikingRuntimeOptionsFromEnv(),
+      ...(llmApiKey === undefined ? {} : { apiKey: llmApiKey }),
+      ...getRuntimeOptionsFromEnv(),
     },
   );
 }
@@ -319,20 +324,17 @@ async function loadConfigSafe(configPath: string): Promise<Config> {
   }
 }
 
-async function prepareChunking(config: Config): Promise<ReturnType<typeof selectChunkingStrategy>> {
-  if (config.defaults.chunking === "tree-sitter") {
-    await initTreeSitterChunker(resolveTreeSitterWasmPaths());
-  }
-  return selectChunkingStrategy(config.defaults.chunking);
+async function prepareChunking(): Promise<ReturnType<typeof selectChunkingStrategy>> {
+  await initTreeSitterChunker(resolveTreeSitterWasmPaths());
+  return selectChunkingStrategy("tree-sitter");
 }
 
 function resolveMcpProviderConfig(config: Config | null): { providerConfig: McpProviderConfig; warnings: string[] } {
   const warnings: string[] = [];
   const model = config?.provider.model ?? process.env["LLM_MODEL"];
   const baseUrl = config?.provider.baseUrl ?? process.env["LLM_BASE_URL"];
-  const vikingUrl = config?.provider.vikingUrl ?? process.env["VIKING_URL"];
+  const embeddingModel = config?.provider.embeddingModel ?? process.env["LLM_EMBEDDING_MODEL"];
   const llmApiKey = process.env["LLM_API_KEY"];
-  const vikingApiKey = process.env["VIKING_API_KEY"];
 
   if (config === null) {
     warnings.push("config.yaml not found; MCP entry uses env/default values for model and URLs.");
@@ -342,9 +344,8 @@ function resolveMcpProviderConfig(config: Config | null): { providerConfig: McpP
     providerConfig: {
       ...(model === undefined ? {} : { model }),
       ...(baseUrl === undefined ? {} : { baseUrl }),
-      ...(vikingUrl === undefined ? {} : { vikingUrl }),
+      ...(embeddingModel === undefined ? {} : { embeddingModel }),
       ...(llmApiKey === undefined ? {} : { llmApiKey }),
-      ...(vikingApiKey === undefined ? {} : { vikingApiKey }),
     },
     warnings,
   };
@@ -494,7 +495,7 @@ function parseOptionalMaxSteps(value: string | undefined): number | undefined {
   return parsed;
 }
 
-function getVikingRuntimeOptionsFromEnv(): VikingRuntimeOptions {
+function getRuntimeOptionsFromEnv(): LocalRuntimeOptions {
   const requestTimeoutMs = parseOptionalPositiveInt(process.env["LLM_REQUEST_TIMEOUT_MS"], 20_000);
   const maxRetriesPerModel = parseNonNegativeInt(process.env["LLM_MAX_RETRIES_PER_MODEL"] ?? "1", 1);
   const retryBaseDelayMs = parseOptionalPositiveInt(process.env["LLM_RETRY_BASE_DELAY_MS"], 600);
@@ -612,7 +613,7 @@ async function loadAskConfigDefaults(configPath: string | undefined): Promise<{
 
   const config = await loadConfigSafe(resolvedPath);
   return {
-    askTimeoutMs: config.defaults.askTimeoutMs ?? defaults.askTimeoutMs,
+    askTimeoutMs: defaults.askTimeoutMs,
     ...(config.provider.fastModel === undefined ? {} : { fastModel: config.provider.fastModel }),
   };
 }
@@ -828,6 +829,7 @@ program
   .option("--config <path>", "Config file path", "config.yaml")
   .option("--resume", "Resume incomplete setup work (default behavior)")
   .option("--reindex", "Force full re-index for existing agents")
+  .option("--no-bootstrap", "Skip the bootstrap analysis stage")
   .option("--json", "Output setup results as JSON")
   .option("--load-retries <n>", "Retries for passage loading", "2")
   .option("--bootstrap-retries <n>", "Retries for bootstrap stage", "2")
@@ -850,7 +852,7 @@ program
 
     const configPath = path.resolve(opts.config);
     const config = await loadConfigSafe(configPath);
-    const chunkingStrategy = await prepareChunking(config);
+    const chunkingStrategy = await prepareChunking();
     const provider = createProviderForCommands(config);
     let state = await loadState(STATE_FILE);
 
@@ -869,7 +871,7 @@ program
       }
 
       const existingAgent = getOwnRecordValue(state.agents, repoName);
-      const mode = getSetupMode(existingAgent, repoConfig.bootstrapOnCreate, {
+      const mode = getSetupMode(existingAgent, opts.bootstrap, {
         forceResume: Boolean(opts.resume),
         forceReindex: Boolean(opts.reindex),
       });
@@ -960,7 +962,7 @@ program
           await saveState(STATE_FILE, state);
         }
 
-        if (repoConfig.bootstrapOnCreate) {
+        if (opts.bootstrap) {
           const bootstrapStart = Date.now();
           log(`  Bootstrapping...`);
           await withRetry(
@@ -1080,7 +1082,7 @@ program
     const log = opts.json ? (_: string) => {} : (line: string) => { console.log(line); };
     const configPath = path.resolve(opts.config);
     const config = await loadConfigSafe(configPath);
-    await prepareChunking(config);
+    await prepareChunking();
     const provider = opts.dryRun ? null : createProviderForCommands(config);
     let state = await loadState(STATE_FILE);
     const syncResults: Array<Record<string, unknown>> = [];
@@ -1143,7 +1145,7 @@ program
           const { changedSubmodules, regularFiles } = partitionDiffPaths(
             diffPaths,
             submodules,
-            (f) => shouldIncludeFile(f, 0, repoConfig),
+            (f) => shouldIncludeFile(f, 0, repoFilterOptions(repoConfig)),
           );
           const expandedSubFiles: string[] = [];
           for (const sub of changedSubmodules) {
@@ -1151,7 +1153,7 @@ program
           }
           changedFiles = [...regularFiles, ...expandedSubFiles];
         } else {
-          changedFiles = diffPaths.filter((f) => shouldIncludeFile(f, 0, repoConfig));
+          changedFiles = diffPaths.filter((f) => shouldIncludeFile(f, 0, repoFilterOptions(repoConfig)));
         }
         log(`Syncing "${repoName}" (${String(changedFiles.length)} changed files since ${sinceRef.slice(0, 7)})...`);
       }
@@ -1206,8 +1208,7 @@ program
           }
         },
         headCommit,
-        maxFileSizeKb: repoConfig.maxFileSizeKb,
-        chunking: config.defaults.chunking,
+        maxFileSizeKb: MAX_FILE_SIZE_KB,
         ...(isTTY ? {
           onProgress: (completed: number, total: number, filePath: string) => {
             const label = filePath.length > 60 ? `...${filePath.slice(-57)}` : filePath;
@@ -1228,13 +1229,13 @@ program
       state = updateAgentField(state, repoName, { passages: result.passages, lastSyncCommit: result.lastSyncCommit });
       await saveState(STATE_FILE, state);
 
-      if (shouldConsolidate(result, config.defaults)) {
+      if (shouldConsolidate(result, config.consolidateOnSync)) {
         const consolidation = await consolidateAgentMemory({
           provider,
           agentId: agentInfo.agentId,
           changedFiles,
           syncResult: result,
-          blockCharLimit: repoConfig.memoryBlockLimit,
+          blockCharLimit: MEMORY_BLOCK_LIMIT,
           log,
         });
         if (consolidation.consolidated) {
@@ -1366,17 +1367,13 @@ program
       const agentInfo = requireAgent(state, repoName);
       if (!agentInfo) return;
 
-      const repoConfig = config ? getOwnRecordValue(config.repos, repoName) : undefined;
-      const blockCharLimit =
-        repoConfig?.memoryBlockLimit ?? config?.defaults.memoryBlockLimit ?? 5000;
-
       console.log(`Consolidating memory for "${repoName}"...`);
       const result = await consolidateAgentMemory({
         provider,
         agentId: agentInfo.agentId,
         changedFiles: [],
         syncResult: { filesReIndexed: 0, filesRemoved: 0 },
-        blockCharLimit,
+        blockCharLimit: MEMORY_BLOCK_LIMIT,
         log: (line: string) => { console.log(line); },
       });
 

@@ -122,9 +122,15 @@ async function checkDependencies(cwd: string, pkg: PackageJsonShape | null, fs: 
   return { name: "dependencies", status: "pass", message: `${String(depNames.length)} dependencies installed` };
 }
 
+/**
+ * Node major every environment standardizes on (engines, CI, .nvmrc, SEA
+ * packaging). better-sqlite3's addon is ABI-locked to this major.
+ */
+export const MIN_NODE_MAJOR = 22;
+
 export async function runSelfChecks(
   cwd = process.cwd(),
-  minNodeMajor = 18,
+  minNodeMajor = MIN_NODE_MAJOR,
   fs: FileSystemPort = nodeFileSystem,
   runCommand: (cmd: string, args: string[], cwd: string) => string = defaultRunCommand,
 ): Promise<SelfCheckResult[]> {

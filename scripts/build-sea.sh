@@ -11,6 +11,18 @@ cd "${ROOT_DIR}"
 printf 'Building SEA CJS bundles...\n'
 node_modules/.bin/tsx scripts/build.ts --sea
 
+# Stage native artifacts as SEA assets. The runtime extracts them to a cached
+# dir and dlopens them (see src/shell/sqlite-native.ts).
+# ABI note: better_sqlite3.node is ABI-locked to the Node major it was built
+# against, and the SEA binary copies the packaging Node — build/rebuild
+# better-sqlite3 with the same Node major you package with
+# (pnpm rebuild better-sqlite3).
+printf 'Staging native artifacts...\n'
+mkdir -p dist/native
+cp node_modules/better-sqlite3/build/Release/better_sqlite3.node dist/native/better_sqlite3.node
+VEC0_PATH="$(node -e "process.stdout.write(require('sqlite-vec').getLoadablePath())")"
+cp "${VEC0_PATH}" dist/native/vec0
+
 # Find a Node.js binary that supports SEA fuse probing.
 find_node_with_sea_fuse() {
     local candidates=()
@@ -48,7 +60,7 @@ NODE_BIN=""
 NODE_FUSE=""
 if ! find_node_with_sea_fuse; then
     printf 'Error: could not find a Node.js binary with NODE_SEA_FUSE support.\n' >&2
-    printf 'Hint: set NODE_SEA_BIN to a compatible Node (e.g. a Node 24.x binary with SEA fuse).\n' >&2
+    printf 'Hint: set NODE_SEA_BIN to a compatible Node (e.g. a Node 22.x binary with SEA fuse).\n' >&2
     exit 1
 fi
 printf 'Using SEA Node: %s\n' "${NODE_BIN}"
@@ -66,16 +78,20 @@ package_sea() {
     printf 'Creating binary %s...\n' "${binary_name}"
     cp "${NODE_BIN}" "${binary_path}"
 
-    printf 'Stripping macOS signature from %s...\n' "${binary_name}"
-    codesign --remove-signature "${binary_path}"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        printf 'Stripping macOS signature from %s...\n' "${binary_name}"
+        codesign --remove-signature "${binary_path}"
+    fi
 
     printf 'Injecting SEA blob into %s...\n' "${binary_name}"
     node_modules/.bin/postject "${binary_path}" NODE_SEA_BLOB "${blob_file}" \
         --sentinel-fuse "${NODE_FUSE}" \
         --macho-segment-name NODE_SEA
 
-    printf 'Ad-hoc signing %s...\n' "${binary_name}"
-    codesign --sign - "${binary_path}"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        printf 'Ad-hoc signing %s...\n' "${binary_name}"
+        codesign --sign - "${binary_path}"
+    fi
 
     printf 'Done: %s\n' "${binary_path}"
 }

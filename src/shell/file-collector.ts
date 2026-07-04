@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { RepoConfig, FileInfo } from "../core/types.js";
+import { MAX_FILE_SIZE_KB, type RepoConfig, type FileInfo } from "../core/types.js";
 import type { FileSystemPort } from "../ports/filesystem.js";
 import { nodeFileSystem } from "./adapters/node-filesystem.js";
 
@@ -25,7 +25,7 @@ export async function collectFiles(
     const stat = await fs.stat(absPath);
     const sizeKb = stat.size / 1024;
 
-    if (sizeKb <= config.maxFileSizeKb) {
+    if (sizeKb <= MAX_FILE_SIZE_KB) {
       const content = await fs.readFile(absPath, "utf8");
       files.push({ path: relPath, content, sizeKb });
     }

@@ -111,7 +111,7 @@ describe("checkApiConnection (port-injected, stryker)", () => {
     const result = await checkApiConnection(mockProvider, "agent-1");
     expect(result.status).toBe("pass");
     expect(result.name).toBe("API connection");
-    expect(result.message).toContain("Connected");
+    expect(result.message).toContain("readable");
   });
 
   it("returns fail when provider.listPassages rejects", async () => {
