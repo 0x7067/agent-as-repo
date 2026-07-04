@@ -1,7 +1,18 @@
+import { MAX_FILE_SIZE_KB, type RepoConfig } from "./types.js";
+
 export interface FilterOptions {
   extensions: string[];
   ignoreDirs: string[];
   maxFileSizeKb: number;
+}
+
+/** Filter options for a repo: its extensions/ignore dirs + the built-in size cap. */
+export function repoFilterOptions(repo: Pick<RepoConfig, "extensions" | "ignoreDirs">): FilterOptions {
+  return {
+    extensions: repo.extensions,
+    ignoreDirs: repo.ignoreDirs,
+    maxFileSizeKb: MAX_FILE_SIZE_KB,
+  };
 }
 
 export function shouldIncludeFile(

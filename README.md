@@ -45,7 +45,7 @@ pnpm repo-expert mcp-install  # writes the "repo-expert" entry to ~/.claude.json
 | Command | Description |
 |---------|-------------|
 | `init` | Interactive setup: pick model + LLM base URL, scan a repo, generate `config.yaml` |
-| `setup [--repo] [--reindex]` | Create agents from `config.yaml`, load file passages, bootstrap |
+| `setup [--repo] [--reindex] [--no-bootstrap]` | Create agents from `config.yaml`, load file passages, bootstrap |
 | `ask <repo> <question> [--fast] [--fast-model <id>]` | Ask a single agent a question; `--fast` uses `provider.fast_model` (or `--fast-model`) |
 | `ask --all <question>` | Broadcast question to all agents and collect responses |
 | `sync [--repo] [--full]` | Sync file changes to agents via `git diff` |
@@ -68,23 +68,19 @@ pnpm repo-expert mcp-install  # writes the "repo-expert" entry to ~/.claude.json
 
 ## Configuration
 
-Copy `config.example.yaml` to `config.yaml`:
+Copy `config.example.yaml` to `config.yaml`. A complete config is three fields — everything else is optional with sensible defaults:
 
 ```yaml
 provider:
-  model: qwen3-coder:30b                  # chat model id as the endpoint knows it
-  # base_url: http://localhost:11434/v1   # optional; default local Ollama
-  # fallback_models: []                   # optional; tried in order after `model`
-  # fast_model: llama3.2:3b               # optional; smaller model used by `ask --fast`
-  # embedding_model: nomic-embed-text     # optional; embedding model served by the same endpoint
+  model: qwen3-coder:30b
 
 repos:
   my-app:
     path: ~/repos/my-app
     description: "React Native mobile app"
-    extensions: [.ts, .tsx, .js, .json]
-    ignore_dirs: [node_modules, .git, dist]
 ```
+
+Optional provider fields: `base_url` (default: local Ollama), `embedding_model` (default `nomic-embed-text`), `fast_model` (used by `ask --fast`), `fallback_models`. Optional repo fields: `extensions` and `ignore_dirs` (defaults cover common code/doc extensions and junk dirs), `persona`, `base_path` (monorepo subtree), `include_submodules`. A top-level `consolidate_on_sync: true` enables post-sync memory consolidation. Unknown keys are rejected, so typos fail loudly instead of being ignored.
 
 To use a remote endpoint (e.g. OpenRouter) instead of local Ollama, set `base_url` and provide `LLM_API_KEY` in `.env`:
 
@@ -98,7 +94,7 @@ Embeddings for archival search come from the same OpenAI-compatible endpoint (`P
 
 ### Memory consolidation
 
-The agent's `architecture`/`conventions` memory blocks can improve over time instead of staying frozen at bootstrap. Run `repo-expert consolidate [--repo]` for a one-off refresh, or set `defaults.consolidate_on_sync: true` to run it automatically after any `sync` (and `watch`, which calls sync) that touches at least `consolidate_min_files_changed` files. Consolidation runs one restricted LLM turn that may only rewrite the architecture/conventions blocks — the persona block is never touched — and it is non-fatal: if it fails or returns nothing usable, the old blocks are kept and the sync still succeeds.
+The agent's `architecture`/`conventions` memory blocks can improve over time instead of staying frozen at bootstrap. Run `repo-expert consolidate [--repo]` for a one-off refresh, or set `consolidate_on_sync: true` to run it automatically after any `sync` (and `watch`, which calls sync) that touches at least 5 files. Consolidation runs one restricted LLM turn that may only rewrite the architecture/conventions blocks — the persona block is never touched — and it is non-fatal: if it fails or returns nothing usable, the old blocks are kept and the sync still succeeds.
 
 ### Environment variables (`.env`)
 
@@ -122,7 +118,7 @@ Key points:
 - **Functional core, imperative shell** — `src/core/` contains pure functions, `src/shell/` handles all I/O
 - **Provider abstraction** — `AgentProvider` (`src/ports/agent-provider.ts`) and `PassageStore` (`src/ports/passage-store.ts`) interfaces decouple business logic from the store/LLM implementation
 - **Three-tier memory** — core (always in context), archival (vector-searchable source files), recall (conversation history)
-- **Symbol-aware chunking** — `chunking: tree-sitter` (default) chunks TypeScript/JavaScript at function/class boundaries; set `chunking: raw` for legacy ~2KB text splits
+- **Symbol-aware chunking** — TypeScript/JavaScript is chunked at function/class boundaries via tree-sitter; other file types fall back to ~2KB text splits
 - **Incremental sync** — `git diff` detects changes; only affected passages are re-indexed
 
 ## Development

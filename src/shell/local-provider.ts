@@ -102,7 +102,7 @@ export class LocalProvider implements AgentProvider {
       agentId: repoName,
       name: params.name,
       model: params.model,
-      tags: params.tags,
+      tags: ["repo-expert"],
       createdAt: new Date().toISOString(),
     });
 

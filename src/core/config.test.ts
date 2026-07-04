@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { parseConfig, ConfigError, formatConfigError } from "./config.js";
+import {
+  parseConfig,
+  ConfigError,
+  formatConfigError,
+  DEFAULT_EXTENSIONS,
+  DEFAULT_IGNORE_DIRS,
+} from "./config.js";
 
 const MODEL = "qwen3-coder:30b";
 
@@ -11,9 +17,6 @@ const validRaw = {
     "my-app": {
       path: "/home/user/repos/my-app",
       description: "My application",
-      extensions: [".ts", ".tsx"],
-      ignore_dirs: ["node_modules", ".git"],
-      tags: ["frontend"],
     },
   },
 };
@@ -29,61 +32,40 @@ function parseConfigError(raw: unknown): ConfigError {
 }
 
 describe("parseConfig", () => {
-  it("parses a valid config with defaults applied", () => {
+  it("parses a minimal config (model + path + description) with defaults applied", () => {
     const config = parseConfig(validRaw);
     expect(config.provider.model).toBe(MODEL);
     expect(config.provider.baseUrl).toBe("http://localhost:11434/v1");
     expect(config.provider.fallbackModels).toEqual([]);
-    expect(config.repos["my-app"].maxFileSizeKb).toBe(50);
-    expect(config.repos["my-app"].memoryBlockLimit).toBe(5000);
-    expect(config.repos["my-app"].bootstrapOnCreate).toBe(true);
-    expect(config.defaults.askTimeoutMs).toBe(60_000);
+    expect(config.provider.embeddingModel).toBe("nomic-embed-text");
+    expect(config.provider.fastModel).toBeUndefined();
+    expect(config.consolidateOnSync).toBe(false);
+    expect(config.repos["my-app"].path).toBe("/home/user/repos/my-app");
+    expect(config.repos["my-app"].description).toBe("My application");
   });
 
-  it("defaults chunking to 'tree-sitter' when omitted", () => {
+  it("fills extensions and ignore_dirs with the built-in defaults when omitted", () => {
     const config = parseConfig(validRaw);
-    expect(config.defaults.chunking).toBe("tree-sitter");
+    expect(config.repos["my-app"].extensions).toEqual(DEFAULT_EXTENSIONS);
+    expect(config.repos["my-app"].ignoreDirs).toEqual(DEFAULT_IGNORE_DIRS);
+    expect(DEFAULT_EXTENSIONS).toContain(".ts");
+    expect(DEFAULT_IGNORE_DIRS).toContain("node_modules");
   });
 
-  it("accepts chunking: tree-sitter and threads it into defaults", () => {
+  it("uses explicit extensions and ignore_dirs when provided", () => {
     const raw = {
-      provider: { model: MODEL },
-      defaults: { chunking: "tree-sitter" },
+      ...validRaw,
       repos: {
         "my-app": {
-          path: "~/repos/my-app",
-          description: "test",
-          extensions: [".ts"],
-          ignore_dirs: ["node_modules"],
+          ...validRaw.repos["my-app"],
+          extensions: [".ts", ".tsx"],
+          ignore_dirs: ["node_modules", ".git"],
         },
       },
     };
-
     const config = parseConfig(raw);
-    expect(config.defaults.chunking).toBe("tree-sitter");
-  });
-
-  it("accepts explicit 'raw' chunking in defaults", () => {
-    const raw = { ...validRaw, defaults: { chunking: "raw" } };
-    const config = parseConfig(raw);
-    expect(config.defaults.chunking).toBe("raw");
-  });
-
-  it("applies explicit defaults over built-in defaults", () => {
-    const raw = {
-      ...validRaw,
-      defaults: {
-        max_file_size_kb: 100,
-        memory_block_limit: 3000,
-        bootstrap_on_create: false,
-        ask_timeout_ms: 12_345,
-      },
-    };
-    const config = parseConfig(raw);
-    expect(config.repos["my-app"].maxFileSizeKb).toBe(100);
-    expect(config.repos["my-app"].memoryBlockLimit).toBe(3000);
-    expect(config.repos["my-app"].bootstrapOnCreate).toBe(false);
-    expect(config.defaults.askTimeoutMs).toBe(12_345);
+    expect(config.repos["my-app"].extensions).toEqual([".ts", ".tsx"]);
+    expect(config.repos["my-app"].ignoreDirs).toEqual(["node_modules", ".git"]);
   });
 
   it("parses provider base_url and fallback_models", () => {
@@ -112,11 +94,6 @@ describe("parseConfig", () => {
     expect(config.provider.fastModel).toBe("llama3.2:3b");
   });
 
-  it("leaves provider.fastModel undefined when omitted", () => {
-    const config = parseConfig(validRaw);
-    expect(config.provider.fastModel).toBeUndefined();
-  });
-
   it("parses provider.embedding_model when provided", () => {
     const raw = {
       provider: {
@@ -129,67 +106,9 @@ describe("parseConfig", () => {
     expect(config.provider.embeddingModel).toBe("mxbai-embed-large");
   });
 
-  it("defaults provider.embeddingModel to nomic-embed-text when omitted", () => {
-    const config = parseConfig(validRaw);
-    expect(config.provider.embeddingModel).toBe("nomic-embed-text");
-  });
-
-  it("defaults consolidate_on_sync to false and consolidate_min_files_changed to 5", () => {
-    const config = parseConfig(validRaw);
-    expect(config.defaults.consolidateOnSync).toBe(false);
-    expect(config.defaults.consolidateMinFilesChanged).toBe(5);
-  });
-
-  it("applies explicit consolidation defaults", () => {
-    const raw = {
-      ...validRaw,
-      defaults: { consolidate_on_sync: true, consolidate_min_files_changed: 12 },
-    };
-    const config = parseConfig(raw);
-    expect(config.defaults.consolidateOnSync).toBe(true);
-    expect(config.defaults.consolidateMinFilesChanged).toBe(12);
-  });
-
-  it("allows per-repo overrides of defaults", () => {
-    const raw = {
-      ...validRaw,
-      defaults: { max_file_size_kb: 100 },
-      repos: {
-        "my-app": {
-          ...validRaw.repos["my-app"],
-          max_file_size_kb: 200,
-        },
-      },
-    };
-    const config = parseConfig(raw);
-    expect(config.repos["my-app"].maxFileSizeKb).toBe(200);
-  });
-
-  it("throws on missing required fields", () => {
-    expect(() => parseConfig({})).toThrow();
-    expect(() => parseConfig({ provider: {} })).toThrow();
-    expect(() =>
-      parseConfig({
-        provider: { model: "x" },
-        repos: { app: { path: "/x" } },
-      }),
-    ).toThrow();
-  });
-
-  it("defaults tags to empty array when omitted", () => {
-    const raw = {
-      ...validRaw,
-      repos: {
-        "my-app": {
-          path: "/x",
-          description: "app",
-          extensions: [".ts"],
-          ignore_dirs: [".git"],
-        },
-      },
-    };
-    const config = parseConfig(raw);
-    expect(config.repos["my-app"].tags).toEqual([]);
+  it("parses top-level consolidate_on_sync", () => {
+    const config = parseConfig({ ...validRaw, consolidate_on_sync: true });
+    expect(config.consolidateOnSync).toBe(true);
   });
 
   it("includes optional persona when provided", () => {
@@ -204,25 +123,6 @@ describe("parseConfig", () => {
     };
     const config = parseConfig(raw);
     expect(config.repos["my-app"].persona).toBe("I am an expert on my-app.");
-  });
-
-  it("includes optional tools when provided", () => {
-    const raw = {
-      ...validRaw,
-      repos: {
-        "my-app": {
-          ...validRaw.repos["my-app"],
-          tools: ["archival_memory_search"],
-        },
-      },
-    };
-    const config = parseConfig(raw);
-    expect(config.repos["my-app"].tools).toEqual(["archival_memory_search"]);
-  });
-
-  it("leaves tools undefined when omitted", () => {
-    const config = parseConfig(validRaw);
-    expect(config.repos["my-app"].tools).toBeUndefined();
   });
 
   it("includes optional base_path for monorepo support", () => {
@@ -244,77 +144,29 @@ describe("parseConfig", () => {
     expect(config.repos["my-app"].basePath).toBeUndefined();
   });
 
-  it("applies defaults.tools to repos without per-repo tools", () => {
+  it("parses include_submodules", () => {
     const raw = {
       ...validRaw,
-      defaults: { tools: ["archival_memory_search"] },
-    };
-    const config = parseConfig(raw);
-    expect(config.repos["my-app"].tools).toEqual(["archival_memory_search"]);
-  });
-
-  it("per-repo tools override defaults.tools", () => {
-    const raw = {
-      ...validRaw,
-      defaults: { tools: ["archival_memory_search"] },
       repos: {
         "my-app": {
           ...validRaw.repos["my-app"],
-          tools: ["memory_replace"],
+          include_submodules: true,
         },
       },
     };
     const config = parseConfig(raw);
-    expect(config.repos["my-app"].tools).toEqual(["memory_replace"]);
+    expect(config.repos["my-app"].includeSubmodules).toBe(true);
   });
 
-  it("throws ConfigError with formatted messages on schema violations", () => {
-    const configErr = parseConfigError({
-      provider: {},
-      repos: { app: { path: 123, extensions: "not-array" } },
-    });
-    expect(configErr.issues.length).toBeGreaterThan(0);
-    expect(configErr.issues.some((i) => i.includes("provider.model"))).toBe(true);
-    expect(configErr.issues.some((i) => i.includes("repos.app.path"))).toBe(true);
-  });
-
-  it("throws ConfigError when extensions don't start with dot", () => {
-    const configErr = parseConfigError({
-      ...validRaw,
-      repos: {
-        "my-app": {
-          ...validRaw.repos["my-app"],
-          extensions: [".ts", "js", ".tsx"],
-        },
-      },
-    });
-    expect(configErr.issues.some((i) => i.includes('"js"'))).toBe(true);
-    expect(configErr.issues.some((i) => i.includes("start with"))).toBe(true);
-  });
-
-  it("throws ConfigError when no repos defined", () => {
-    const configErr = parseConfigError({
-      provider: { model: "x" },
-      repos: {},
-    });
-    expect(configErr.issues.some((i) => i.includes("at least one repo"))).toBe(true);
-  });
-
-  it("re-throws non-ZodError errors as-is (not wrapped in ConfigError)", () => {
-    expect(() => parseConfig(null)).toThrow(ConfigError);
-  });
-
-  it("throws ConfigError when ignore_dirs contain path separators", () => {
-    const configErr = parseConfigError({
-      ...validRaw,
-      repos: {
-        "my-app": {
-          ...validRaw.repos["my-app"],
-          ignore_dirs: ["node_modules", "src/dist"],
-        },
-      },
-    });
-    expect(configErr.issues.some((i) => i.includes("src/dist"))).toBe(true);
+  it("throws on missing required fields", () => {
+    expect(() => parseConfig({})).toThrow();
+    expect(() => parseConfig({ provider: {} })).toThrow();
+    expect(() =>
+      parseConfig({
+        provider: { model: "x" },
+        repos: { app: { path: "/x" } },
+      }),
+    ).toThrow();
   });
 
   it("throws ConfigError when provider is missing", () => {
@@ -322,62 +174,70 @@ describe("parseConfig", () => {
     expect(configErr.issues.some((i) => i.includes("provider"))).toBe(true);
   });
 
-});
-
-describe("include_submodules config field", () => {
-  it("defaults to false when omitted", () => {
-    const config = parseConfig(validRaw);
-    expect(config.repos["my-app"].includeSubmodules).toBe(false);
+  it("rejects unknown provider keys (typo protection)", () => {
+    const configErr = parseConfigError({
+      provider: { model: MODEL, modle: "oops" },
+      repos: validRaw.repos,
+    });
+    expect(configErr.issues.some((i) => i.includes("modle"))).toBe(true);
   });
 
-  it("parses include_submodules: true", () => {
-    const raw = {
+  it("rejects unknown repo keys (typo protection)", () => {
+    const configErr = parseConfigError({
       ...validRaw,
       repos: {
-        "my-app": { ...validRaw.repos["my-app"], include_submodules: true },
+        "my-app": {
+          ...validRaw.repos["my-app"],
+          ignore_dir: ["node_modules"],
+        },
       },
-    };
-    const config = parseConfig(raw);
-    expect(config.repos["my-app"].includeSubmodules).toBe(true);
+    });
+    expect(configErr.issues.some((i) => i.includes("ignore_dir"))).toBe(true);
+  });
+
+  it("rejects unknown top-level keys (typo protection)", () => {
+    const configErr = parseConfigError({ ...validRaw, defaults: { chunking: "raw" } });
+    expect(configErr.issues.some((i) => i.includes("defaults"))).toBe(true);
+  });
+
+  it("throws ConfigError when repos is empty", () => {
+    const configErr = parseConfigError({ provider: { model: MODEL }, repos: {} });
+    expect(configErr.issues.some((i) => i.includes("at least one repo"))).toBe(true);
+  });
+
+  it("rejects extensions without a leading dot", () => {
+    const configErr = parseConfigError({
+      ...validRaw,
+      repos: {
+        "my-app": {
+          ...validRaw.repos["my-app"],
+          extensions: ["ts"],
+        },
+      },
+    });
+    expect(configErr.issues.some((i) => i.includes('"ts" should start with "."'))).toBe(true);
+  });
+
+  it("rejects ignore_dirs entries that look like paths", () => {
+    const configErr = parseConfigError({
+      ...validRaw,
+      repos: {
+        "my-app": {
+          ...validRaw.repos["my-app"],
+          ignore_dirs: ["src/dist"],
+        },
+      },
+    });
+    expect(configErr.issues.some((i) => i.includes("src/dist"))).toBe(true);
   });
 });
 
-describe("formatConfigError", () => {
-  it("formats a ConfigError into readable lines", () => {
-    const err = new ConfigError(["provider.model: Required", "repos.app.path: Expected string"]);
-    const output = formatConfigError(err);
-    expect(output).toContain("Config validation failed");
-    expect(output).toContain("provider.model: Required");
-    expect(output).toContain("repos.app.path: Expected string");
-  });
-
-  it("separates issues with newlines and prefixes with dash", () => {
-    const err = new ConfigError(["issue1", "issue2"]);
-    const output = formatConfigError(err);
-    expect(output).toContain("  - issue1\n  - issue2");
-  });
-});
-
-describe("ConfigError", () => {
-  it("has name set to ConfigError", () => {
-    const err = new ConfigError(["test"]);
-    expect(err.name).toBe("ConfigError");
-  });
-
-  it("stores issues array", () => {
-    const err = new ConfigError(["a", "b"]);
-    expect(err.issues).toEqual(["a", "b"]);
-  });
-
-  it("message contains each issue prefixed with dash", () => {
-    const err = new ConfigError(["foo", "bar"]);
-    expect(err.message).toContain("  - foo");
-    expect(err.message).toContain("  - bar");
-    expect(err.message).toContain("\n");
-  });
-
-  it("message joins issues with newline separator (not empty string)", () => {
-    const err = new ConfigError(["issue-one", "issue-two"]);
-    expect(err.message).toContain("  - issue-one\n  - issue-two");
+describe("ConfigError formatting", () => {
+  it("formats issues as a bulleted list", () => {
+    const err = new ConfigError(["first issue", "second issue"]);
+    expect(err.message).toContain("Config validation failed:");
+    expect(err.message).toContain("  - first issue");
+    expect(err.message).toContain("  - second issue");
+    expect(formatConfigError(err)).toBe(err.message);
   });
 });

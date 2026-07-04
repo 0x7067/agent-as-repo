@@ -16,11 +16,8 @@ export async function createRepoAgent(
     name: `repo-expert-${repoName}`,
     repoName,
     description: repoConfig.description,
-    tags: ["repo-expert", ...repoConfig.tags],
     model: modelOptions.model,
-    memoryBlockLimit: repoConfig.memoryBlockLimit,
     ...(repoConfig.persona === undefined ? {} : { persona: repoConfig.persona }),
-    ...(repoConfig.tools === undefined ? {} : { tools: repoConfig.tools }),
   };
   const { agentId } = await provider.createAgent(createAgentParams);
 

@@ -8,6 +8,12 @@ export interface SubmoduleInfo {
   initialized: boolean;
 }
 
+/** Files larger than this are never indexed. */
+export const MAX_FILE_SIZE_KB = 50;
+
+/** Max characters per core memory block. */
+export const MEMORY_BLOCK_LIMIT = 5000;
+
 /** Validated configuration for a single repo. */
 export interface RepoConfig {
   path: string;
@@ -15,12 +21,7 @@ export interface RepoConfig {
   description: string;
   extensions: string[];
   ignoreDirs: string[];
-  tags: string[];
   persona?: string;
-  tools?: string[];
-  maxFileSizeKb: number;
-  memoryBlockLimit: number;
-  bootstrapOnCreate: boolean;
   /** When true, files inside git submodules are indexed alongside the parent repo. */
   includeSubmodules?: boolean;
 }
@@ -41,17 +42,8 @@ export interface ProviderConfig {
 /** Top-level validated config. */
 export interface Config {
   provider: ProviderConfig;
-  defaults: {
-    maxFileSizeKb: number;
-    memoryBlockLimit: number;
-    bootstrapOnCreate: boolean;
-    chunking: "raw" | "tree-sitter";
-    askTimeoutMs?: number;
-    /** When true, a successful sync triggers synchronous memory consolidation. */
-    consolidateOnSync: boolean;
-    /** Minimum files touched (re-indexed + removed) before a sync consolidates. */
-    consolidateMinFilesChanged: number;
-  };
+  /** When true, a successful sync triggers synchronous memory consolidation. */
+  consolidateOnSync: boolean;
   repos: Record<string, RepoConfig>;
 }
 

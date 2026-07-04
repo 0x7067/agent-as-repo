@@ -150,7 +150,7 @@ pnpm test   # architecture.test.ts catches violations at the file content level
  └──────────────────────────────────────────────────────────────────┘
 ```
 
-The chunk step supports two strategies, selected via `config.defaults.chunking`: **`tree-sitter`** (default, symbol-boundary chunking for `.ts`/`.tsx`/`.js`/`.jsx`) and **`raw`** (~2KB text splits on paragraph boundaries). Non-JS/TS file types automatically fall back to raw chunking when using tree-sitter. Implementation lives in `src/core/tree-sitter-chunker.ts`.
+The chunk step uses **tree-sitter** symbol-boundary chunking for `.ts`/`.tsx`/`.js`/`.jsx`; other file types automatically fall back to ~2KB raw text splits on paragraph boundaries. Implementation lives in `src/core/tree-sitter-chunker.ts`.
 
 ---
 

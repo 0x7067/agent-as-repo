@@ -67,23 +67,20 @@ export interface ConsolidationDecisionInput {
   filesRemoved: number;
 }
 
-/** Config thresholds that gate post-sync consolidation. */
-export interface ConsolidationThresholds {
-  consolidateOnSync: boolean;
-  consolidateMinFilesChanged: number;
-}
+/** Minimum files touched (re-indexed + removed) before a sync consolidates. */
+export const CONSOLIDATE_MIN_FILES_CHANGED = 5;
 
 /**
  * Decide whether a completed sync should trigger memory consolidation.
  *
  * Stateless: gates on the opt-in flag and on the number of files the sync
- * actually touched (re-indexed + removed) meeting the configured minimum.
+ * actually touched (re-indexed + removed) meeting the built-in minimum.
  */
 export function shouldConsolidate(
   sync: ConsolidationDecisionInput,
-  thresholds: ConsolidationThresholds,
+  consolidateOnSync: boolean,
 ): boolean {
-  if (!thresholds.consolidateOnSync) return false;
+  if (!consolidateOnSync) return false;
   const filesChanged = sync.filesReIndexed + sync.filesRemoved;
-  return filesChanged >= thresholds.consolidateMinFilesChanged;
+  return filesChanged >= CONSOLIDATE_MIN_FILES_CHANGED;
 }

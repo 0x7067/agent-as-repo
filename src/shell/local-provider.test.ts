@@ -61,9 +61,7 @@ describe("LocalProvider", () => {
         name: "My Repo",
         repoName: "myrepo",
         description: "A test repo",
-        tags: ["test"],
         model: "openai/gpt-4o",
-        memoryBlockLimit: 5000,
       };
 
       const result = await provider.createAgent(params);
@@ -76,7 +74,7 @@ describe("LocalProvider", () => {
           agentId: "myrepo",
           name: "My Repo",
           model: "openai/gpt-4o",
-          tags: ["test"],
+          tags: ["repo-expert"],
         }),
       );
 
@@ -94,9 +92,7 @@ describe("LocalProvider", () => {
         name: "My Repo",
         repoName: "myrepo",
         description: "A test repo",
-        tags: ["test"],
         model: "openai/gpt-4o",
-        memoryBlockLimit: 5000,
       };
 
       await provider.createAgent(params);

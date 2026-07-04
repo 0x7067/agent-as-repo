@@ -98,7 +98,6 @@ async function writeConfig(cwd: string, repoName: string, repoPath: string): Pro
     "    description: test repo",
     "    extensions: [.ts]",
     "    ignore_dirs: [node_modules, .git]",
-    "    bootstrap_on_create: false",
   ].join("\n");
   await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
 }
@@ -117,7 +116,6 @@ async function writeWarnDoctorWorkspace(cwd: string): Promise<string> {
     "    description: test repo",
     "    extensions: [.ts]",
     "    ignore_dirs: [node_modules, .git]",
-    "    bootstrap_on_create: false",
   ].join("\n");
   await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
   return repoDir;
@@ -135,7 +133,6 @@ async function writeAskWorkspace(cwd: string, providerLines: string[]): Promise<
     "    description: test repo",
     "    extensions: [.ts]",
     "    ignore_dirs: [node_modules, .git]",
-    "    bootstrap_on_create: false",
   ].join("\n");
   await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
   const state = {
@@ -222,6 +219,7 @@ describe("cli contract", () => {
       --config <path> Config file path (default: "config.yaml")
       --resume Resume incomplete setup work (default behavior)
       --reindex Force full re-index for existing agents
+      --no-bootstrap Skip the bootstrap analysis stage
       --json Output setup results as JSON
       --load-retries <n> Retries for passage loading (default: "2")
       --bootstrap-retries <n> Retries for bootstrap stage (default: "2")
@@ -773,7 +771,7 @@ describe("cli contract", () => {
     await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
 
     const result = runCli(
-      ["setup", "--config", "config.yaml", "--reindex", "--json"],
+      ["setup", "--config", "config.yaml", "--reindex", "--json", "--no-bootstrap"],
       cwd,
       { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" },
     );
@@ -792,7 +790,7 @@ describe("cli contract", () => {
     await writeConfig(cwd, "my-app", repoDir);
 
     const first = runCli(
-      ["setup", "--config", "config.yaml", "--json", "--load-retries", "0", "--load-timeout-ms", "1"],
+      ["setup", "--config", "config.yaml", "--json", "--load-retries", "0", "--load-timeout-ms", "1", "--no-bootstrap"],
       cwd,
       {
         REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
@@ -808,7 +806,7 @@ describe("cli contract", () => {
     expect(state.agents["my-app"]).toBeDefined();
 
     const second = runCli(
-      ["setup", "--config", "config.yaml", "--resume", "--json"],
+      ["setup", "--config", "config.yaml", "--resume", "--json", "--no-bootstrap"],
       cwd,
       { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" },
     );
@@ -828,7 +826,7 @@ describe("cli contract", () => {
     }
     await writeConfig(cwd, "my-app", repoDir);
 
-    const child = spawn(tsxBinPath(), [cliEntryPath, "setup", "--config", "config.yaml"], {
+    const child = spawn(tsxBinPath(), [cliEntryPath, "setup", "--config", "config.yaml", "--no-bootstrap"], {
       cwd,
       env: {
         ...process.env,
@@ -871,7 +869,7 @@ describe("cli contract", () => {
     await writeConfig(cwd, "my-app", repoDir);
 
     const result = runCli(
-      ["setup", "--config", "config.yaml", "--json"],
+      ["setup", "--config", "config.yaml", "--json", "--no-bootstrap"],
       cwd,
       { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" },
     );
