@@ -426,4 +426,50 @@ describe("VikingProvider", () => {
       expect(result).toBe("Updated block 'architecture'");
     });
   });
+
+  describe("consolidateMemory", () => {
+    it("exposes only the memory_replace tool and uses the consolidation prompt", async () => {
+      await provider.consolidateMemory("myrepo", "consolidate please");
+
+      const callArgs = vi.mocked(toolCallingLoop).mock.calls[0][0];
+      expect(callArgs.userMessage).toBe("consolidate please");
+      expect(callArgs.tools).toHaveLength(1);
+      expect(callArgs.tools[0]?.function.name).toBe("memory_replace");
+      expect(callArgs.toolHandlers["archival_memory_search"]).toBeUndefined();
+      expect(callArgs.maxSteps).toBe(2);
+    });
+
+    it("writes architecture/conventions blocks within the limit", async () => {
+      await provider.consolidateMemory("myrepo", "prompt", { blockCharLimit: 100 });
+      const handler = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers["memory_replace"];
+
+      vi.clearAllMocks();
+      const result = await handler({ label: "conventions", value: "new conv" });
+
+      expect(mockBlockStorage.set).toHaveBeenCalledWith("myrepo", "conventions", "new conv");
+      expect(result).toBe("Updated block 'conventions'");
+    });
+
+    it("rejects persona writes without touching block storage", async () => {
+      await provider.consolidateMemory("myrepo", "prompt");
+      const handler = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers["memory_replace"];
+
+      vi.clearAllMocks();
+      const result = await handler({ label: "persona", value: "hacked" });
+
+      expect(mockBlockStorage.set).not.toHaveBeenCalled();
+      expect(result).toContain("cannot be modified");
+    });
+
+    it("rejects values over the block char limit and keeps the old block", async () => {
+      await provider.consolidateMemory("myrepo", "prompt", { blockCharLimit: 10 });
+      const handler = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers["memory_replace"];
+
+      vi.clearAllMocks();
+      const result = await handler({ label: "architecture", value: "x".repeat(50) });
+
+      expect(mockBlockStorage.set).not.toHaveBeenCalled();
+      expect(result).toContain("over the 10-char limit");
+    });
+  });
 });

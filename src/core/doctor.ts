@@ -27,3 +27,14 @@ export function formatDoctorReport(results: CheckResult[]): string {
 
   return lines.join("\n");
 }
+
+/**
+ * Decide the process exit code for a doctor run. Failures always yield 1.
+ * When `strict` is set, warnings are promoted to failures so CI/scripted runs
+ * can demand a fully healthy stack.
+ */
+export function computeDoctorExitCode(results: CheckResult[], strict: boolean): number {
+  const hasFailures = results.some((r) => r.status === "fail");
+  const hasWarnings = results.some((r) => r.status === "warn");
+  return hasFailures || (strict && hasWarnings) ? 1 : 0;
+}

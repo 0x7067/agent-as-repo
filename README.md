@@ -47,12 +47,13 @@ pnpm repo-expert mcp-install  # writes the "repo-expert" entry to ~/.claude.json
 |---------|-------------|
 | `init` | Interactive setup: pick model + LLM base URL, scan a repo, generate `config.yaml` |
 | `setup [--repo] [--reindex]` | Create agents from `config.yaml`, load file passages, bootstrap |
-| `ask <repo> <question>` | Ask a single agent a question |
+| `ask <repo> <question> [--fast] [--fast-model <id>]` | Ask a single agent a question; `--fast` uses `provider.fast_model` (or `--fast-model`) |
 | `ask --all <question>` | Broadcast question to all agents and collect responses |
 | `sync [--repo] [--full]` | Sync file changes to agents via `git diff` |
 | `reconcile [--repo] [--fix]` | Compare local passage state vs the provider, detect and fix drift |
 | `list [--json] [--live]` | List all agents with passage counts |
 | `status [--repo]` | Show agent memory stats and health |
+| `consolidate [--repo]` | Rewrite the architecture/conventions memory blocks via the LLM (manual run; also runs post-sync when `consolidate_on_sync` is enabled) |
 | `export [--repo]` | Export agent memory to markdown |
 | `onboard <repo>` | Guided codebase walkthrough for new developers |
 | `destroy [--repo] [--force] [--dry-run]` | Delete agents |
@@ -62,7 +63,7 @@ pnpm repo-expert mcp-install  # writes the "repo-expert" entry to ~/.claude.json
 | `mcp-install [--global\|--local]` | Write MCP server entry to Claude Code config |
 | `mcp-check [--json]` | Validate existing MCP server entry |
 | `config lint [--json]` | Validate `config.yaml` structure and semantics |
-| `doctor [--fix] [--json]` | Check config, viking/LLM endpoint reachability, repo paths, git, state consistency |
+| `doctor [--fix] [--json] [--strict]` | Check config, viking/LLM endpoint reachability, repo paths, git, state consistency; `--strict` promotes warnings to failures (non-zero exit) |
 | `self-check [--json]` | Check local runtime/toolchain health (Node, pnpm, dependencies) |
 | `completion <shell>` | Print shell completion script (bash, zsh, fish) |
 
@@ -76,6 +77,7 @@ provider:
   # base_url: http://localhost:11434/v1   # optional; default local Ollama
   # fallback_models: []                   # optional; tried in order after `model`
   # viking_url: http://localhost:1933     # optional; default local OpenViking
+  # fast_model: llama3.2:3b               # optional; smaller model used by `ask --fast`
 
 repos:
   my-app:
@@ -94,6 +96,10 @@ provider:
 ```
 
 OpenViking owns embeddings for archival search — configure the embedding backend in `~/.openviking/ov.conf` (typically delegating to Ollama, e.g. `nomic-embed-text`), not in `config.yaml`.
+
+### Memory consolidation
+
+The agent's `architecture`/`conventions` memory blocks can improve over time instead of staying frozen at bootstrap. Run `repo-expert consolidate [--repo]` for a one-off refresh, or set `defaults.consolidate_on_sync: true` to run it automatically after any `sync` (and `watch`, which calls sync) that touches at least `consolidate_min_files_changed` files. Consolidation runs one restricted LLM turn that may only rewrite the architecture/conventions blocks — the persona block is never touched — and it is non-fatal: if it fails or returns nothing usable, the old blocks are kept and the sync still succeeds.
 
 ### Environment variables (`.env`)
 

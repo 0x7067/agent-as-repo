@@ -9,6 +9,7 @@ provider:
   # base_url: http://localhost:11434/v1   # OpenAI-compatible LLM endpoint. Default: local Ollama.
   # fallback_models: []                   # Tried in order if `model` fails (e.g. rate limit, timeout)
   # viking_url: http://localhost:1933     # OpenViking server. Default: local OpenViking.
+  # fast_model: llama3.2:3b               # Smaller/faster model used by `ask --fast` (e.g. an Ollama small-instruct model)
 
 # To point at a remote/cloud endpoint instead of local Ollama (e.g. OpenRouter):
 #
@@ -31,6 +32,8 @@ defaults:
   # ask_timeout_ms: 60000      # Default timeout for single-agent ask requests
   chunking: tree-sitter       # Default: symbol-boundary chunking for .ts/.tsx/.js/.jsx
                                # Use "raw" for ~2KB text splits; other file types fall back to raw
+  # consolidate_on_sync: false        # Opt-in: refresh architecture/conventions blocks via the LLM after a sync
+  # consolidate_min_files_changed: 5  # Only consolidate when a sync touches at least this many files
   # tools:                    # Additional tool names for all agents (per-repo overrides)
   #   - archival_memory_search
 

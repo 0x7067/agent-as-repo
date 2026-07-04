@@ -103,6 +103,58 @@ async function writeConfig(cwd: string, repoName: string, repoPath: string): Pro
   await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
 }
 
+async function writeWarnDoctorWorkspace(cwd: string): Promise<string> {
+  const repoDir = path.join(cwd, "repo");
+  await mkdirWorkspaceDir(repoDir, { recursive: true });
+  // Unreachable LLM base_url forces checkLlmEndpoint into a warning (never a failure).
+  const config = [
+    "provider:",
+    "  model: qwen3-coder:30b",
+    "  base_url: http://127.0.0.1:1",
+    "repos:",
+    "  my-app:",
+    `    path: ${repoDir}`,
+    "    description: test repo",
+    "    extensions: [.ts]",
+    "    ignore_dirs: [node_modules, .git]",
+    "    bootstrap_on_create: false",
+  ].join("\n");
+  await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
+  return repoDir;
+}
+
+async function writeAskWorkspace(cwd: string, providerLines: string[]): Promise<void> {
+  const repoDir = path.join(cwd, "repo");
+  await mkdirWorkspaceDir(repoDir, { recursive: true });
+  const config = [
+    "provider:",
+    ...providerLines,
+    "repos:",
+    "  my-app:",
+    `    path: ${repoDir}`,
+    "    description: test repo",
+    "    extensions: [.ts]",
+    "    ignore_dirs: [node_modules, .git]",
+    "    bootstrap_on_create: false",
+  ].join("\n");
+  await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
+  const state = {
+    stateVersion: 2,
+    agents: {
+      "my-app": {
+        agentId: "agent-1",
+        repoName: "my-app",
+        passages: {},
+        lastBootstrap: null,
+        lastSyncCommit: null,
+        lastSyncAt: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    },
+  };
+  await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+}
+
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
@@ -134,6 +186,7 @@ describe("cli contract", () => {
       sync [options] Sync file changes to agents
       list [options] List all agents
       status [options] Show agent memory stats and health
+      consolidate [options] Consolidate architecture/conventions memory blocks via the LLM
       export [options] Export agent memory to markdown
       onboard <repo> Guided codebase walkthrough for new developers
       destroy [options] Delete agents
@@ -461,6 +514,60 @@ describe("cli contract", () => {
     expect(payload[0].repoName).toBe("my-app");
   });
 
+  it("runs the consolidate command against a repo agent", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-consolidate-");
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["consolidate", "--repo", "my-app"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Consolidating memory for "my-app"');
+    expect(result.stdout).toContain("Done.");
+  });
+
+  it("consolidate reports a skip when the provider fails, without erroring", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-consolidate-fail-");
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["consolidate", "--repo", "my-app"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_FAIL_CONSOLIDATE_ONCE: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Skipped");
+  });
+
   it("supports doctor --fix", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-doctor-fix-");
     await writeWorkspaceFile(path.join(cwd, "config.example.yaml"), "provider:\n  model: qwen3-coder:30b\nrepos: {}\n", "utf8");
@@ -474,6 +581,77 @@ describe("cli contract", () => {
     await expect(fs.access(path.join(cwd, ".env"))).resolves.toBeUndefined();
     await expect(fs.access(path.join(cwd, "config.yaml"))).resolves.toBeUndefined();
     await expect(fs.access(path.join(cwd, ".repo-expert-state.json"))).resolves.toBeUndefined();
+  });
+
+  it("doctor exits 0 on warnings without --strict", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-doctor-warn-");
+    await writeWarnDoctorWorkspace(cwd);
+
+    const result = runCli(["doctor"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("WARN");
+  });
+
+  it("doctor exits non-zero on warnings with --strict", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-doctor-strict-");
+    await writeWarnDoctorWorkspace(cwd);
+
+    const result = runCli(["doctor", "--strict"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("WARN");
+  });
+
+  it("errors when ask --fast has no model source", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-ask-fast-error-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+
+    const result = runCli(["ask", "my-app", "How does auth work?", "--fast"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("--fast requires provider.fast_model in config.yaml or --fast-model");
+  });
+
+  it("uses provider.fast_model from config for ask --fast", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-ask-fast-config-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b", "  fast_model: llama3.2:3b"]);
+
+    const result = runCli(["ask", "my-app", "q", "--fast"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_ECHO_MODEL: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("model=llama3.2:3b");
+  });
+
+  it("prefers --fast-model flag over provider.fast_model config", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-ask-fast-precedence-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b", "  fast_model: config-model"]);
+
+    const result = runCli(["ask", "my-app", "q", "--fast", "--fast-model", "flag-model"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_ECHO_MODEL: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("model=flag-model");
+  });
+
+  it("does not apply a fast model when --fast is omitted", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-ask-no-fast-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b", "  fast_model: config-model"]);
+
+    const result = runCli(["ask", "my-app", "q"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_ECHO_MODEL: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("model=default");
   });
 
   it("supports self-check --json", async () => {

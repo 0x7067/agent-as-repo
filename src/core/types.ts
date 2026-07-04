@@ -34,6 +34,8 @@ export interface ProviderConfig {
   fallbackModels: string[];
   /** OpenViking storage/retrieval base URL. */
   vikingUrl: string;
+  /** Smaller/faster chat model used when `ask --fast` is requested. No default. */
+  fastModel?: string;
 }
 
 /** Top-level validated config. */
@@ -45,6 +47,10 @@ export interface Config {
     bootstrapOnCreate: boolean;
     chunking: "raw" | "tree-sitter";
     askTimeoutMs?: number;
+    /** When true, a successful sync triggers synchronous memory consolidation. */
+    consolidateOnSync: boolean;
+    /** Minimum files touched (re-indexed + removed) before a sync consolidates. */
+    consolidateMinFilesChanged: number;
   };
   repos: Record<string, RepoConfig>;
 }

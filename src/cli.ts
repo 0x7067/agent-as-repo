@@ -11,7 +11,7 @@ import { runInit } from "./shell/init.js";
 import { runAllChecks, runDoctorFixes } from "./shell/doctor.js";
 import { formatSelfChecks, runSelfChecks } from "./shell/self-check.js";
 import { completionFileName, generateCompletionScript, type CompletionShell } from "./core/completion.js";
-import { formatDoctorReport } from "./core/doctor.js";
+import { computeDoctorExitCode, formatDoctorReport } from "./core/doctor.js";
 import { ConfigError, formatConfigError } from "./core/config.js";
 import { collectFiles } from "./shell/file-collector.js";
 import { StateFileError, loadState, saveState } from "./shell/state-store.js";
@@ -29,6 +29,8 @@ import { partitionDiffPaths } from "./core/submodule.js";
 import { listSubmodules, expandSubmoduleFiles } from "./shell/submodule-collector.js";
 import { addAgentToState, removeAgentFromState, updateAgentField, updatePassageMap } from "./core/state.js";
 import { syncRepo } from "./shell/sync.js";
+import { consolidateAgentMemory } from "./shell/consolidate.js";
+import { shouldConsolidate } from "./core/consolidate.js";
 import { resolveTreeSitterWasmPaths } from "./shell/tree-sitter-paths.js";
 import { getAgentStatus, getAgentStatusData } from "./shell/status.js";
 import { exportAgent } from "./shell/export.js";
@@ -72,6 +74,7 @@ interface DoctorOpts {
   config: string;
   json?: boolean;
   fix?: boolean;
+  strict?: boolean;
 }
 
 interface SelfCheckOpts {
@@ -100,6 +103,11 @@ interface SyncOpts {
 interface RepoOpts {
   repo?: string;
   json?: boolean;
+}
+
+interface ConsolidateCliOpts {
+  repo?: string;
+  config: string;
 }
 
 interface DestroyOpts {
@@ -257,7 +265,7 @@ class FakeProvider implements AgentProvider {
     return Promise.resolve({ value, limit });
   }
 
-  async sendMessage(_agentId: string, _content: string, _options?: SendMessageOptions): Promise<string> {
+  async sendMessage(_agentId: string, _content: string, options?: SendMessageOptions): Promise<string> {
     const delayMs = Number.parseInt(process.env["REPO_EXPERT_TEST_DELAY_BOOTSTRAP_MS"] ?? "0", 10);
     if (!Number.isNaN(delayMs) && delayMs > 0) {
       await delay(delayMs);
@@ -266,7 +274,19 @@ class FakeProvider implements AgentProvider {
       process.env["REPO_EXPERT_TEST_FAIL_BOOTSTRAP_ONCE"] = "0";
       throw new Error("simulated bootstrap failure");
     }
+    if (process.env["REPO_EXPERT_TEST_ECHO_MODEL"] === "1") {
+      return `model=${options?.overrideModel ?? "default"}`;
+    }
     return "ok";
+  }
+
+  async consolidateMemory(agentId: string, _prompt: string, _options?: unknown): Promise<void> {
+    if (process.env["REPO_EXPERT_TEST_FAIL_CONSOLIDATE_ONCE"] === "1") {
+      process.env["REPO_EXPERT_TEST_FAIL_CONSOLIDATE_ONCE"] = "0";
+      throw new Error("simulated consolidation failure");
+    }
+    await this.updateBlock(agentId, "architecture", "consolidated architecture");
+    await this.updateBlock(agentId, "conventions", "consolidated conventions");
   }
 }
 
@@ -576,6 +596,7 @@ const ASK_DEFAULT_TIMEOUT_MS = 60_000;
 
 async function loadAskConfigDefaults(configPath: string | undefined): Promise<{
   askTimeoutMs: number;
+  fastModel?: string;
 }> {
   const defaults = { askTimeoutMs: ASK_DEFAULT_TIMEOUT_MS };
 
@@ -592,6 +613,7 @@ async function loadAskConfigDefaults(configPath: string | undefined): Promise<{
   const config = await loadConfigSafe(resolvedPath);
   return {
     askTimeoutMs: config.defaults.askTimeoutMs ?? defaults.askTimeoutMs,
+    ...(config.provider.fastModel === undefined ? {} : { fastModel: config.provider.fastModel }),
   };
 }
 
@@ -611,6 +633,85 @@ async function askAgent(
     settings.askTimeoutMs,
     (signal) => provider.sendMessage(agent.agentId, question, { ...sendOptions, signal }),
   );
+}
+
+async function buildAskSettings(opts: AskOpts): Promise<AskRuntimeSettings> {
+  const configDefaults = await loadAskConfigDefaults(opts.config);
+  const fastModel = opts.fastModel ?? configDefaults.fastModel;
+  const maxSteps = parseOptionalMaxSteps(opts.maxSteps);
+  if (opts.fast && fastModel === undefined) {
+    throw new CliUserError("--fast requires provider.fast_model in config.yaml or --fast-model");
+  }
+  return {
+    askTimeoutMs: parseOptionalPositiveInt(opts.askTimeoutMs, configDefaults.askTimeoutMs),
+    useFast: Boolean(opts.fast),
+    ...(fastModel === undefined ? {} : { fastModel }),
+    ...(maxSteps === undefined ? {} : { maxSteps }),
+  };
+}
+
+async function runBroadcastAsk(repo: string | undefined, opts: AskOpts): Promise<void> {
+  // When --all is used, the first positional arg is the question
+  const actualQuestion = repo;
+  if (!actualQuestion) {
+    console.error("Usage: repo-expert ask --all <question>");
+    process.exitCode = 1;
+    return;
+  }
+
+  const state = await loadState(STATE_FILE);
+  const entries = Object.entries(state.agents);
+  if (entries.length === 0) {
+    console.error('No agents found. Run "repo-expert setup" to create them.');
+    process.exitCode = 1;
+    return;
+  }
+
+  const askSettings = await buildAskSettings(opts);
+  const askAllConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
+  const provider = createProvider(askAllConfig);
+  const agents = entries.map(([repoName, agent]) => ({ repoName, agentId: agent.agentId }));
+
+  console.log(`Broadcasting to ${String(agents.length)} agents...`);
+  const results = await broadcastAsk(provider, agents, actualQuestion, {
+    timeoutMs: parseIntOrDefault(opts.timeout, BROADCAST_ASK_DEFAULT_TIMEOUT_MS),
+    ...(askSettings.useFast && askSettings.fastModel !== undefined ? { overrideModel: askSettings.fastModel } : {}),
+  });
+
+  for (const result of results) {
+    console.log(`\n--- ${result.repoName} ---`);
+    if (result.error) {
+      console.error(`  Error: ${result.error}`);
+    } else {
+      console.log(result.response);
+    }
+  }
+}
+
+async function runSingleAsk(repo: string | undefined, question: string | undefined, opts: AskOpts): Promise<void> {
+  if (!repo || !question) {
+    console.error("Usage: repo-expert ask <repo> <question>");
+    console.error("       repo-expert ask --all <question>");
+    process.exitCode = 1;
+    return;
+  }
+
+  const state = await loadState(STATE_FILE);
+  const agentInfo = requireAgent(state, repo);
+  if (!agentInfo) return;
+
+  const askConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
+  const provider = createProviderForCommands(askConfig);
+  const askSettings = await buildAskSettings(opts);
+  const stop = startSpinner(`Asking ${repo}...`);
+  try {
+    const answer = await askAgent(provider, agentInfo, question, askSettings);
+    stop();
+    console.log(answer);
+  } catch (error) {
+    stop();
+    throw error;
+  }
 }
 
 function startSpinner(label: string): () => void {
@@ -677,6 +778,7 @@ program
   .option("--config <path>", "Config file path", "config.yaml")
   .option("--json", "Output checks as JSON")
   .option("--fix", "Apply safe automatic remediations before checks")
+  .option("--strict", "Promote warnings to failures (non-zero exit)")
   .action(async (opts: DoctorOpts) => {
     const configPath = path.resolve(opts.config);
     let fixed: Awaited<ReturnType<typeof runDoctorFixes>> | null = null;
@@ -701,8 +803,8 @@ program
     } else {
       console.log(formatDoctorReport(results));
     }
-    const hasFailures = results.some((r) => r.status === "fail");
-    if (hasFailures) process.exitCode = 1;
+    const exitCode = computeDoctorExitCode(results, Boolean(opts.strict));
+    if (exitCode !== 0) process.exitCode = exitCode;
   });
 
 program
@@ -956,79 +1058,12 @@ program
   .option("--max-steps <n>", "Maximum agent reasoning/tool steps per ask")
   .option("--config <path>", "Optional config file path for ask defaults")
   .action(async (repo: string | undefined, question: string | undefined, opts: AskOpts) => {
-    const buildAskSettings = async (): Promise<AskRuntimeSettings> => {
-      const configDefaults = await loadAskConfigDefaults(opts.config);
-      const fastModel = opts.fastModel;
-      const maxSteps = parseOptionalMaxSteps(opts.maxSteps);
-      return {
-        askTimeoutMs: parseOptionalPositiveInt(opts.askTimeoutMs, configDefaults.askTimeoutMs),
-        useFast: Boolean(opts.fast) && Boolean(fastModel),
-        ...(fastModel === undefined ? {} : { fastModel }),
-        ...(maxSteps === undefined ? {} : { maxSteps }),
-      };
-    };
-
     if (opts.all) {
-      // When --all is used, the first positional arg is the question
-      const actualQuestion = repo;
-      if (!actualQuestion) {
-        console.error("Usage: repo-expert ask --all <question>");
-        process.exitCode = 1;
-        return;
-      }
-
-      const state = await loadState(STATE_FILE);
-      const entries = Object.entries(state.agents);
-      if (entries.length === 0) {
-        console.error('No agents found. Run "repo-expert setup" to create them.');
-        process.exitCode = 1;
-        return;
-      }
-
-      const askAllConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
-      const provider = createProvider(askAllConfig);
-      const agents = entries.map(([repoName, agent]) => ({ repoName, agentId: agent.agentId }));
-
-      console.log(`Broadcasting to ${String(agents.length)} agents...`);
-      const results = await broadcastAsk(provider, agents, actualQuestion, {
-        timeoutMs: parseIntOrDefault(opts.timeout, BROADCAST_ASK_DEFAULT_TIMEOUT_MS),
-      });
-
-      for (const result of results) {
-        console.log(`\n--- ${result.repoName} ---`);
-        if (result.error) {
-          console.error(`  Error: ${result.error}`);
-        } else {
-          console.log(result.response);
-        }
-      }
+      await runBroadcastAsk(repo, opts);
       return;
     }
 
-    // Single agent query
-    if (!repo || !question) {
-      console.error("Usage: repo-expert ask <repo> <question>");
-      console.error("       repo-expert ask --all <question>");
-      process.exitCode = 1;
-      return;
-    }
-
-    const state = await loadState(STATE_FILE);
-    const agentInfo = requireAgent(state, repo);
-    if (!agentInfo) return;
-
-    const askConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
-    const provider = createProvider(askConfig);
-    const askSettings = await buildAskSettings();
-    const stop = startSpinner(`Asking ${repo}...`);
-    try {
-      const answer = await askAgent(provider, agentInfo, question, askSettings);
-      stop();
-      console.log(answer);
-    } catch (error) {
-      stop();
-      throw error;
-    }
+    await runSingleAsk(repo, question, opts);
   });
 
 program
@@ -1192,6 +1227,21 @@ program
 
       state = updateAgentField(state, repoName, { passages: result.passages, lastSyncCommit: result.lastSyncCommit });
       await saveState(STATE_FILE, state);
+
+      if (shouldConsolidate(result, config.defaults)) {
+        const consolidation = await consolidateAgentMemory({
+          provider,
+          agentId: agentInfo.agentId,
+          changedFiles,
+          syncResult: result,
+          blockCharLimit: repoConfig.memoryBlockLimit,
+          log,
+        });
+        if (consolidation.consolidated) {
+          log(`  Consolidated architecture/conventions memory blocks.`);
+        }
+      }
+
       log(`  Done.`);
       syncResults.push({
         repoName,
@@ -1298,6 +1348,43 @@ program
 
     if (opts.json) {
       console.log(JSON.stringify(rows, null, 2));
+    }
+  });
+
+program
+  .command("consolidate")
+  .description("Consolidate architecture/conventions memory blocks via the LLM")
+  .option("--repo <name>", "Consolidate a single repo agent")
+  .option("--config <path>", "Config file path", "config.yaml")
+  .action(async (opts: ConsolidateCliOpts) => {
+    const state = await loadState(STATE_FILE);
+    const config = await loadConfigForProvider(path.resolve(opts.config));
+    const provider = createProviderForCommands(config);
+    const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
+
+    for (const repoName of repoNames) {
+      const agentInfo = requireAgent(state, repoName);
+      if (!agentInfo) return;
+
+      const repoConfig = config ? getOwnRecordValue(config.repos, repoName) : undefined;
+      const blockCharLimit =
+        repoConfig?.memoryBlockLimit ?? config?.defaults.memoryBlockLimit ?? 5000;
+
+      console.log(`Consolidating memory for "${repoName}"...`);
+      const result = await consolidateAgentMemory({
+        provider,
+        agentId: agentInfo.agentId,
+        changedFiles: [],
+        syncResult: { filesReIndexed: 0, filesRemoved: 0 },
+        blockCharLimit,
+        log: (line: string) => { console.log(line); },
+      });
+
+      if (result.consolidated) {
+        console.log(`  Done.`);
+      } else {
+        console.log(`  Skipped: ${result.error ?? "nothing to consolidate"}.`);
+      }
     }
   });
 
