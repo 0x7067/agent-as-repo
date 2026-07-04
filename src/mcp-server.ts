@@ -7,6 +7,7 @@ import type { AgentProvider, SendMessageOptions } from "./ports/agent-provider.j
 import type { AdminPort } from "./ports/admin.js";
 import { VikingProvider, type VikingRuntimeOptions } from "./shell/viking-provider.js";
 import { VikingHttpClient } from "./shell/viking-http.js";
+import { VikingPassageStore } from "./shell/adapters/viking-passage-store.js";
 import { VikingAdminAdapter } from "./shell/adapters/viking-admin-adapter.js";
 import { FilesystemBlockStorage } from "./shell/block-storage.js";
 import { resolveOpenVikingBlocksDir } from "./shell/openviking-paths.js";
@@ -75,13 +76,14 @@ export function buildRuntime(): Runtime {
   const baseUrl = process.env["LLM_BASE_URL"] ?? DEFAULT_LLM_BASE_URL;
   const apiKey = process.env["LLM_API_KEY"];
   const viking = new VikingHttpClient(vikingUrl, vikingApiKey);
+  const store = new VikingPassageStore(viking);
   const blockStorage = new FilesystemBlockStorage(resolveOpenVikingBlocksDir());
-  const provider = new VikingProvider(viking, model, blockStorage, {
+  const provider = new VikingProvider(store, model, blockStorage, {
     baseUrl,
     ...(apiKey === undefined ? {} : { apiKey }),
     ...getVikingRuntimeOptionsFromEnv(),
   });
-  return { provider, admin: new VikingAdminAdapter(provider, viking) };
+  return { provider, admin: new VikingAdminAdapter(provider, store) };
 }
 
 export async function withTimeout<T>(label: string, timeoutMs: number, fn: () => Promise<T>): Promise<T> {

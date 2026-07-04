@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- provider keeps sendMessage and the restricted consolidateMemory turn in one module alongside their shared retry loop. */
 import { randomUUID } from "node:crypto";
 import { buildPersona } from "../core/prompts.js";
 import type {
@@ -10,7 +9,7 @@ import type {
   SendMessageOptions,
   ConsolidateMemoryOptions,
 } from "../ports/agent-provider.js";
-import type { VikingHttpClient } from "./viking-http.js";
+import type { PassageStore } from "../ports/passage-store.js";
 import { toolCallingLoop, DEFAULT_LLM_BASE_URL, type ToolDefinition, type ToolHandler } from "./llm-client.js";
 import type { BlockStorage } from "./block-storage.js";
 
@@ -54,12 +53,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isDeletePassageAmbiguousFsError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  return message.includes("http 500") && message.includes("/api/v1/fs");
-}
-
 function unknownToMessage(value: unknown): string {
   if (value instanceof Error) return value.message;
   if (typeof value === "string") return value;
@@ -88,7 +81,7 @@ export class VikingProvider implements AgentProvider {
   private readonly retryBaseDelayMs: number;
 
   constructor(
-    private viking: VikingHttpClient,
+    private store: PassageStore,
     private model: string,
     private blockStorage: BlockStorage,
     runtimeOptions: VikingRuntimeOptions = {},
@@ -105,19 +98,13 @@ export class VikingProvider implements AgentProvider {
     const { repoName } = params;
     const persona = buildPersona(repoName, params.description, params.persona);
 
-    await this.viking.mkdir(`viking://resources/${repoName}/`);
-    await this.viking.mkdir(`viking://resources/${repoName}/passages/`);
-
-    await this.viking.writeFile(
-      `viking://resources/${repoName}/manifest.json`,
-      JSON.stringify({
-        agentId: repoName,
-        name: params.name,
-        model: params.model,
-        tags: params.tags,
-        createdAt: new Date().toISOString(),
-      }),
-    );
+    await this.store.initAgent(repoName, {
+      agentId: repoName,
+      name: params.name,
+      model: params.model,
+      tags: params.tags,
+      createdAt: new Date().toISOString(),
+    });
 
     this.blockStorage.init(repoName, {
       persona,
@@ -129,94 +116,22 @@ export class VikingProvider implements AgentProvider {
   }
 
   async deleteAgent(agentId: string): Promise<void> {
-    await this.viking.deleteResource(`viking://resources/${agentId}/`);
+    await this.store.deleteAgent(agentId);
     this.blockStorage.delete(agentId);
   }
 
   async storePassage(agentId: string, text: string): Promise<string> {
     const uuid = randomUUID();
-    await this.viking.writeFile(`viking://resources/${agentId}/passages/${uuid}.txt`, text);
+    await this.store.writePassage(agentId, uuid, text);
     return uuid;
   }
 
   async deletePassage(agentId: string, passageId: string): Promise<void> {
-    const targetUri = `viking://resources/${agentId}/passages/${passageId}.txt`;
-    try {
-      await this.viking.deleteFile(targetUri);
-      return;
-    } catch (error) {
-      if (!isDeletePassageAmbiguousFsError(error)) throw error;
-
-      const listUri = `viking://resources/${agentId}/passages/`;
-      const siblingUris = await this.viking.listDirectory(listUri);
-      const hasTarget = siblingUris.some((uri) => uri.endsWith(`/${passageId}.txt`));
-      if (!hasTarget) return;
-
-      await sleep(120);
-      try {
-        await this.viking.deleteFile(targetUri);
-        return;
-      } catch (retryError) {
-        if (!isDeletePassageAmbiguousFsError(retryError)) throw retryError;
-        const afterRetryUris = await this.viking.listDirectory(listUri);
-        const stillExists = afterRetryUris.some((uri) => uri.endsWith(`/${passageId}.txt`));
-        if (!stillExists) return;
-        throw retryError;
-      }
-    }
+    await this.store.deletePassage(agentId, passageId);
   }
 
-  // eslint-disable-next-line sonarjs/cognitive-complexity
   async listPassages(agentId: string): Promise<Passage[]> {
-    const uris = await this.viking.listDirectory(`viking://resources/${agentId}/passages/`);
-    const readPassage = async (uri: string): Promise<Passage> => {
-      const text = await this.viking.readFile(uri);
-      const filename = uri.slice(uri.lastIndexOf("/") + 1);
-      const id = filename.endsWith(".txt") ? filename.slice(0, -4) : filename;
-      return { id, text };
-    };
-
-    const settled = await Promise.allSettled(uris.map((uri) => readPassage(uri)));
-
-    const passages: Passage[] = [];
-    const failedUris: string[] = [];
-    let firstError: unknown;
-
-    for (const [index, entry] of settled.entries()) {
-      if (entry.status === "fulfilled") {
-        passages.push(entry.value);
-        continue;
-      }
-      const uri = uris[index];
-      if (uri) {
-        failedUris.push(uri);
-      }
-      if (firstError === undefined) {
-        firstError = entry.reason;
-      }
-    }
-
-    if (failedUris.length > 0) {
-      await sleep(120);
-      const retrySettled = await Promise.allSettled(failedUris.map((uri) => readPassage(uri)));
-      for (const retryEntry of retrySettled) {
-        if (retryEntry.status === "fulfilled") {
-          passages.push(retryEntry.value);
-          continue;
-        }
-        if (firstError === undefined) {
-          firstError = retryEntry.reason;
-        }
-      }
-    }
-
-    if (passages.length === 0 && firstError !== undefined) {
-      throw firstError instanceof Error
-        ? firstError
-        : new Error(unknownToMessage(firstError) || "Failed to list passages");
-    }
-
-    return passages;
+    return this.store.listPassages(agentId);
   }
 
   getBlock(agentId: string, label: string): Promise<MemoryBlock> {
@@ -275,7 +190,7 @@ export class VikingProvider implements AgentProvider {
     const toolHandlers = {
       archival_memory_search: async (args: Record<string, unknown>): Promise<string> => {
         const query = args["query"] as string;
-        const results = await this.viking.semanticSearch(query, `viking://resources/${agentId}/passages/`, 10);
+        const results = await this.store.semanticSearch(agentId, query, 10);
         return JSON.stringify(results);
       },
       memory_replace: async (args: Record<string, unknown>): Promise<string> => {
@@ -410,4 +325,3 @@ export class VikingProvider implements AgentProvider {
     throw new Error(`All model attempts failed:\n${failureMessages.join("\n")}`);
   }
 }
-/* eslint-enable max-lines */

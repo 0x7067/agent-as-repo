@@ -20,6 +20,7 @@ import { bootstrapAgent } from "./shell/bootstrap.js";
 import type { AgentProvider, CreateAgentParams, SendMessageOptions } from "./ports/agent-provider.js";
 import { VikingProvider } from "./shell/viking-provider.js";
 import { VikingHttpClient } from "./shell/viking-http.js";
+import { VikingPassageStore } from "./shell/adapters/viking-passage-store.js";
 import { FilesystemBlockStorage } from "./shell/block-storage.js";
 import { resolveOpenVikingBlocksDir } from "./shell/openviking-paths.js";
 import { selectChunkingStrategy } from "./core/chunker.js";
@@ -171,9 +172,10 @@ function createProvider(config: Config): AgentProvider {
   const vikingUrl = config.provider.vikingUrl;
   const vikingApiKey = process.env["VIKING_API_KEY"];
   const viking = new VikingHttpClient(vikingUrl, vikingApiKey);
+  const store = new VikingPassageStore(viking);
   const blockStorage = new FilesystemBlockStorage(resolveOpenVikingBlocksDir());
   return new VikingProvider(
-    viking,
+    store,
     config.provider.model,
     blockStorage,
     {
