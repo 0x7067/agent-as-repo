@@ -22,7 +22,7 @@ import { LocalProvider } from "./shell/local-provider.js";
 import { SqlitePassageStore } from "./shell/sqlite-store.js";
 import { SqliteBlockStorage } from "./shell/sqlite-block-storage.js";
 import { resolveStoreDbPath } from "./shell/repo-expert-paths.js";
-import { embed } from "./shell/llm-client.js";
+import { createEmbedder } from "./shell/embedder-factory.js";
 import { selectChunkingStrategy } from "./core/chunker.js";
 import { initTreeSitterChunker } from "./core/tree-sitter-chunker.js";
 import { repoFilterOptions, shouldIncludeFile } from "./core/filter.js";
@@ -174,7 +174,12 @@ function createProvider(config: Config): AgentProvider {
   const dbPath = resolveStoreDbPath();
   const store = new SqlitePassageStore({
     dbPath,
-    embed: (texts) => embed(texts, config.provider.embeddingModel, config.provider.baseUrl, llmApiKey),
+    embed: createEmbedder({
+      engine: config.provider.embeddingEngine,
+      model: config.provider.embeddingModel,
+      baseUrl: config.provider.baseUrl,
+      ...(llmApiKey === undefined ? {} : { apiKey: llmApiKey }),
+    }),
   });
   const blockStorage = new SqliteBlockStorage(dbPath);
   return new LocalProvider(
@@ -334,6 +339,7 @@ function resolveMcpProviderConfig(config: Config | null): { providerConfig: McpP
   const model = config?.provider.model ?? process.env["LLM_MODEL"];
   const baseUrl = config?.provider.baseUrl ?? process.env["LLM_BASE_URL"];
   const embeddingModel = config?.provider.embeddingModel ?? process.env["LLM_EMBEDDING_MODEL"];
+  const embeddingEngine = config?.provider.embeddingEngine ?? process.env["LLM_EMBEDDING_ENGINE"];
   const llmApiKey = process.env["LLM_API_KEY"];
 
   if (config === null) {
@@ -345,6 +351,7 @@ function resolveMcpProviderConfig(config: Config | null): { providerConfig: McpP
       ...(model === undefined ? {} : { model }),
       ...(baseUrl === undefined ? {} : { baseUrl }),
       ...(embeddingModel === undefined ? {} : { embeddingModel }),
+      ...(embeddingEngine === undefined ? {} : { embeddingEngine }),
       ...(llmApiKey === undefined ? {} : { llmApiKey }),
     },
     warnings,

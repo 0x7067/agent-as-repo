@@ -106,6 +106,49 @@ describe("parseConfig", () => {
     expect(config.provider.embeddingModel).toBe("mxbai-embed-large");
   });
 
+  it("defaults provider.embedding_engine to http", () => {
+    const config = parseConfig(validRaw);
+    expect(config.provider.embeddingEngine).toBe("http");
+  });
+
+  it("parses provider.embedding_engine transformersjs and defaults its embedding model to a HF ONNX id", () => {
+    const raw = {
+      provider: {
+        model: MODEL,
+        embedding_engine: "transformersjs",
+      },
+      repos: validRaw.repos,
+    };
+    const config = parseConfig(raw);
+    expect(config.provider.embeddingEngine).toBe("transformersjs");
+    expect(config.provider.embeddingModel).toBe("nomic-ai/nomic-embed-text-v1.5");
+  });
+
+  it("keeps an explicit embedding_model when embedding_engine is transformersjs", () => {
+    const raw = {
+      provider: {
+        model: MODEL,
+        embedding_engine: "transformersjs",
+        embedding_model: "Xenova/all-MiniLM-L6-v2",
+      },
+      repos: validRaw.repos,
+    };
+    const config = parseConfig(raw);
+    expect(config.provider.embeddingModel).toBe("Xenova/all-MiniLM-L6-v2");
+  });
+
+  it("rejects an unknown embedding_engine value", () => {
+    const raw = {
+      provider: {
+        model: MODEL,
+        embedding_engine: "webgpu",
+      },
+      repos: validRaw.repos,
+    };
+    const error = parseConfigError(raw);
+    expect(error.issues.join("\n")).toContain("provider.embedding_engine");
+  });
+
   it("parses top-level consolidate_on_sync", () => {
     const config = parseConfig({ ...validRaw, consolidate_on_sync: true });
     expect(config.consolidateOnSync).toBe(true);

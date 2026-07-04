@@ -3,6 +3,8 @@ import type { Config, RepoConfig, ProviderConfig } from "./types.js";
 
 const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
 const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
+/** Default HF model id when embeddings run in-process via transformers.js. */
+export const DEFAULT_TRANSFORMERSJS_EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v1.5";
 
 /** Indexed when a repo doesn't list its own `extensions`. */
 export const DEFAULT_EXTENSIONS = [
@@ -21,6 +23,7 @@ export const DEFAULT_IGNORE_DIRS = [
 const providerSchema = z.strictObject({
   model: z.string(),
   base_url: z.string().optional(),
+  embedding_engine: z.enum(["http", "transformersjs"]).optional(),
   embedding_model: z.string().optional(),
   fast_model: z.string().optional(),
   fallback_models: z.array(z.string()).optional(),
@@ -43,7 +46,7 @@ const rawConfigSchema = z.strictObject({
 });
 
 const PROVIDER_SHAPE_HINT =
-  "Use provider: { model, base_url?, embedding_model?, fast_model?, fallback_models? }. See config.example.yaml.";
+  "Use provider: { model, base_url?, embedding_engine?, embedding_model?, fast_model?, fallback_models? }. See config.example.yaml.";
 
 export class ConfigError extends Error {
   constructor(public readonly issues: string[]) {
@@ -109,11 +112,15 @@ export function parseConfig(raw: unknown): Config {
     throw new ConfigError(semanticIssues);
   }
 
+  const embeddingEngine = parsed.provider.embedding_engine ?? "http";
   const providerConfig: ProviderConfig = {
     model: parsed.provider.model,
     baseUrl: parsed.provider.base_url ?? DEFAULT_LLM_BASE_URL,
     fallbackModels: parsed.provider.fallback_models ?? [],
-    embeddingModel: parsed.provider.embedding_model ?? DEFAULT_EMBEDDING_MODEL,
+    embeddingEngine,
+    embeddingModel:
+      parsed.provider.embedding_model ??
+      (embeddingEngine === "transformersjs" ? DEFAULT_TRANSFORMERSJS_EMBEDDING_MODEL : DEFAULT_EMBEDDING_MODEL),
     ...(parsed.provider.fast_model === undefined ? {} : { fastModel: parsed.provider.fast_model }),
   };
 

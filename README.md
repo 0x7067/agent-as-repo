@@ -6,7 +6,7 @@ Single path: an embedded sqlite-vec store for passages and semantic search + any
 
 ## Prerequisites
 
-- [Ollama](https://ollama.com) running locally with a chat model pulled (default config expects `qwen3-coder:30b`) and an embedding model pulled (default `nomic-embed-text`, e.g. `ollama pull nomic-embed-text`)
+- [Ollama](https://ollama.com) running locally with a chat model pulled (default config expects `qwen3-coder:30b`). An embedding model pull (default `nomic-embed-text`, e.g. `ollama pull nomic-embed-text`) is only needed with the default `provider.embedding_engine: http` — set it to `transformersjs` to skip this and compute embeddings in-process instead.
 - Node.js 22 (see `.nvmrc`; better-sqlite3's native addon is ABI-locked to this major) and pnpm
 
 ## Quickstart
@@ -80,7 +80,7 @@ repos:
     description: "React Native mobile app"
 ```
 
-Optional provider fields: `base_url` (default: local Ollama), `embedding_model` (default `nomic-embed-text`), `fast_model` (used by `ask --fast`), `fallback_models`. Optional repo fields: `extensions` and `ignore_dirs` (defaults cover common code/doc extensions and junk dirs), `persona`, `base_path` (monorepo subtree), `include_submodules`. A top-level `consolidate_on_sync: true` enables post-sync memory consolidation. Unknown keys are rejected, so typos fail loudly instead of being ignored.
+Optional provider fields: `base_url` (default: local Ollama), `embedding_engine` (`http` default, or `transformersjs`), `embedding_model` (default `nomic-embed-text`), `fast_model` (used by `ask --fast`), `fallback_models`. Optional repo fields: `extensions` and `ignore_dirs` (defaults cover common code/doc extensions and junk dirs), `persona`, `base_path` (monorepo subtree), `include_submodules`. A top-level `consolidate_on_sync: true` enables post-sync memory consolidation. Unknown keys are rejected, so typos fail loudly instead of being ignored.
 
 To use a remote endpoint (e.g. OpenRouter) instead of local Ollama, set `base_url` and provide `LLM_API_KEY` in `.env`:
 
@@ -90,7 +90,7 @@ provider:
   base_url: https://openrouter.ai/api/v1
 ```
 
-Embeddings for archival search come from the same OpenAI-compatible endpoint (`POST {base_url}/embeddings`), using `provider.embedding_model` (default `nomic-embed-text`). Passages, vectors, and memory blocks live in one local SQLite database at `~/.repo-expert/store.db` (override the directory with `REPO_EXPERT_DATA_DIR`).
+Embeddings for archival search come from the same OpenAI-compatible endpoint by default (`POST {base_url}/embeddings`), using `provider.embedding_model` (default `nomic-embed-text`). Set `provider.embedding_engine: transformersjs` to compute embeddings in-process instead, via `@huggingface/transformers` running an ONNX model on CPU — no Ollama embedding model needed. In that mode `embedding_model` is a Hugging Face model id (default `nomic-ai/nomic-embed-text-v1.5`, q8-quantized ONNX); weights (~140 MB) download from the Hugging Face Hub on first use and are cached locally, so the first `setup`/`sync`/search is slower and everything after runs fully offline. Switching `embedding_engine` or `embedding_model` changes the vector space, so re-run `repo-expert setup --reindex` afterwards — same-dimension swaps need it too, not just ones the store's dimension check would catch. Passages, vectors, and memory blocks live in one local SQLite database at `~/.repo-expert/store.db` (override the directory with `REPO_EXPERT_DATA_DIR`).
 
 ### Memory consolidation
 
@@ -109,6 +109,7 @@ The agent's `architecture`/`conventions` memory blocks can improve over time ins
 | `REPO_EXPERT_ASK_TIMEOUT_MS` | Timeout for MCP `agent_call` when not overridden per-call. |
 | `REPO_EXPERT_DATA_DIR` | Directory for the embedded store DB (default `~/.repo-expert`). |
 | `LLM_EMBEDDING_MODEL` | Embedding model id (MCP server only; CLI uses `config.provider.embedding_model`). |
+| `LLM_EMBEDDING_ENGINE` | `http` (default) or `transformersjs` — read by the MCP server (CLI uses `config.provider.embedding_engine`); written automatically by `mcp-install`. |
 
 ## Architecture
 

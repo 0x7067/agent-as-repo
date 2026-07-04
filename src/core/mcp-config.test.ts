@@ -32,8 +32,14 @@ describe("generateMcpEntry", () => {
 
     expect(entry.env.LLM_MODEL).toBe(MODEL);
     expect(entry.env.LLM_BASE_URL).toBe(BASE_URL);
+    expect(entry.env.LLM_EMBEDDING_ENGINE).toBe("http");
     expect(entry.env.LLM_EMBEDDING_MODEL).toBe(EMBEDDING_MODEL);
     expect(entry.env.LLM_API_KEY).toBeUndefined();
+  });
+
+  it("writes LLM_EMBEDDING_ENGINE when configured", () => {
+    const entry = generateMcpEntry("/path", { model: MODEL, embeddingEngine: "transformersjs" });
+    expect(entry.env.LLM_EMBEDDING_ENGINE).toBe("transformersjs");
   });
 });
 
@@ -84,6 +90,13 @@ describe("checkMcpEntry", () => {
     const result = checkMcpEntry(entry, MCP_SERVER_PATH, providerConfig);
     expect(result.ok).toBe(false);
     expect(result.issues).toEqual(expect.arrayContaining([expect.stringContaining("LLM_EMBEDDING_MODEL mismatch")]));
+  });
+
+  it("reports LLM_EMBEDDING_ENGINE mismatch", () => {
+    const transformersConfig = { ...providerConfig, embeddingEngine: "transformersjs" };
+    const result = checkMcpEntry(validEntry, MCP_SERVER_PATH, transformersConfig);
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([expect.stringContaining("LLM_EMBEDDING_ENGINE mismatch")]));
   });
 
   it("reports low timeout", () => {
