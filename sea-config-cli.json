@@ -1,1 +1,8 @@
-{ "main": "dist/sea-cli.cjs", "output": "dist/sea-cli.blob" }
+{
+  "main": "dist/sea-cli.cjs",
+  "output": "dist/sea-cli.blob",
+  "assets": {
+    "better_sqlite3.node": "dist/native/better_sqlite3.node",
+    "vec0": "dist/native/vec0"
+  }
+}
