@@ -1,12 +1,12 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { beforeAll, describe, it, expect, vi } from "vitest";
 import { syncRepo } from "./sync.js";
 import type { AgentState } from "../core/types.js";
-import { initTreeSitterChunker, resetTreeSitterChunkerForTests } from "../core/tree-sitter-chunker.js";
+import {
+  initTreeSitterChunker,
+  resetTreeSitterChunkerForTests,
+} from "../core/tree-sitter-chunker.js";
+import { GRAMMAR_WASM_BY_LABEL, WEB_TREE_SITTER_WASM } from "../core/tree-sitter-test-paths.js";
 import { makeMockProvider as makeBase } from "./__test__/mock-provider.js";
-
-const ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 const NEW_CONTENT = "new content";
@@ -14,10 +14,8 @@ const NEW_CONTENT = "new content";
 beforeAll(async () => {
   resetTreeSitterChunkerForTests();
   await initTreeSitterChunker({
-    webTreeSitterWasm: path.join(ROOT, "node_modules/web-tree-sitter/web-tree-sitter.wasm"),
-    typescriptWasm: path.join(ROOT, "node_modules/tree-sitter-typescript/tree-sitter-typescript.wasm"),
-    tsxWasm: path.join(ROOT, "node_modules/tree-sitter-typescript/tree-sitter-tsx.wasm"),
-    javascriptWasm: path.join(ROOT, "node_modules/tree-sitter-javascript/tree-sitter-javascript.wasm"),
+    webTreeSitterWasm: WEB_TREE_SITTER_WASM,
+    grammarWasmByLabel: GRAMMAR_WASM_BY_LABEL,
   });
 });
 

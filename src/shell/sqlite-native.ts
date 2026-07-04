@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { atomicWriteFileSync } from "./atomic-fs.js";
 
 export type VectorDatabase = Database.Database;
 
@@ -33,13 +34,20 @@ function vecExtensionFilename(): string {
 
 /**
  * dlopen/loadExtension need real filesystem paths, so SEA assets are
- * extracted once into a cache keyed by platform/arch/Node version.
+ * extracted once into a cache keyed by platform/arch/Node version. The write
+ * is atomic (src/shell/atomic-fs.ts) so a crash mid-extraction can never
+ * leave a truncated `.node`/`.so` file for a later dlopen to choke on.
+ *
+ * Note: unlike src/shell/tree-sitter-paths.ts, this cache key has no
+ * package-version component (better-sqlite3/sqlite-vec version), so an
+ * addon upgrade under an unchanged platform/arch/Node triple would still
+ * serve a stale cached binary. Out of scope here — see the SEA wasm-staging
+ * review follow-ups for the wasm side of this same class of bug.
  */
 function extractSeaAsset(sea: SeaApi, assetKey: string, targetPath: string): void {
   // eslint-disable-next-line security/detect-non-literal-fs-filename -- target is inside the app-owned native cache dir
   if (existsSync(targetPath)) return;
-  // eslint-disable-next-line security/detect-non-literal-fs-filename -- target is inside the app-owned native cache dir
-  writeFileSync(targetPath, Buffer.from(sea.getRawAsset(assetKey)));
+  atomicWriteFileSync(targetPath, Buffer.from(sea.getRawAsset(assetKey)));
 }
 
 function openSeaDatabase(sea: SeaApi, dbPath: string): VectorDatabase {

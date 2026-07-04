@@ -1,0 +1,24 @@
+{
+  "kotlin": {
+    "file": "tree-sitter-kotlin.wasm",
+    "sha256": "c216c74b701ee536df7f6509564775984850835e731e7289ca435d11cad29a97",
+    "source": "fallback-prebuilt",
+    "sourcePackage": "@lumis-sh/wasm-kotlin",
+    "sourcePackageVersion": "0.26.3",
+    "grammarVersion": "0.3.8",
+    "buildTool": "@lumis-sh/wasm-kotlin 0.26.3 (prebuilt with tree-sitter-cli 0.26.x, per its own provenance metadata)",
+    "builtAt": "2026-07-04T14:34:43.919Z",
+    "notice": "NOTICE"
+  },
+  "swift": {
+    "file": "tree-sitter-swift.wasm",
+    "sha256": "0258a7ef17303a8079ffe0748b3583d59656b5c3e8653fca7b6451b3e6689eb2",
+    "source": "fallback-prebuilt",
+    "sourcePackage": "@lumis-sh/wasm-swift",
+    "sourcePackageVersion": "0.26.1",
+    "grammarVersion": "0.7.3",
+    "buildTool": "@lumis-sh/wasm-swift 0.26.1 (prebuilt with tree-sitter-cli 0.26.x, per its own provenance metadata)",
+    "builtAt": "2026-07-04T14:34:43.978Z",
+    "notice": "NOTICE"
+  }
+}
