@@ -3,6 +3,19 @@
   "output": "dist/sea-mcp.blob",
   "assets": {
     "better_sqlite3.node": "dist/native/better_sqlite3.node",
-    "vec0": "dist/native/vec0"
+    "vec0": "dist/native/vec0",
+    "web-tree-sitter.wasm": "dist/wasm/web-tree-sitter.wasm",
+    "tree-sitter-typescript.wasm": "dist/wasm/tree-sitter-typescript.wasm",
+    "tree-sitter-tsx.wasm": "dist/wasm/tree-sitter-tsx.wasm",
+    "tree-sitter-javascript.wasm": "dist/wasm/tree-sitter-javascript.wasm",
+    "tree-sitter-python.wasm": "dist/wasm/tree-sitter-python.wasm",
+    "tree-sitter-go.wasm": "dist/wasm/tree-sitter-go.wasm",
+    "tree-sitter-java.wasm": "dist/wasm/tree-sitter-java.wasm",
+    "tree-sitter-ruby.wasm": "dist/wasm/tree-sitter-ruby.wasm",
+    "tree-sitter-rust.wasm": "dist/wasm/tree-sitter-rust.wasm",
+    "tree-sitter-php.wasm": "dist/wasm/tree-sitter-php.wasm",
+    "tree-sitter-c.wasm": "dist/wasm/tree-sitter-c.wasm",
+    "tree-sitter-cpp.wasm": "dist/wasm/tree-sitter-cpp.wasm",
+    "tree-sitter-c_sharp.wasm": "dist/wasm/tree-sitter-c_sharp.wasm"
   }
 }

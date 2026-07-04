@@ -23,6 +23,16 @@ cp node_modules/better-sqlite3/build/Release/better_sqlite3.node dist/native/bet
 VEC0_PATH="$(node -e "process.stdout.write(require('sqlite-vec').getLoadablePath())")"
 cp "${VEC0_PATH}" dist/native/vec0
 
+# Stage every tree-sitter wasm file (web-tree-sitter runtime + one grammar per
+# supported language) as SEA blob assets, and regenerate the "assets" section
+# of sea-config-{cli,mcp}.json to match. The list is driven from
+# src/shell/tree-sitter-paths.ts's GRAMMAR_PACKAGE_INFO (see
+# scripts/gen-sea-config.ts) rather than duplicated here, so adding a grammar
+# can't silently miss the SEA build. The runtime extracts these to a cache
+# dir and resolves them via web-tree-sitter (see src/shell/tree-sitter-paths.ts).
+printf 'Staging tree-sitter wasm artifacts...\n'
+node_modules/.bin/tsx scripts/gen-sea-config.ts
+
 # Find a Node.js binary that supports SEA fuse probing.
 find_node_with_sea_fuse() {
     local candidates=()
