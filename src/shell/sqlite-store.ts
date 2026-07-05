@@ -1,4 +1,5 @@
 import { extractSourcePath } from "../core/chunker.js";
+import { rrfFuse, toFtsMatchQuery } from "../core/hybrid-rank.js";
 import type {
   AgentManifest,
   PassageSearchResult,
@@ -37,6 +38,32 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 `;
 
+/**
+ * Lexical leg of hybrid search: an external-content FTS5 index over
+ * passages.text, kept in sync by triggers so every write path (including
+ * writePassage's delete+insert) maintains it without per-callsite code.
+ * tokenchars '_' keeps snake_case identifiers whole; no stemming (it hurts
+ * code identifiers). The table is created before the triggers so a failed
+ * FTS setup never leaves triggers that would break plain writes.
+ */
+const FTS_TABLE_SQL = `
+CREATE VIRTUAL TABLE IF NOT EXISTS passage_fts USING fts5(
+  text,
+  content='passages',
+  content_rowid='seq',
+  tokenize="unicode61 tokenchars '_'"
+);
+`;
+
+const FTS_TRIGGERS_SQL = `
+CREATE TRIGGER IF NOT EXISTS passages_ai AFTER INSERT ON passages BEGIN
+  INSERT INTO passage_fts(rowid, text) VALUES (new.seq, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS passages_ad AFTER DELETE ON passages BEGIN
+  INSERT INTO passage_fts(passage_fts, rowid, text) VALUES ('delete', old.seq, old.text);
+END;
+`;
+
 const DIMENSION_META_KEY = "embedding_dimension";
 
 function normalizeVector(vector: number[]): number[] {
@@ -51,24 +78,18 @@ function encodeVector(vector: number[]): Buffer {
   return Buffer.from(new Float32Array(vector).buffer);
 }
 
-/**
- * L2 distance between unit vectors maps to cosine similarity:
- * cos(a, b) = 1 - d^2 / 2.
- */
-function distanceToScore(distance: number): number {
-  return 1 - (distance * distance) / 2;
-}
-
 /** Embedded PassageStore: better-sqlite3 + the sqlite-vec vec0 extension. */
 export class SqlitePassageStore implements PassageStore {
   private readonly db: VectorDatabase;
   private readonly embedTexts: EmbedTexts;
   private vectorTableReady = false;
+  private ftsReady = false;
 
   constructor(options: SqlitePassageStoreOptions) {
     this.db = openVectorDatabase(options.dbPath);
     this.embedTexts = options.embed;
     this.db.exec(SCHEMA);
+    this.ftsReady = this.initFullTextIndex();
     const dimension = this.storedDimension();
     if (dimension !== undefined) {
       this.ensureVectorTable(dimension);
@@ -188,20 +209,87 @@ export class SqlitePassageStore implements PassageStore {
     this.assertDimension(vector.length);
     const encoded = encodeVector(normalizeVector(vector));
 
-    const hits = this.db
+    // Over-fetch both legs so RRF has depth to fuse over.
+    const candidates = Math.max(limit * 3, 15);
+    const vectorHits = this.db
       .prepare(
-        "SELECT rowid, distance FROM passage_vectors WHERE embedding MATCH ? AND k = ? AND rowid IN (SELECT seq FROM passages WHERE agent_id = ?)",
+        "SELECT rowid FROM passage_vectors WHERE embedding MATCH ? AND k = ? AND rowid IN (SELECT seq FROM passages WHERE agent_id = ?)",
       )
-      .all(encoded, limit, agentId) as Array<{ rowid: number | bigint; distance: number }>;
+      .all(encoded, candidates, agentId) as Array<{ rowid: number | bigint }>;
+    const lexicalRowids = this.lexicalSearch(agentId, query, candidates);
 
     const readPassageRow = this.db.prepare("SELECT id, text FROM passages WHERE seq = ?");
-    const results: PassageSearchResult[] = [];
-    for (const hit of hits) {
-      const row = readPassageRow.get(hit.rowid) as { id: string; text: string } | undefined;
-      if (row === undefined) continue;
-      results.push({ id: row.id, text: row.text, score: distanceToScore(hit.distance) });
+    const textById = new Map<string, string>();
+    const toIds = (rowids: Array<number | bigint>): string[] => {
+      const ids: string[] = [];
+      for (const rowid of rowids) {
+        const row = readPassageRow.get(rowid) as { id: string; text: string } | undefined;
+        if (row === undefined) continue;
+        textById.set(row.id, row.text);
+        ids.push(row.id);
+      }
+      return ids;
+    };
+    const vectorIds = toIds(vectorHits.map((hit) => hit.rowid));
+    const lexicalIds = toIds(lexicalRowids);
+
+    const fused = rrfFuse([vectorIds, lexicalIds]);
+    return fused
+      .slice(0, limit)
+      .map(({ id, score }) => ({ id, text: textById.get(id) ?? "", score }));
+  }
+
+  /**
+   * BM25 leg over the FTS5 index; any failure degrades to an empty list so
+   * retrieval is never worse than vector-only.
+   */
+  private lexicalSearch(agentId: string, query: string, limit: number): Array<number | bigint> {
+    if (!this.ftsReady) return [];
+    const match = toFtsMatchQuery(query);
+    if (match === undefined) return [];
+    try {
+      const rows = this.db
+        .prepare(
+          "SELECT rowid FROM passage_fts WHERE passage_fts MATCH ? AND rowid IN (SELECT seq FROM passages WHERE agent_id = ?) ORDER BY rank LIMIT ?",
+        )
+        .all(match, agentId, limit) as Array<{ rowid: number | bigint }>;
+      return rows.map((row) => row.rowid);
+    } catch (error) {
+      console.warn(`repo-expert: FTS query failed, falling back to vector-only search: ${String(error)}`);
+      return [];
     }
-    return results;
+  }
+
+  /**
+   * Create the FTS index, backfill it when a pre-FTS database is opened
+   * (counts diverge → FTS5 'rebuild' re-derives the index from passages),
+   * and only then install the sync triggers. Returns false — vector-only
+   * mode — if any step fails (e.g. FTS5 missing or the table unusable).
+   */
+  private initFullTextIndex(): boolean {
+    try {
+      this.db.exec(FTS_TABLE_SQL);
+      const passageCount = (
+        this.db.prepare("SELECT COUNT(*) AS count FROM passages").get() as { count: number }
+      ).count;
+      const indexedCount = (
+        this.db.prepare("SELECT COUNT(*) AS count FROM passage_fts_docsize").get() as {
+          count: number;
+        }
+      ).count;
+      if (passageCount !== indexedCount) {
+        this.db.prepare("INSERT INTO passage_fts(passage_fts) VALUES ('rebuild')").run();
+      }
+      this.db.exec(FTS_TRIGGERS_SQL);
+      return true;
+    } catch (error) {
+      // Triggers referencing a broken FTS table would fail every write.
+      this.db.exec("DROP TRIGGER IF EXISTS passages_ai; DROP TRIGGER IF EXISTS passages_ad;");
+      console.warn(
+        `repo-expert: full-text index unavailable, using vector-only search: ${String(error)}`,
+      );
+      return false;
+    }
   }
 
   private storedDimension(): number | undefined {

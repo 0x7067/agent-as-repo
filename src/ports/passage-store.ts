@@ -17,6 +17,7 @@ export interface StoredPassage {
 export interface PassageSearchResult {
   id: string;
   text: string;
+  /** Fused relevance score (higher is better); not cosine similarity. */
   score: number;
 }
 
