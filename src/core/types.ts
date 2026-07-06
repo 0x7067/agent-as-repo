@@ -89,6 +89,8 @@ export interface AgentState {
   lastSyncCommit: string | null;
   lastSyncAt: string | null;
   createdAt: string;
+  /** Commit HEAD was at when a consolidation last actually changed the blocks (unset until then). */
+  lastConsolidatedCommit?: string | null;
 }
 
 /** Top-level persisted state. */

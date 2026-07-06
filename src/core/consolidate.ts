@@ -12,6 +12,8 @@ export interface ConsolidationPromptInput {
   filesRemoved: number;
   /** Max characters allowed per memory block. */
   blockCharLimit: number;
+  /** Formatted git log evidence (see `formatGitEvidence`); omitted when unavailable. */
+  gitEvidence?: string;
 }
 
 /** Cap the number of changed-file paths listed in the prompt to keep it bounded. */
@@ -26,7 +28,7 @@ const MAX_LISTED_FILES = 50;
  * touching the persona block.
  */
 export function buildConsolidationPrompt(input: ConsolidationPromptInput): string {
-  const { architecture, conventions, changedFiles, filesReIndexed, filesRemoved, blockCharLimit } = input;
+  const { architecture, conventions, changedFiles, filesReIndexed, filesRemoved, blockCharLimit, gitEvidence } = input;
 
   const listed = changedFiles.slice(0, MAX_LISTED_FILES);
   const overflow = changedFiles.length - listed.length;
@@ -41,11 +43,21 @@ export function buildConsolidationPrompt(input: ConsolidationPromptInput): strin
           ...(overflow > 0 ? [`- ...and ${String(overflow)} more`] : []),
         ];
 
+  const gitEvidenceSection: string[] =
+    gitEvidence === undefined || gitEvidence.length === 0
+      ? []
+      : [
+          "",
+          "Commit log since the last sync — treat as ground truth for what changed",
+          gitEvidence,
+        ];
+
   return [
     "You are refreshing the long-lived memory blocks for a codebase expert after a repository sync.",
     "Update the 'architecture' and 'conventions' blocks so they reflect the current state of the code.",
     "",
     ...changedSection,
+    ...gitEvidenceSection,
     "",
     "## Current architecture block",
     architecture.trim().length > 0 ? architecture : "(empty)",
@@ -83,4 +95,25 @@ export function shouldConsolidate(
   if (!consolidateOnSync) return false;
   const filesChanged = sync.filesReIndexed + sync.filesRemoved;
   return filesChanged >= CONSOLIDATE_MIN_FILES_CHANGED;
+}
+
+/** Agent state fields consulted when deciding whether to skip a manual consolidation run. */
+export interface SkipConsolidationInput {
+  lastSyncCommit: string | null;
+  lastConsolidatedCommit?: string | null;
+}
+
+/**
+ * Decide whether a manual consolidation run has nothing new to do: the repo's
+ * current HEAD matches the commit the last sync ran against, and a
+ * consolidation already completed (with a real change) at that same commit.
+ *
+ * Openwiki's `getUpdateNoopStatus` equivalent — the scheduled run that finds
+ * nothing costs nothing. `headCommit === null` (git unavailable) never skips,
+ * since there is no evidence nothing changed.
+ */
+export function shouldSkipConsolidation(agent: SkipConsolidationInput, headCommit: string | null): boolean {
+  if (headCommit === null) return false;
+  if (agent.lastSyncCommit !== headCommit) return false;
+  return agent.lastConsolidatedCommit === headCommit;
 }

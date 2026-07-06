@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 
 interface CliResult {
@@ -88,10 +88,16 @@ async function chmodWorkspaceFile(filePath: string, mode: number): Promise<void>
   await fs.chmod(filePath, mode);
 }
 
-async function writeConfig(cwd: string, repoName: string, repoPath: string): Promise<void> {
+async function writeConfig(
+  cwd: string,
+  repoName: string,
+  repoPath: string,
+  opts: { consolidateOnSync?: boolean } = {},
+): Promise<void> {
   const config = [
     "provider:",
     "  model: qwen3-coder:30b",
+    ...(opts.consolidateOnSync ? ["consolidate_on_sync: true"] : []),
     "repos:",
     `  ${repoName}:`,
     `    path: ${repoPath}`,
@@ -100,6 +106,43 @@ async function writeConfig(cwd: string, repoName: string, repoPath: string): Pro
     "    ignore_dirs: [node_modules, .git]",
   ].join("\n");
   await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
+}
+
+function initGitRepo(repoDir: string): void {
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["init", "-q"], { cwd: repoDir });
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repoDir });
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["config", "user.name", "Test"], { cwd: repoDir });
+}
+
+async function commitFile(repoDir: string, name: string, contents: string, message: string): Promise<string> {
+  await writeWorkspaceFile(path.join(repoDir, name), contents, "utf8");
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["add", name], { cwd: repoDir });
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["commit", "-q", "-m", message], { cwd: repoDir });
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoDir, encoding: "utf8" }).trim();
+}
+
+function gitHeadCommitForTest(repoDir: string): string {
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoDir, encoding: "utf8" }).trim();
+}
+
+/** Amends the last commit and prunes it so the previous checkpoint SHA becomes unreachable, simulating rebase/force-push drift. */
+async function orphanLastCommit(repoDir: string, fileName: string, newContents: string): Promise<void> {
+  await writeWorkspaceFile(path.join(repoDir, fileName), newContents, "utf8");
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["add", fileName], { cwd: repoDir });
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["commit", "--amend", "-q", "-m", "amended"], { cwd: repoDir });
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["reflog", "expire", "--expire=now", "--all"], { cwd: repoDir });
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["gc", "--prune=now", "-q"], { cwd: repoDir });
 }
 
 async function writeWarnDoctorWorkspace(cwd: string): Promise<string> {
@@ -191,6 +234,7 @@ describe("cli contract", () => {
       watch [options] Watch repos and auto-sync on repo changes
       install-daemon [options] Install launchd daemon for auto-sync on macOS
       uninstall-daemon Uninstall the launchd watch daemon
+      install-instructions [options] Inject repo-expert usage instructions into a repo's CLAUDE.md/AGENTS.md
       mcp-install [options] Add the repo-expert MCP server entry to Claude Code config
       mcp-check [options] Validate existing MCP server entry in Claude Code config
       completion [options] <shell> Print shell completion script (bash, zsh, fish)
@@ -388,6 +432,36 @@ describe("cli contract", () => {
     expect(localConfig.mcpServers?.["repo-expert"]).toBeDefined();
   });
 
+  it("installs instructions, is idempotent, and supports --remove", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-install-instructions-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "CLAUDE.md"), "# My Repo\n", "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const first = runCli(["install-instructions"], cwd);
+    expect(first.status).toBe(0);
+    expect(first.stderr).toBe("");
+    expect(first.stdout).toContain("updated");
+
+    const claudeMd = await readWorkspaceFile(path.join(repoDir, "CLAUDE.md"), "utf8");
+    expect(claudeMd).toContain("<!-- repo-expert:start -->");
+    expect(claudeMd).toContain("# My Repo");
+    await expect(fs.access(path.join(repoDir, "AGENTS.md"))).rejects.toThrow();
+
+    const second = runCli(["install-instructions"], cwd);
+    expect(second.status).toBe(0);
+    expect(second.stdout).toContain("already up to date");
+    expect(second.stdout).not.toContain("updated");
+
+    const removed = runCli(["install-instructions", "--remove"], cwd);
+    expect(removed.status).toBe(0);
+    expect(removed.stdout).toContain("removed");
+    const claudeMdAfterRemove = await readWorkspaceFile(path.join(repoDir, "CLAUDE.md"), "utf8");
+    expect(claudeMdAfterRemove).not.toContain("<!-- repo-expert:start -->");
+    expect(claudeMdAfterRemove).toContain("# My Repo");
+  });
+
   it("shows actionable error without stack trace when mcp-check config is malformed", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-malformed-");
     const home = await makeWorkspace("repo-expert-cli-home-malformed-");
@@ -485,6 +559,272 @@ describe("cli contract", () => {
     expect(payload.results[0].changedFiles).toBe(1);
   });
 
+  it("performs a normal incremental sync against a valid checkpoint commit", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-sync-checkpoint-valid-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    const checkpointSha = await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    await commitFile(repoDir, "b.ts", "export const b = 2;\n", "add b.ts");
+    const headSha = gitHeadCommitForTest(repoDir);
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: checkpointSha,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["sync", "--config", "config.yaml"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("1 changed files since");
+    expect(result.stderr).toBe("");
+
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastSyncCommit: string }>;
+    };
+    expect(savedState.agents["my-app"].lastSyncCommit).toBe(headSha);
+  });
+
+  it("fails fast when the checkpoint commit is orphaned, even if a last-sync timestamp is available", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-sync-checkpoint-since-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    const orphanedSha = await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    await orphanLastCommit(repoDir, "a.ts", "export const a = 2;\n");
+    const headSha = gitHeadCommitForTest(repoDir);
+    expect(headSha).not.toBe(orphanedSha);
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: orphanedSha,
+          lastSyncAt: "2000-01-01T00:00:00.000Z",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["sync", "--config", "config.yaml"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`checkpoint commit ${orphanedSha.slice(0, 7)} no longer exists`);
+    expect(result.stderr).toContain("Refusing to guess a diff window");
+    expect(result.stdout).not.toContain("changed files since");
+
+    // The stored checkpoint is authoritative: state must be left untouched.
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastSyncCommit: string }>;
+    };
+    expect(savedState.agents["my-app"].lastSyncCommit).toBe(orphanedSha);
+    expect(headSha).not.toBe(orphanedSha);
+  });
+
+  it("fails fast when the checkpoint commit is orphaned and no last-sync timestamp is available", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-sync-checkpoint-recent-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    const orphanedSha = await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    await orphanLastCommit(repoDir, "a.ts", "export const a = 2;\n");
+    const headSha = gitHeadCommitForTest(repoDir);
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: orphanedSha,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["sync", "--config", "config.yaml"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`checkpoint commit ${orphanedSha.slice(0, 7)} no longer exists`);
+    expect(result.stderr).toContain("Refusing to guess a diff window");
+    expect(result.stdout).not.toContain("changed files since");
+
+    // The stored checkpoint is authoritative: state must be left untouched.
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastSyncCommit: string }>;
+    };
+    expect(savedState.agents["my-app"].lastSyncCommit).toBe(orphanedSha);
+    expect(headSha).not.toBe(orphanedSha);
+  });
+
+  it("auto-consolidates after sync via checkpoint-range git evidence when consolidate_on_sync is enabled", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-sync-consolidate-checkpoint-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    const checkpointSha = await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    await commitFile(repoDir, "b.ts", "export const b = 2;\n", "add b.ts");
+    await commitFile(repoDir, "c.ts", "export const c = 3;\n", "add c.ts");
+    await commitFile(repoDir, "d.ts", "export const d = 4;\n", "add d.ts");
+    await commitFile(repoDir, "e.ts", "export const e = 5;\n", "add e.ts");
+    await commitFile(repoDir, "f.ts", "export const f = 6;\n", "add f.ts");
+    const headSha = gitHeadCommitForTest(repoDir);
+    await writeConfig(cwd, "my-app", repoDir, { consolidateOnSync: true });
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: checkpointSha,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["sync", "--config", "config.yaml"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_ECHO_PROMPT: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("5 changed files since");
+    expect(result.stdout).toContain("Consolidated architecture/conventions memory blocks.");
+    // Evidence actually reached the prompt, not just an empty placeholder.
+    expect(result.stdout).toContain("Commit log since the last sync");
+    expect(result.stdout).toContain("add f.ts");
+
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastSyncCommit: string; lastConsolidatedCommit?: string | null }>;
+    };
+    expect(savedState.agents["my-app"].lastSyncCommit).toBe(headSha);
+    expect(savedState.agents["my-app"].lastConsolidatedCommit).toBe(headSha);
+  });
+
+  it("auto-consolidates after sync via an explicit --since ref", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-sync-consolidate-since-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    const sinceSha = await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    await commitFile(repoDir, "b.ts", "export const b = 2;\n", "add b.ts");
+    await commitFile(repoDir, "c.ts", "export const c = 3;\n", "add c.ts");
+    await commitFile(repoDir, "d.ts", "export const d = 4;\n", "add d.ts");
+    await commitFile(repoDir, "e.ts", "export const e = 5;\n", "add e.ts");
+    await commitFile(repoDir, "f.ts", "export const f = 6;\n", "add f.ts");
+    const headSha = gitHeadCommitForTest(repoDir);
+    await writeConfig(cwd, "my-app", repoDir, { consolidateOnSync: true });
+
+    // No stored checkpoint: without --since this would hit the "no previous
+    // sync" skip branch, proving the evidence below comes from the explicit ref.
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["sync", "--config", "config.yaml", "--since", sinceSha], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_ECHO_PROMPT: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("5 changed files since");
+    expect(result.stdout).toContain("Consolidated architecture/conventions memory blocks.");
+    expect(result.stdout).toContain("Commit log since the last sync");
+    expect(result.stdout).toContain("add f.ts");
+
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastConsolidatedCommit?: string | null }>;
+    };
+    expect(savedState.agents["my-app"].lastConsolidatedCommit).toBe(headSha);
+  });
+
+  it("auto-consolidates after a full re-index sync with git evidence omitted", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-sync-consolidate-full-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    await commitFile(repoDir, "b.ts", "export const b = 2;\n", "add b.ts");
+    await commitFile(repoDir, "c.ts", "export const c = 3;\n", "add c.ts");
+    await commitFile(repoDir, "d.ts", "export const d = 4;\n", "add d.ts");
+    await commitFile(repoDir, "e.ts", "export const e = 5;\n", "add e.ts");
+    const headSha = gitHeadCommitForTest(repoDir);
+    await writeConfig(cwd, "my-app", repoDir, { consolidateOnSync: true });
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["sync", "--config", "config.yaml", "--full"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_ECHO_PROMPT: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("full re-index");
+    expect(result.stdout).toContain("Git evidence omitted from consolidation: full re-index has no diff window.");
+    expect(result.stdout).toContain("Consolidated architecture/conventions memory blocks.");
+    // No git evidence was gathered, so the prompt must not carry an evidence section.
+    expect(result.stdout).not.toContain("Commit log since the last sync");
+
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastConsolidatedCommit?: string | null }>;
+    };
+    expect(savedState.agents["my-app"].lastConsolidatedCommit).toBe(headSha);
+  });
+
   it("supports status --json", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-status-json-");
     const state = {
@@ -564,6 +904,138 @@ describe("cli contract", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Skipped");
+  });
+
+  it("manual consolidate gathers checkpoint-range git evidence against a real repo and stamps lastConsolidatedCommit", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-consolidate-checkpoint-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    const checkpointSha = await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    await commitFile(repoDir, "b.ts", "export const b = 2;\n", "add feature b.ts");
+    const headSha = gitHeadCommitForTest(repoDir);
+    expect(headSha).not.toBe(checkpointSha);
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: checkpointSha,
+          lastSyncAt: null,
+          lastConsolidatedCommit: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["consolidate", "--repo", "my-app", "--config", "config.yaml"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_ECHO_PROMPT: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Consolidating memory for "my-app"');
+    expect(result.stdout).toContain("Done.");
+    // Real git evidence from the checkpoint..HEAD range reached the prompt.
+    expect(result.stdout).toContain("Commit log since the last sync");
+    expect(result.stdout).toContain("add feature b.ts");
+
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastConsolidatedCommit?: string | null }>;
+    };
+    expect(savedState.agents["my-app"].lastConsolidatedCommit).toBe(headSha);
+  });
+
+  it("manual consolidate skips when HEAD matches both lastSyncCommit and lastConsolidatedCommit", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-consolidate-skip-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    const headSha = gitHeadCommitForTest(repoDir);
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: headSha,
+          lastSyncAt: null,
+          lastConsolidatedCommit: headSha,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    const stateJson = JSON.stringify(state);
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), stateJson, "utf8");
+
+    const result = runCli(["consolidate", "--repo", "my-app", "--config", "config.yaml"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_ECHO_PROMPT: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Skipped: no repository changes since last consolidation.");
+    // The provider must never be reached once the skip fires.
+    expect(result.stdout).not.toContain("[fake-consolidate-prompt]");
+
+    const savedState = await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"));
+    expect(savedState).toBe(stateJson);
+  });
+
+  it("manual consolidate fails fast on an orphaned checkpoint, leaving state untouched", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-consolidate-orphan-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    // A checkpoint SHA that never existed in this repo — same effect as one
+    // orphaned by rebase/force-push/gc, without needing to reconstruct that history.
+    const bogusSha = "abc1234abc1234abc1234abc1234abc1234abcd";
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: bogusSha,
+          lastSyncAt: null,
+          lastConsolidatedCommit: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    const stateJson = JSON.stringify(state);
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), stateJson, "utf8");
+
+    const result = runCli(["consolidate", "--repo", "my-app", "--config", "config.yaml"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_ECHO_PROMPT: "1",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`checkpoint commit ${bogusSha.slice(0, 7)} no longer exists`);
+    expect(result.stderr).toContain('Re-establish it with "repo-expert sync --since <ref>" or "repo-expert sync --full"');
+    // The provider must never be reached once the orphan check fails.
+    expect(result.stdout).not.toContain("[fake-consolidate-prompt]");
+
+    const savedState = await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"));
+    expect(savedState).toBe(stateJson);
   });
 
   it("supports doctor --fix", async () => {

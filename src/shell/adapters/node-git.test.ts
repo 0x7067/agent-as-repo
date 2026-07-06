@@ -107,4 +107,63 @@ describe("nodeGit adapter", () => {
     mockedExecFileSync.mockImplementation(() => { throw new Error("git error"); });
     expect(nodeGit.diffFiles("/repo", "abc123")).toBeNull();
   });
+
+  it("satisfies GitPort interface with commitExists and logNameStatus", () => {
+    const port: GitPort = nodeGit;
+    expect(typeof port.commitExists).toBe("function");
+    expect(typeof port.logNameStatus).toBe("function");
+  });
+
+  it("commitExists calls git cat-file -e <sha>^{commit} and returns true on success", () => {
+    mockedExecFileSync.mockReturnValue("");
+    const result = nodeGit.commitExists("/repo", "abc123");
+    expect(mockedExecFileSync).toHaveBeenCalledWith(
+      "git",
+      ["cat-file", "-e", "abc123^{commit}"],
+      expect.objectContaining({ cwd: "/repo", encoding: "utf8" }),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("commitExists returns false when git fails", () => {
+    mockedExecFileSync.mockImplementation(() => { throw new Error("no such commit"); });
+    expect(nodeGit.commitExists("/repo", "deadbeef")).toBe(false);
+  });
+
+  it("logNameStatus calls git log with <from>..HEAD for a range source", () => {
+    mockedExecFileSync.mockReturnValue("abc1234 msg\nM\tsrc/a.ts\n");
+    const result = nodeGit.logNameStatus("/repo", { kind: "range", from: "abc123" });
+    expect(mockedExecFileSync).toHaveBeenCalledWith(
+      "git",
+      ["--no-pager", "log", "--name-status", "--oneline", "abc123..HEAD"],
+      expect.objectContaining({ cwd: "/repo", encoding: "utf8", maxBuffer: 1024 * 1024 }),
+    );
+    expect(result).toBe("abc1234 msg\nM\tsrc/a.ts\n");
+  });
+
+  it("logNameStatus calls git log with --since=<date> for a since source", () => {
+    mockedExecFileSync.mockReturnValue("");
+    nodeGit.logNameStatus("/repo", { kind: "since", date: "2026-01-01T00:00:00.000Z" });
+    expect(mockedExecFileSync).toHaveBeenCalledWith(
+      "git",
+      ["--no-pager", "log", "--name-status", "--oneline", "--since=2026-01-01T00:00:00.000Z"],
+      expect.objectContaining({ cwd: "/repo" }),
+    );
+  });
+
+  it("logNameStatus calls git log with --max-count=<n> for a recent source", () => {
+    mockedExecFileSync.mockReturnValue("");
+    nodeGit.logNameStatus("/repo", { kind: "recent", count: 20 });
+    expect(mockedExecFileSync).toHaveBeenCalledWith(
+      "git",
+      ["--no-pager", "log", "--name-status", "--oneline", "--max-count=20"],
+      expect.objectContaining({ cwd: "/repo" }),
+    );
+  });
+
+  it("logNameStatus returns empty string when git fails", () => {
+    mockedExecFileSync.mockImplementation(() => { throw new Error("git error"); });
+    expect(nodeGit.logNameStatus("/repo", { kind: "recent", count: 20 })).toBe("");
+  });
+
 });

@@ -31,18 +31,22 @@ import { listSubmodules, expandSubmoduleFiles } from "./shell/submodule-collecto
 import { addAgentToState, removeAgentFromState, updateAgentField, updatePassageMap } from "./core/state.js";
 import { syncRepo } from "./shell/sync.js";
 import { consolidateAgentMemory } from "./shell/consolidate.js";
-import { shouldConsolidate } from "./core/consolidate.js";
+import { shouldConsolidate, shouldSkipConsolidation } from "./core/consolidate.js";
+import { nodeGit } from "./shell/adapters/node-git.js";
+import { formatGitEvidence, formatOrphanedCheckpointMessage, OrphanedCheckpointError, type EvidenceSource } from "./core/git-evidence.js";
+import { gatherGitEvidence, GIT_EVIDENCE_MAX_CHARS } from "./shell/git-evidence.js";
 import { resolveTreeSitterWasmPaths } from "./shell/tree-sitter-paths.js";
 import { getAgentStatus, getAgentStatusData } from "./shell/status.js";
 import { exportAgent } from "./shell/export.js";
 import { onboardAgent } from "./shell/onboard.js";
+import { installInstructions } from "./shell/agent-instructions.js";
 import { BROADCAST_ASK_DEFAULT_TIMEOUT_MS, broadcastAsk } from "./shell/group-provider.js";
 import { watchRepos } from "./shell/watch.js";
 import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
 import { generateMcpEntry, checkMcpEntry, type McpProviderConfig } from "./core/mcp-config.js";
 import { buildPostSetupNextSteps, getSetupMode } from "./core/setup.js";
-import { MAX_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Config } from "./core/types.js";
+import { MAX_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Config, type RepoConfig } from "./core/types.js";
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
 import type { LocalRuntimeOptions } from "./shell/local-provider.js";
 
@@ -290,10 +294,13 @@ class FakeProvider implements AgentProvider {
     return "ok";
   }
 
-  async consolidateMemory(agentId: string, _prompt: string, _options?: unknown): Promise<void> {
+  async consolidateMemory(agentId: string, prompt: string, _options?: unknown): Promise<void> {
     if (process.env["REPO_EXPERT_TEST_FAIL_CONSOLIDATE_ONCE"] === "1") {
       process.env["REPO_EXPERT_TEST_FAIL_CONSOLIDATE_ONCE"] = "0";
       throw new Error("simulated consolidation failure");
+    }
+    if (process.env["REPO_EXPERT_TEST_ECHO_PROMPT"] === "1") {
+      console.log(`[fake-consolidate-prompt]${prompt}[/fake-consolidate-prompt]`);
     }
     await this.updateBlock(agentId, "architecture", "consolidated architecture");
     await this.updateBlock(agentId, "conventions", "consolidated conventions");
@@ -311,7 +318,11 @@ function createProviderForCommands(config: Config | null): AgentProvider {
 }
 
 async function loadConfigForProvider(configPath: string): Promise<Config | null> {
-  if (process.env["REPO_EXPERT_TEST_FAKE_PROVIDER"] === "1") return null;
+  // The fake provider stands in for the LLM regardless of config, but git-backed
+  // commands (consolidate, sync's downstream helpers) still need real repo config
+  // to exercise their git wiring under test. Fall back to null only when no config
+  // file is present, same as loadOptionalConfig elsewhere.
+  if (process.env["REPO_EXPERT_TEST_FAKE_PROVIDER"] === "1") return loadOptionalConfig(configPath);
   return loadConfigSafe(configPath);
 }
 
@@ -366,13 +377,93 @@ async function loadOptionalConfig(configPath: string): Promise<Config | null> {
   }
 }
 
-function gitHeadCommit(cwd: string): string | null {
-  try {
-    // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
-    return execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-  } catch {
-    return null;
+/**
+ * Apply the same extension/ignore-dir filtering and submodule expansion to a
+ * raw list of diff paths, regardless of which evidence source produced them
+ * (an explicit --since ref or a validated checkpoint commit).
+ */
+async function filterChangedFiles(diffPaths: string[], repoConfig: RepoConfig): Promise<string[]> {
+  if (repoConfig.includeSubmodules) {
+    const submodules = listSubmodules(repoConfig.path);
+    const { changedSubmodules, regularFiles } = partitionDiffPaths(
+      diffPaths,
+      submodules,
+      (f) => shouldIncludeFile(f, 0, repoFilterOptions(repoConfig)),
+    );
+    const expandedSubFiles: string[] = [];
+    for (const sub of changedSubmodules) {
+      expandedSubFiles.push(...(await expandSubmoduleFiles(repoConfig, sub)));
+    }
+    return [...regularFiles, ...expandedSubFiles];
   }
+  return diffPaths.filter((f) => shouldIncludeFile(f, 0, repoFilterOptions(repoConfig)));
+}
+
+/**
+ * Run (or skip) manual consolidation for a single repo agent, returning the
+ * possibly-updated app state. Extracted from the `consolidate` command action
+ * to keep its cognitive complexity within budget.
+ */
+async function consolidateRepoAgent(params: {
+  state: AppState;
+  repoName: string;
+  agentInfo: AgentState;
+  config: Config | null;
+  provider: AgentProvider;
+}): Promise<AppState> {
+  const { repoName, agentInfo, config, provider } = params;
+  let state = params.state;
+
+  console.log(`Consolidating memory for "${repoName}"...`);
+  const repoConfig = config ? getOwnRecordValue(config.repos, repoName) : undefined;
+  const headCommit = repoConfig ? nodeGit.headCommit(repoConfig.path) : null;
+
+  if (shouldSkipConsolidation(agentInfo, headCommit)) {
+    console.log(`  Skipped: no repository changes since last consolidation.`);
+    return state;
+  }
+
+  let gitEvidence = "";
+  if (repoConfig) {
+    try {
+      gitEvidence = gatherGitEvidence(nodeGit, repoConfig.path, agentInfo);
+    } catch (error) {
+      if (error instanceof OrphanedCheckpointError) {
+        console.error(
+          `"${repoName}": checkpoint commit ${error.commit.slice(0, 7)} no longer exists (rebase, force-push, or gc?). ` +
+          `Re-establish it with "repo-expert sync --since <ref>" or "repo-expert sync --full", then consolidate.`,
+        );
+        process.exitCode = 1;
+        return state;
+      }
+      throw error;
+    }
+  }
+  const result = await consolidateAgentMemory({
+    provider,
+    agentId: agentInfo.agentId,
+    changedFiles: [],
+    syncResult: { filesReIndexed: 0, filesRemoved: 0 },
+    blockCharLimit: MEMORY_BLOCK_LIMIT,
+    gitEvidence,
+    log: (line: string) => { console.log(line); },
+  });
+
+  if (!result.consolidated) {
+    console.log(`  Skipped: ${result.error ?? "nothing to consolidate"}.`);
+    return state;
+  }
+
+  if (result.changed) {
+    if (headCommit !== null) {
+      state = updateAgentField(state, repoName, { lastConsolidatedCommit: headCommit });
+      await saveState(STATE_FILE, state);
+    }
+    console.log(`  Done.`);
+  }
+  // else: "consolidation: blocks unchanged" was already logged inside consolidateAgentMemory.
+
+  return state;
 }
 
 function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
@@ -963,7 +1054,7 @@ program
         }
 
         // Store HEAD commit so incremental sync works immediately
-        const headCommit = gitHeadCommit(repoConfig.path);
+        const headCommit = nodeGit.headCommit(repoConfig.path);
         if (headCommit) {
           state = updateAgentField(state, repoName, { lastSyncCommit: headCommit });
           await saveState(STATE_FILE, state);
@@ -1109,7 +1200,7 @@ program
         continue;
       }
 
-      const headCommit = gitHeadCommit(repoConfig.path);
+      const headCommit = nodeGit.headCommit(repoConfig.path);
       if (!headCommit && (!opts.dryRun || !opts.full)) {
         const message = `"${repoName}": not a git repository or git is not available (${repoConfig.path})`;
         console.error(message);
@@ -1119,50 +1210,55 @@ program
       }
 
       let changedFiles: string[];
+      // The evidence window consolidation will use — always the same source
+      // the sync itself used, never re-derived from (possibly stale) state.
+      // Null only under --full, which has no diff window.
+      let syncEvidenceSource: EvidenceSource | null = null;
       if (opts.full) {
         const files = await collectFiles(repoConfig);
         changedFiles = files.map((f) => f.path);
         log(`Syncing "${repoName}" (full re-index, ${String(changedFiles.length)} files)...`);
-      } else {
-        const sinceRef = opts.since ?? agentInfo.lastSyncCommit;
-        if (!sinceRef) {
-          log(`No previous sync for "${repoName}". Run "repo-expert sync --full" or re-run "repo-expert setup".`);
-          syncResults.push({ repoName, status: "skipped", reason: "no_previous_sync" });
-          continue;
-        }
-
-        let diff: string;
-        try {
-          // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
-          diff = execFileSync("git", ["diff", "--name-only", `${sinceRef}..HEAD`], {
-            cwd: repoConfig.path,
-            encoding: "utf8",
-            stdio: ["pipe", "pipe", "pipe"],
-          }).trim();
-        } catch {
-          const message = `"${repoName}": git diff failed. Is "${sinceRef}" a valid ref?`;
+      } else if (opts.since) {
+        // Explicit override: the user named a specific ref, so an invalid one
+        // is a user error — fail loudly rather than degrade.
+        const diff = nodeGit.diffFiles(repoConfig.path, opts.since);
+        if (diff === null) {
+          const message = `"${repoName}": git diff failed. Is "${opts.since}" a valid ref?`;
           console.error(message);
           syncResults.push({ repoName, status: "error", error: message });
           process.exitCode = 1;
           continue;
         }
-        const diffPaths = diff ? diff.split("\n") : [];
-        if (repoConfig.includeSubmodules) {
-          const submodules = listSubmodules(repoConfig.path);
-          const { changedSubmodules, regularFiles } = partitionDiffPaths(
-            diffPaths,
-            submodules,
-            (f) => shouldIncludeFile(f, 0, repoFilterOptions(repoConfig)),
-          );
-          const expandedSubFiles: string[] = [];
-          for (const sub of changedSubmodules) {
-            expandedSubFiles.push(...(await expandSubmoduleFiles(repoConfig, sub)));
-          }
-          changedFiles = [...regularFiles, ...expandedSubFiles];
-        } else {
-          changedFiles = diffPaths.filter((f) => shouldIncludeFile(f, 0, repoFilterOptions(repoConfig)));
+        changedFiles = await filterChangedFiles(diff, repoConfig);
+        syncEvidenceSource = { kind: "range", from: opts.since };
+        log(`Syncing "${repoName}" (${String(changedFiles.length)} changed files since ${opts.since.slice(0, 7)})...`);
+      } else if (agentInfo.lastSyncCommit) {
+        const checkpoint = agentInfo.lastSyncCommit;
+        if (!nodeGit.commitExists(repoConfig.path, checkpoint)) {
+          // The stored checkpoint is authoritative. If it is gone (rebase,
+          // force-push, gc), refuse to guess a diff window — recovery is
+          // only ever explicit.
+          const message = `"${repoName}": ${formatOrphanedCheckpointMessage(checkpoint)}`;
+          console.error(message);
+          syncResults.push({ repoName, status: "error", error: message });
+          process.exitCode = 1;
+          continue;
         }
-        log(`Syncing "${repoName}" (${String(changedFiles.length)} changed files since ${sinceRef.slice(0, 7)})...`);
+        const diff = nodeGit.diffFiles(repoConfig.path, checkpoint);
+        if (diff === null) {
+          const message = `"${repoName}": git diff failed. Is "${checkpoint}" a valid ref?`;
+          console.error(message);
+          syncResults.push({ repoName, status: "error", error: message });
+          process.exitCode = 1;
+          continue;
+        }
+        changedFiles = await filterChangedFiles(diff, repoConfig);
+        syncEvidenceSource = { kind: "range", from: checkpoint };
+        log(`Syncing "${repoName}" (${String(changedFiles.length)} changed files since ${checkpoint.slice(0, 7)})...`);
+      } else {
+        log(`No previous sync for "${repoName}". Run "repo-expert sync --full" or re-run "repo-expert setup".`);
+        syncResults.push({ repoName, status: "skipped", reason: "no_previous_sync" });
+        continue;
       }
 
       if (changedFiles.length === 0) {
@@ -1237,15 +1333,26 @@ program
       await saveState(STATE_FILE, state);
 
       if (shouldConsolidate(result, config.consolidateOnSync)) {
+        // Evidence comes from the exact window this sync just used — never
+        // re-derived from pre-sync state.
+        let gitEvidence = "";
+        if (syncEvidenceSource) {
+          gitEvidence = formatGitEvidence(nodeGit.logNameStatus(repoConfig.path, syncEvidenceSource), GIT_EVIDENCE_MAX_CHARS);
+        } else {
+          log(`  Git evidence omitted from consolidation: full re-index has no diff window.`);
+        }
         const consolidation = await consolidateAgentMemory({
           provider,
           agentId: agentInfo.agentId,
           changedFiles,
           syncResult: result,
           blockCharLimit: MEMORY_BLOCK_LIMIT,
+          gitEvidence,
           log,
         });
-        if (consolidation.consolidated) {
+        if (consolidation.consolidated && consolidation.changed) {
+          state = updateAgentField(state, repoName, { lastConsolidatedCommit: headCommit });
+          await saveState(STATE_FILE, state);
           log(`  Consolidated architecture/conventions memory blocks.`);
         }
       }
@@ -1365,7 +1472,7 @@ program
   .option("--repo <name>", "Consolidate a single repo agent")
   .option("--config <path>", "Config file path", "config.yaml")
   .action(async (opts: ConsolidateCliOpts) => {
-    const state = await loadState(STATE_FILE);
+    let state = await loadState(STATE_FILE);
     const config = await loadConfigForProvider(path.resolve(opts.config));
     const provider = createProviderForCommands(config);
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
@@ -1374,21 +1481,7 @@ program
       const agentInfo = requireAgent(state, repoName);
       if (!agentInfo) return;
 
-      console.log(`Consolidating memory for "${repoName}"...`);
-      const result = await consolidateAgentMemory({
-        provider,
-        agentId: agentInfo.agentId,
-        changedFiles: [],
-        syncResult: { filesReIndexed: 0, filesRemoved: 0 },
-        blockCharLimit: MEMORY_BLOCK_LIMIT,
-        log: (line: string) => { console.log(line); },
-      });
-
-      if (result.consolidated) {
-        console.log(`  Done.`);
-      } else {
-        console.log(`  Skipped: ${result.error ?? "nothing to consolidate"}.`);
-      }
+      state = await consolidateRepoAgent({ state, repoName, agentInfo, config, provider });
     }
   });
 
@@ -1583,15 +1676,24 @@ program
       `Watching ${String(repoNames.length)} repo(s) (poll every ${String(intervalMs / 1000)}s, debounce ${String(debounceMs)}ms). Press Ctrl+C to stop.`,
     );
 
-    await watchRepos({
-      provider,
-      config,
-      repoNames,
-      statePath: STATE_FILE,
-      intervalMs,
-      debounceMs,
-      signal: ac.signal,
-    });
+    try {
+      await watchRepos({
+        provider,
+        config,
+        repoNames,
+        statePath: STATE_FILE,
+        intervalMs,
+        debounceMs,
+        signal: ac.signal,
+      });
+    } catch (error) {
+      if (error instanceof OrphanedCheckpointError) {
+        console.error(`Watch stopped: ${formatOrphanedCheckpointMessage(error.commit)}`);
+        process.exitCode = 1;
+        return;
+      }
+      throw error;
+    }
 
     console.log("Watch stopped.");
   });
@@ -1695,6 +1797,14 @@ program
     }
   });
 
+interface InstallInstructionsOpts {
+  repo?: string;
+  config: string;
+  file?: string;
+  remove?: boolean;
+  dryRun?: boolean;
+}
+
 interface McpInstallOpts {
   global?: boolean;
   local?: boolean;
@@ -1711,6 +1821,65 @@ interface CompletionOpts {
 }
 
 const MCP_ENTRY_NAME = "repo-expert";
+
+function printInstallInstructionsOutcome(prefix: string, repoName: string, outcome: { path: string; action: string; warning?: string }): void {
+  if (outcome.action === "unchanged") {
+    console.log(`${prefix}${repoName}: ${outcome.path} already up to date`);
+  } else {
+    console.log(`${prefix}${repoName}: ${outcome.action} ${outcome.path}`);
+  }
+  if (outcome.warning) console.warn(`  Warning: ${outcome.warning}`);
+}
+
+async function runInstallInstructionsForRepo(
+  repoName: string,
+  config: Config,
+  opts: InstallInstructionsOpts,
+  prefix: string,
+): Promise<void> {
+  const repoConfig = getOwnRecordValue(config.repos, repoName);
+  if (repoConfig === undefined) {
+    console.error(`Repo "${repoName}" not found in config`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const outcomes = await installInstructions({
+    repoPath: repoConfig.path,
+    repoNames: [repoName],
+    remove: Boolean(opts.remove),
+    dryRun: Boolean(opts.dryRun),
+    ...(opts.file === undefined ? {} : { filePath: opts.file }),
+  });
+
+  for (const outcome of outcomes) {
+    printInstallInstructionsOutcome(prefix, repoName, outcome);
+  }
+}
+
+program
+  .command("install-instructions")
+  .description("Inject repo-expert usage instructions into a repo's CLAUDE.md/AGENTS.md")
+  .option("--repo <name>", "Install for a single repo (default: all configured repos)")
+  .option("--config <path>", "Config file path", "config.yaml")
+  .option("--file <path>", "Explicit target file path (overrides CLAUDE.md/AGENTS.md discovery)")
+  .option("--remove", "Remove the repo-expert instructions block instead of installing it")
+  .option("--dry-run", "Preview without writing files")
+  .action(async (opts: InstallInstructionsOpts) => {
+    const configPath = path.resolve(opts.config);
+    const config = await loadConfigSafe(configPath);
+    const repoNames = opts.repo ? [opts.repo] : Object.keys(config.repos);
+
+    if (repoNames.length === 0) {
+      console.log("No repos configured.");
+      return;
+    }
+
+    const prefix = opts.dryRun ? "[dry-run] " : "";
+    for (const repoName of repoNames) {
+      await runInstallInstructionsForRepo(repoName, config, opts, prefix);
+    }
+  });
 
 program
   .command("mcp-install")
@@ -1767,6 +1936,7 @@ program
       }
     }
     console.log("Restart Claude Code to pick up the change.");
+    console.log('Tip: run "repo-expert install-instructions" to point Claude Code at these tools from CLAUDE.md/AGENTS.md.');
   });
 
 program
