@@ -293,10 +293,13 @@ class FakeProvider implements AgentProvider {
     return "ok";
   }
 
-  async consolidateMemory(agentId: string, _prompt: string, _options?: unknown): Promise<void> {
+  async consolidateMemory(agentId: string, prompt: string, _options?: unknown): Promise<void> {
     if (process.env["REPO_EXPERT_TEST_FAIL_CONSOLIDATE_ONCE"] === "1") {
       process.env["REPO_EXPERT_TEST_FAIL_CONSOLIDATE_ONCE"] = "0";
       throw new Error("simulated consolidation failure");
+    }
+    if (process.env["REPO_EXPERT_TEST_ECHO_PROMPT"] === "1") {
+      console.log(`[fake-consolidate-prompt]${prompt}[/fake-consolidate-prompt]`);
     }
     await this.updateBlock(agentId, "architecture", "consolidated architecture");
     await this.updateBlock(agentId, "conventions", "consolidated conventions");
