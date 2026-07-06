@@ -47,6 +47,18 @@ export function selectEvidenceSource(agent: AgentState, commitExists: boolean): 
 }
 
 /**
+ * Format the recovery message for an orphaned checkpoint: names the
+ * short SHA and points at the two explicit recovery paths (`sync --since
+ * <ref>` / `sync --full`). Shared by every caller that surfaces
+ * `OrphanedCheckpointError` to a human — sync, manual consolidate, and the
+ * watch daemon — so the instructions never drift between them.
+ */
+export function formatOrphanedCheckpointMessage(commit: string): string {
+  return `checkpoint commit ${commit.slice(0, 7)} no longer exists (rebase, force-push, or gc?). ` +
+    `Refusing to guess a diff window — re-run with "repo-expert sync --since <ref>" or "repo-expert sync --full".`;
+}
+
+/**
  * Format a raw `git log --name-status --oneline` output as a fenced section
  * for the consolidation prompt, truncated from the oldest end so the newest
  * commits (the most relevant evidence) are kept.

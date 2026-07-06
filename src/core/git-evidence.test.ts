@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { selectEvidenceSource, formatGitEvidence, OrphanedCheckpointError } from "./git-evidence.js";
+import { selectEvidenceSource, formatGitEvidence, formatOrphanedCheckpointMessage, OrphanedCheckpointError } from "./git-evidence.js";
 import type { AgentState } from "./types.js";
 
 function makeAgent(overrides: Partial<AgentState> = {}): AgentState {
@@ -40,6 +40,19 @@ describe("selectEvidenceSource", () => {
   it("uses a recent window for a brand-new agent with no checkpoint and no timestamp", () => {
     const agent = makeAgent();
     expect(selectEvidenceSource(agent, false)).toEqual({ kind: "recent", count: 20 });
+  });
+});
+
+describe("formatOrphanedCheckpointMessage", () => {
+  it("names the short SHA and both recovery flags", () => {
+    const message = formatOrphanedCheckpointMessage("abc1234def5678");
+    expect(message).toContain("checkpoint commit abc1234 no longer exists");
+    expect(message).toContain('"repo-expert sync --since <ref>"');
+    expect(message).toContain('"repo-expert sync --full"');
+  });
+
+  it("is stable for the same input (pure)", () => {
+    expect(formatOrphanedCheckpointMessage("abc1234")).toBe(formatOrphanedCheckpointMessage("abc1234"));
   });
 });
 

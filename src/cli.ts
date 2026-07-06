@@ -33,7 +33,8 @@ import { syncRepo } from "./shell/sync.js";
 import { consolidateAgentMemory } from "./shell/consolidate.js";
 import { shouldConsolidate, shouldSkipConsolidation } from "./core/consolidate.js";
 import { nodeGit } from "./shell/adapters/node-git.js";
-import { selectEvidenceSource, formatGitEvidence, OrphanedCheckpointError, type EvidenceSource } from "./core/git-evidence.js";
+import { formatGitEvidence, formatOrphanedCheckpointMessage, OrphanedCheckpointError, type EvidenceSource } from "./core/git-evidence.js";
+import { gatherGitEvidence, GIT_EVIDENCE_MAX_CHARS } from "./shell/git-evidence.js";
 import { resolveTreeSitterWasmPaths } from "./shell/tree-sitter-paths.js";
 import { getAgentStatus, getAgentStatusData } from "./shell/status.js";
 import { exportAgent } from "./shell/export.js";
@@ -376,22 +377,6 @@ async function loadOptionalConfig(configPath: string): Promise<Config | null> {
   }
 }
 
-/** Max characters of formatted git log evidence embedded in a consolidation prompt. */
-const GIT_EVIDENCE_MAX_CHARS = 4000;
-
-/**
- * Gather formatted git evidence for a consolidation prompt. Throws
- * `OrphanedCheckpointError` when the agent's stored checkpoint no longer
- * exists — callers must surface that instead of consolidating against a
- * silently different evidence window.
- */
-function gatherGitEvidence(repoPath: string, agent: AgentState): string {
-  const commitExists = agent.lastSyncCommit !== null && nodeGit.commitExists(repoPath, agent.lastSyncCommit);
-  const source = selectEvidenceSource(agent, commitExists);
-  const rawLog = nodeGit.logNameStatus(repoPath, source);
-  return formatGitEvidence(rawLog, GIT_EVIDENCE_MAX_CHARS);
-}
-
 /**
  * Apply the same extension/ignore-dir filtering and submodule expansion to a
  * raw list of diff paths, regardless of which evidence source produced them
@@ -441,7 +426,7 @@ async function consolidateRepoAgent(params: {
   let gitEvidence = "";
   if (repoConfig) {
     try {
-      gitEvidence = gatherGitEvidence(repoConfig.path, agentInfo);
+      gitEvidence = gatherGitEvidence(nodeGit, repoConfig.path, agentInfo);
     } catch (error) {
       if (error instanceof OrphanedCheckpointError) {
         console.error(
@@ -1253,9 +1238,7 @@ program
           // The stored checkpoint is authoritative. If it is gone (rebase,
           // force-push, gc), refuse to guess a diff window — recovery is
           // only ever explicit.
-          const message =
-            `"${repoName}": checkpoint commit ${checkpoint.slice(0, 7)} no longer exists (rebase, force-push, or gc?). ` +
-            `Refusing to guess a diff window — re-run with "repo-expert sync --since <ref>" or "repo-expert sync --full".`;
+          const message = `"${repoName}": ${formatOrphanedCheckpointMessage(checkpoint)}`;
           console.error(message);
           syncResults.push({ repoName, status: "error", error: message });
           process.exitCode = 1;
