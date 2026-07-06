@@ -8,15 +8,19 @@ answers questions about them. Functional core / imperative shell, TDD, pnpm,
 vitest, Zod v4 (`zod/v4` import path).
 
 ## Now
-docs/plans/2026-07-06-auto-updating-context-spec.md is fully implemented.
-All four items committed on branch `claude/auto-updating-docs-spec-8gi079`:
+docs/plans/2026-07-06-auto-updating-context-spec.md is fully implemented
+on branch `claude/auto-updating-docs-spec-8gi079`, **pushed** to origin
+(github.com:0x7067/agent-as-repo) through `4d019f9`. No PR opened yet.
 
 - `605e5e5` install-instructions command (spec item 4)
 - `4d9b793` git evidence in consolidation prompts (spec item 1)
 - `0731cf9` fingerprint no-op detection (spec item 2)
 - `cdc44af` checkpoint fallback for sync (spec item 3)
-
-Branch is local-only: not pushed, no PR, awaiting the user's review/merge.
+- `6c49f3b` refactor: orphaned sync checkpoint now **fails fast** with
+  recovery instructions (`--since <ref>` / `--full`) instead of silently
+  guessing a diff window — supersedes cdc44af's silent fallback chain
+- `4d019f9` spec doc re-synced with implemented behavior (teammate audit
+  found 3/4 items compliant, 4 doc-only stale passages; all fixed)
 
 ## Verification path
 - `pnpm test` — 931 passed (931), run 2026-07-06 on final tree (session
@@ -29,9 +33,14 @@ Branch is local-only: not pushed, no PR, awaiting the user's review/merge.
 - Sequential subagent phases over parallel worktrees: overlapping `src/cli.ts`
   edits and inter-item dependencies made merge risk cost more than parallelism.
 - `sync --since <ref>` with an invalid ref still hard-fails: an explicit user
-  override is a user error, not eligible for the checkpoint fallback chain.
+  override is a user error, not eligible for automatic recovery.
+- **Superseded decision (6c49f3b):** cdc44af's silent fallback chain for
+  orphaned checkpoints (checkpoint → since → recent/full) was replaced by
+  fail-fast with explicit recovery instructions. Rationale: silently guessing
+  a diff window corrupts memory scope; a hard stop is recoverable, corrupted
+  agent memory is not. The spec doc was updated to match (4d019f9).
 - A never-synced agent (lastSyncCommit null) keeps the "No previous sync" skip;
-  the fallback chain only rescues *orphaned* checkpoints (spec's Problem framing).
+  orphan detection only applies to previously-synced agents.
 - No-op consolidation leaves zero state trace (spec line 58): repeated no-ops
   re-run the LLM turn; only lastConsolidatedCommit === HEAD === lastSyncCommit
   short-circuits pre-LLM.
@@ -52,8 +61,9 @@ Branch is local-only: not pushed, no PR, awaiting the user's review/merge.
   except `sync`, which uses `loadConfigSafe` and loads real config.
 
 ## Next
-1. User (pedro) reviews/merges `claude/auto-updating-docs-spec-8gi079` —
-   external dependency; re-verify branch state before building on it.
+1. Open a PR for `claude/auto-updating-docs-spec-8gi079` (pushed through
+   `4d019f9`, no PR yet) and get pedro's review/merge — external
+   dependency; re-verify branch/PR state before building on it.
 2. Follow-up: `lastSyncAt` is only written by watch.ts, so sync-only users
    can never reach the `since` fallback (they skip range → recent/full).
    Decide whether manual `sync` should also stamp `lastSyncAt`.

@@ -1,5 +1,26 @@
 # Journal
 
+## 2026-07-06 — Fail-fast checkpoint refactor, spec audit, doc sync, branch pushed
+- Did: replaced cdc44af's silent orphaned-checkpoint fallback chain with
+  fail-fast + recovery instructions (`6c49f3b`) at the user's direction —
+  sync now hard-stops on an orphaned checkpoint and tells the user to re-run
+  with `--since <ref>` or `--full` instead of guessing a diff window. Ran a
+  teammate spec audit (`spec-audit`): verdict 3/4 items COMPLIANT, item 3
+  compliant-in-behavior with 4 doc-only stale passages. A second teammate
+  (`spec-doc-fix`) rewrote those passages; reviewed and committed as
+  `4d019f9`. Pushed the whole branch to origin (was local-only).
+- Verified: pnpm test 931 passed (931) on the post-refactor tree; pnpm run
+  typecheck clean; pnpm run lint --max-warnings 0 clean. Final commit
+  4d019f9 is docs-only (19+/14-, single .md file) — gates not re-run after
+  it, by inspection of `git diff --stat`.
+- Learned: truly orphaning a checkpoint in tests needs `commit --amend` +
+  `reflog expire` + `gc --prune=now`; teammate audits catch spec/code drift
+  the implementer reads past.
+- Left: no PR yet (branch pushed through 4d019f9); state.md Next items 2–4
+  (lastSyncAt gap, includeSubmodules × fallback coverage, fake-provider
+  harness fix) still open; distrust the pre-6c49f3b journal entry's claim
+  that a fallback *chain* exists — it was removed.
+
 ## 2026-07-06 — Implemented auto-updating-context spec (all 4 items, subagent-delegated)
 - Did: implemented docs/plans/2026-07-06-auto-updating-context-spec.md as four
   sequential phases, each delegated to a Sonnet subagent with the main session
