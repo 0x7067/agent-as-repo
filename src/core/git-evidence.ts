@@ -61,3 +61,23 @@ export function formatGitEvidence(rawLog: string, maxChars: number): string {
   lines.push("```");
   return lines.join("\n");
 }
+
+/**
+ * Parse the raw output of `git log --name-only --pretty=format:` (blank-line
+ * separated paths, no commit metadata) into a deduplicated, order-preserving
+ * list of file paths. Used as a superset approximation of the true diff when
+ * a sync's checkpoint commit is no longer reachable (see `selectEvidenceSource`'s
+ * "since" branch) — re-indexing an unchanged file is idempotent, so the
+ * superset is safe to feed through the normal sync path.
+ */
+export function parseNameOnlyLog(rawLog: string): string[] {
+  const seen = new Set<string>();
+  const files: string[] = [];
+  for (const rawLine of rawLog.split("\n")) {
+    const line = rawLine.trim();
+    if (line.length === 0 || seen.has(line)) continue;
+    seen.add(line);
+    files.push(line);
+  }
+  return files;
+}

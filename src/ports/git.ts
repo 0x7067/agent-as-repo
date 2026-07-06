@@ -13,4 +13,6 @@ export interface GitPort {
   commitExists(this: void, cwd: string, sha: string): boolean;
   /** Runs `git log --name-status --oneline` scoped by the given evidence source. Returns "" on any failure. */
   logNameStatus(this: void, cwd: string, source: EvidenceSource): string;
+  /** Runs `git log --since=<date> --name-only --pretty=format:` to list files touched since a date. Returns "" on any failure. */
+  logFileNamesSince(this: void, cwd: string, date: string): string;
 }

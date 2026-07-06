@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 
 interface CliResult {
@@ -100,6 +100,43 @@ async function writeConfig(cwd: string, repoName: string, repoPath: string): Pro
     "    ignore_dirs: [node_modules, .git]",
   ].join("\n");
   await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
+}
+
+function initGitRepo(repoDir: string): void {
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["init", "-q"], { cwd: repoDir });
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repoDir });
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["config", "user.name", "Test"], { cwd: repoDir });
+}
+
+async function commitFile(repoDir: string, name: string, contents: string, message: string): Promise<string> {
+  await writeWorkspaceFile(path.join(repoDir, name), contents, "utf8");
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["add", name], { cwd: repoDir });
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["commit", "-q", "-m", message], { cwd: repoDir });
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoDir, encoding: "utf8" }).trim();
+}
+
+function gitHeadCommitForTest(repoDir: string): string {
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoDir, encoding: "utf8" }).trim();
+}
+
+/** Amends the last commit and prunes it so the previous checkpoint SHA becomes unreachable, simulating rebase/force-push drift. */
+async function orphanLastCommit(repoDir: string, fileName: string, newContents: string): Promise<void> {
+  await writeWorkspaceFile(path.join(repoDir, fileName), newContents, "utf8");
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["add", fileName], { cwd: repoDir });
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["commit", "--amend", "-q", "-m", "amended"], { cwd: repoDir });
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["reflog", "expire", "--expire=now", "--all"], { cwd: repoDir });
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
+  execFileSync("git", ["gc", "--prune=now", "-q"], { cwd: repoDir });
 }
 
 async function writeWarnDoctorWorkspace(cwd: string): Promise<string> {
@@ -514,6 +551,121 @@ describe("cli contract", () => {
     const payload = JSON.parse(result.stdout) as { results: Array<{ dryRun?: boolean; changedFiles?: number }> };
     expect(payload.results[0].dryRun).toBe(true);
     expect(payload.results[0].changedFiles).toBe(1);
+  });
+
+  it("performs a normal incremental sync against a valid checkpoint commit", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-sync-checkpoint-valid-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    const checkpointSha = await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    await commitFile(repoDir, "b.ts", "export const b = 2;\n", "add b.ts");
+    const headSha = gitHeadCommitForTest(repoDir);
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: checkpointSha,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["sync", "--config", "config.yaml"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("1 changed files since");
+    expect(result.stdout).not.toContain("Warning: checkpoint commit");
+
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastSyncCommit: string }>;
+    };
+    expect(savedState.agents["my-app"].lastSyncCommit).toBe(headSha);
+  });
+
+  it("degrades to a since-based fallback when the checkpoint commit is orphaned but a last-sync timestamp is available", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-sync-checkpoint-since-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    const orphanedSha = await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    await orphanLastCommit(repoDir, "a.ts", "export const a = 2;\n");
+    const headSha = gitHeadCommitForTest(repoDir);
+    expect(headSha).not.toBe(orphanedSha);
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: orphanedSha,
+          lastSyncAt: "2000-01-01T00:00:00.000Z",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["sync", "--config", "config.yaml"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Warning: checkpoint commit");
+    expect(result.stdout).toContain("falling back to changes since");
+
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastSyncCommit: string }>;
+    };
+    expect(savedState.agents["my-app"].lastSyncCommit).toBe(headSha);
+  });
+
+  it("degrades to a full re-index when the checkpoint commit is orphaned and no last-sync timestamp is available", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-sync-checkpoint-recent-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    const orphanedSha = await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    await orphanLastCommit(repoDir, "a.ts", "export const a = 2;\n");
+    const headSha = gitHeadCommitForTest(repoDir);
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: orphanedSha,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["sync", "--config", "config.yaml"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Warning: checkpoint commit");
+    expect(result.stdout).toContain("falling back to a full re-index");
+
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastSyncCommit: string }>;
+    };
+    expect(savedState.agents["my-app"].lastSyncCommit).toBe(headSha);
   });
 
   it("supports status --json", async () => {

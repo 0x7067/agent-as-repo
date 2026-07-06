@@ -33,7 +33,7 @@ import { syncRepo } from "./shell/sync.js";
 import { consolidateAgentMemory } from "./shell/consolidate.js";
 import { shouldConsolidate, shouldSkipConsolidation } from "./core/consolidate.js";
 import { nodeGit } from "./shell/adapters/node-git.js";
-import { selectEvidenceSource, formatGitEvidence } from "./core/git-evidence.js";
+import { selectEvidenceSource, formatGitEvidence, parseNameOnlyLog } from "./core/git-evidence.js";
 import { resolveTreeSitterWasmPaths } from "./shell/tree-sitter-paths.js";
 import { getAgentStatus, getAgentStatusData } from "./shell/status.js";
 import { exportAgent } from "./shell/export.js";
@@ -45,7 +45,7 @@ import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
 import { generateMcpEntry, checkMcpEntry, type McpProviderConfig } from "./core/mcp-config.js";
 import { buildPostSetupNextSteps, getSetupMode } from "./core/setup.js";
-import { MAX_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Config } from "./core/types.js";
+import { MAX_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Config, type RepoConfig } from "./core/types.js";
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
 import type { LocalRuntimeOptions } from "./shell/local-provider.js";
 
@@ -369,15 +369,6 @@ async function loadOptionalConfig(configPath: string): Promise<Config | null> {
   }
 }
 
-function gitHeadCommit(cwd: string): string | null {
-  try {
-    // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
-    return execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-  } catch {
-    return null;
-  }
-}
-
 /** Max characters of formatted git log evidence embedded in a consolidation prompt. */
 const GIT_EVIDENCE_MAX_CHARS = 4000;
 
@@ -387,6 +378,29 @@ function gatherGitEvidence(repoPath: string, agent: AgentState): string {
   const source = selectEvidenceSource(agent, commitExists);
   const rawLog = nodeGit.logNameStatus(repoPath, source);
   return formatGitEvidence(rawLog, GIT_EVIDENCE_MAX_CHARS);
+}
+
+/**
+ * Apply the same extension/ignore-dir filtering and submodule expansion to a
+ * raw list of diff paths, regardless of which evidence source produced them
+ * (an explicit --since ref, a valid checkpoint commit, or the since-fallback
+ * used when the checkpoint has gone missing).
+ */
+async function filterChangedFiles(diffPaths: string[], repoConfig: RepoConfig): Promise<string[]> {
+  if (repoConfig.includeSubmodules) {
+    const submodules = listSubmodules(repoConfig.path);
+    const { changedSubmodules, regularFiles } = partitionDiffPaths(
+      diffPaths,
+      submodules,
+      (f) => shouldIncludeFile(f, 0, repoFilterOptions(repoConfig)),
+    );
+    const expandedSubFiles: string[] = [];
+    for (const sub of changedSubmodules) {
+      expandedSubFiles.push(...(await expandSubmoduleFiles(repoConfig, sub)));
+    }
+    return [...regularFiles, ...expandedSubFiles];
+  }
+  return diffPaths.filter((f) => shouldIncludeFile(f, 0, repoFilterOptions(repoConfig)));
 }
 
 /**
@@ -406,7 +420,7 @@ async function consolidateRepoAgent(params: {
 
   console.log(`Consolidating memory for "${repoName}"...`);
   const repoConfig = config ? getOwnRecordValue(config.repos, repoName) : undefined;
-  const headCommit = repoConfig ? gitHeadCommit(repoConfig.path) : null;
+  const headCommit = repoConfig ? nodeGit.headCommit(repoConfig.path) : null;
 
   if (shouldSkipConsolidation(agentInfo, headCommit)) {
     console.log(`  Skipped: no repository changes since last consolidation.`);
@@ -1029,7 +1043,7 @@ program
         }
 
         // Store HEAD commit so incremental sync works immediately
-        const headCommit = gitHeadCommit(repoConfig.path);
+        const headCommit = nodeGit.headCommit(repoConfig.path);
         if (headCommit) {
           state = updateAgentField(state, repoName, { lastSyncCommit: headCommit });
           await saveState(STATE_FILE, state);
@@ -1175,7 +1189,7 @@ program
         continue;
       }
 
-      const headCommit = gitHeadCommit(repoConfig.path);
+      const headCommit = nodeGit.headCommit(repoConfig.path);
       if (!headCommit && (!opts.dryRun || !opts.full)) {
         const message = `"${repoName}": not a git repository or git is not available (${repoConfig.path})`;
         console.error(message);
@@ -1189,46 +1203,51 @@ program
         const files = await collectFiles(repoConfig);
         changedFiles = files.map((f) => f.path);
         log(`Syncing "${repoName}" (full re-index, ${String(changedFiles.length)} files)...`);
-      } else {
-        const sinceRef = opts.since ?? agentInfo.lastSyncCommit;
-        if (!sinceRef) {
-          log(`No previous sync for "${repoName}". Run "repo-expert sync --full" or re-run "repo-expert setup".`);
-          syncResults.push({ repoName, status: "skipped", reason: "no_previous_sync" });
-          continue;
-        }
-
-        let diff: string;
-        try {
-          // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
-          diff = execFileSync("git", ["diff", "--name-only", `${sinceRef}..HEAD`], {
-            cwd: repoConfig.path,
-            encoding: "utf8",
-            stdio: ["pipe", "pipe", "pipe"],
-          }).trim();
-        } catch {
-          const message = `"${repoName}": git diff failed. Is "${sinceRef}" a valid ref?`;
+      } else if (opts.since) {
+        // Explicit override: the user named a specific ref, so an invalid one
+        // is a user error — fail loudly rather than degrade. Only the stored
+        // checkpoint (below) gets the fallback treatment.
+        const diff = nodeGit.diffFiles(repoConfig.path, opts.since);
+        if (diff === null) {
+          const message = `"${repoName}": git diff failed. Is "${opts.since}" a valid ref?`;
           console.error(message);
           syncResults.push({ repoName, status: "error", error: message });
           process.exitCode = 1;
           continue;
         }
-        const diffPaths = diff ? diff.split("\n") : [];
-        if (repoConfig.includeSubmodules) {
-          const submodules = listSubmodules(repoConfig.path);
-          const { changedSubmodules, regularFiles } = partitionDiffPaths(
-            diffPaths,
-            submodules,
-            (f) => shouldIncludeFile(f, 0, repoFilterOptions(repoConfig)),
-          );
-          const expandedSubFiles: string[] = [];
-          for (const sub of changedSubmodules) {
-            expandedSubFiles.push(...(await expandSubmoduleFiles(repoConfig, sub)));
+        changedFiles = await filterChangedFiles(diff, repoConfig);
+        log(`Syncing "${repoName}" (${String(changedFiles.length)} changed files since ${opts.since.slice(0, 7)})...`);
+      } else if (agentInfo.lastSyncCommit) {
+        const checkpoint = agentInfo.lastSyncCommit;
+        const commitExists = nodeGit.commitExists(repoConfig.path, checkpoint);
+        const source = selectEvidenceSource(agentInfo, commitExists);
+
+        if (source.kind === "range") {
+          const diff = nodeGit.diffFiles(repoConfig.path, source.from);
+          if (diff === null) {
+            const message = `"${repoName}": git diff failed. Is "${source.from}" a valid ref?`;
+            console.error(message);
+            syncResults.push({ repoName, status: "error", error: message });
+            process.exitCode = 1;
+            continue;
           }
-          changedFiles = [...regularFiles, ...expandedSubFiles];
+          changedFiles = await filterChangedFiles(diff, repoConfig);
+          log(`Syncing "${repoName}" (${String(changedFiles.length)} changed files since ${source.from.slice(0, 7)})...`);
+        } else if (source.kind === "since") {
+          log(`  Warning: checkpoint commit ${checkpoint.slice(0, 7)} no longer exists in "${repoName}" (rebase or force-push?) — falling back to changes since ${source.date}.`);
+          const diff = parseNameOnlyLog(nodeGit.logFileNamesSince(repoConfig.path, source.date));
+          changedFiles = await filterChangedFiles(diff, repoConfig);
+          log(`Syncing "${repoName}" (${String(changedFiles.length)} changed files since ${source.date})...`);
         } else {
-          changedFiles = diffPaths.filter((f) => shouldIncludeFile(f, 0, repoFilterOptions(repoConfig)));
+          log(`  Warning: checkpoint commit ${checkpoint.slice(0, 7)} no longer exists in "${repoName}" and no sync timestamp is available — falling back to a full re-index.`);
+          const files = await collectFiles(repoConfig);
+          changedFiles = files.map((f) => f.path);
+          log(`Syncing "${repoName}" (full re-index, ${String(changedFiles.length)} files)...`);
         }
-        log(`Syncing "${repoName}" (${String(changedFiles.length)} changed files since ${sinceRef.slice(0, 7)})...`);
+      } else {
+        log(`No previous sync for "${repoName}". Run "repo-expert sync --full" or re-run "repo-expert setup".`);
+        syncResults.push({ repoName, status: "skipped", reason: "no_previous_sync" });
+        continue;
       }
 
       if (changedFiles.length === 0) {
