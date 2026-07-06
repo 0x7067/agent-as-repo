@@ -191,6 +191,7 @@ describe("cli contract", () => {
       watch [options] Watch repos and auto-sync on repo changes
       install-daemon [options] Install launchd daemon for auto-sync on macOS
       uninstall-daemon Uninstall the launchd watch daemon
+      install-instructions [options] Inject repo-expert usage instructions into a repo's CLAUDE.md/AGENTS.md
       mcp-install [options] Add the repo-expert MCP server entry to Claude Code config
       mcp-check [options] Validate existing MCP server entry in Claude Code config
       completion [options] <shell> Print shell completion script (bash, zsh, fish)
@@ -386,6 +387,36 @@ describe("cli contract", () => {
     const localRaw = await readWorkspaceFile(path.join(cwd, ".claude.json"), "utf8");
     const localConfig = JSON.parse(localRaw) as { mcpServers?: { "repo-expert"?: unknown } };
     expect(localConfig.mcpServers?.["repo-expert"]).toBeDefined();
+  });
+
+  it("installs instructions, is idempotent, and supports --remove", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-install-instructions-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "CLAUDE.md"), "# My Repo\n", "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const first = runCli(["install-instructions"], cwd);
+    expect(first.status).toBe(0);
+    expect(first.stderr).toBe("");
+    expect(first.stdout).toContain("updated");
+
+    const claudeMd = await readWorkspaceFile(path.join(repoDir, "CLAUDE.md"), "utf8");
+    expect(claudeMd).toContain("<!-- repo-expert:start -->");
+    expect(claudeMd).toContain("# My Repo");
+    await expect(fs.access(path.join(repoDir, "AGENTS.md"))).rejects.toThrow();
+
+    const second = runCli(["install-instructions"], cwd);
+    expect(second.status).toBe(0);
+    expect(second.stdout).toContain("already up to date");
+    expect(second.stdout).not.toContain("updated");
+
+    const removed = runCli(["install-instructions", "--remove"], cwd);
+    expect(removed.status).toBe(0);
+    expect(removed.stdout).toContain("removed");
+    const claudeMdAfterRemove = await readWorkspaceFile(path.join(repoDir, "CLAUDE.md"), "utf8");
+    expect(claudeMdAfterRemove).not.toContain("<!-- repo-expert:start -->");
+    expect(claudeMdAfterRemove).toContain("# My Repo");
   });
 
   it("shows actionable error without stack trace when mcp-check config is malformed", async () => {

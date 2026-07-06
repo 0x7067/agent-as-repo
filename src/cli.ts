@@ -36,6 +36,7 @@ import { resolveTreeSitterWasmPaths } from "./shell/tree-sitter-paths.js";
 import { getAgentStatus, getAgentStatusData } from "./shell/status.js";
 import { exportAgent } from "./shell/export.js";
 import { onboardAgent } from "./shell/onboard.js";
+import { installInstructions } from "./shell/agent-instructions.js";
 import { BROADCAST_ASK_DEFAULT_TIMEOUT_MS, broadcastAsk } from "./shell/group-provider.js";
 import { watchRepos } from "./shell/watch.js";
 import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
@@ -1695,6 +1696,14 @@ program
     }
   });
 
+interface InstallInstructionsOpts {
+  repo?: string;
+  config: string;
+  file?: string;
+  remove?: boolean;
+  dryRun?: boolean;
+}
+
 interface McpInstallOpts {
   global?: boolean;
   local?: boolean;
@@ -1711,6 +1720,65 @@ interface CompletionOpts {
 }
 
 const MCP_ENTRY_NAME = "repo-expert";
+
+function printInstallInstructionsOutcome(prefix: string, repoName: string, outcome: { path: string; action: string; warning?: string }): void {
+  if (outcome.action === "unchanged") {
+    console.log(`${prefix}${repoName}: ${outcome.path} already up to date`);
+  } else {
+    console.log(`${prefix}${repoName}: ${outcome.action} ${outcome.path}`);
+  }
+  if (outcome.warning) console.warn(`  Warning: ${outcome.warning}`);
+}
+
+async function runInstallInstructionsForRepo(
+  repoName: string,
+  config: Config,
+  opts: InstallInstructionsOpts,
+  prefix: string,
+): Promise<void> {
+  const repoConfig = getOwnRecordValue(config.repos, repoName);
+  if (repoConfig === undefined) {
+    console.error(`Repo "${repoName}" not found in config`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const outcomes = await installInstructions({
+    repoPath: repoConfig.path,
+    repoNames: [repoName],
+    remove: Boolean(opts.remove),
+    dryRun: Boolean(opts.dryRun),
+    ...(opts.file === undefined ? {} : { filePath: opts.file }),
+  });
+
+  for (const outcome of outcomes) {
+    printInstallInstructionsOutcome(prefix, repoName, outcome);
+  }
+}
+
+program
+  .command("install-instructions")
+  .description("Inject repo-expert usage instructions into a repo's CLAUDE.md/AGENTS.md")
+  .option("--repo <name>", "Install for a single repo (default: all configured repos)")
+  .option("--config <path>", "Config file path", "config.yaml")
+  .option("--file <path>", "Explicit target file path (overrides CLAUDE.md/AGENTS.md discovery)")
+  .option("--remove", "Remove the repo-expert instructions block instead of installing it")
+  .option("--dry-run", "Preview without writing files")
+  .action(async (opts: InstallInstructionsOpts) => {
+    const configPath = path.resolve(opts.config);
+    const config = await loadConfigSafe(configPath);
+    const repoNames = opts.repo ? [opts.repo] : Object.keys(config.repos);
+
+    if (repoNames.length === 0) {
+      console.log("No repos configured.");
+      return;
+    }
+
+    const prefix = opts.dryRun ? "[dry-run] " : "";
+    for (const repoName of repoNames) {
+      await runInstallInstructionsForRepo(repoName, config, opts, prefix);
+    }
+  });
 
 program
   .command("mcp-install")
@@ -1767,6 +1835,7 @@ program
       }
     }
     console.log("Restart Claude Code to pick up the change.");
+    console.log('Tip: run "repo-expert install-instructions" to point Claude Code at these tools from CLAUDE.md/AGENTS.md.');
   });
 
 program
