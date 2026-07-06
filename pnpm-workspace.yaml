@@ -1,0 +1,19 @@
+# pnpm settings live here as of pnpm 10.x — the `pnpm.*` block in package.json is
+# no longer read (pnpm warns and ignores it). See https://pnpm.io/settings.
+
+overrides:
+  hono: ^4.12.25
+
+# Allowlist of dependencies permitted to run install/build scripts. Only packages
+# that genuinely need a native build belong here:
+#   - better-sqlite3: runtime native addon (the sqlite passage store)
+#   - tree-sitter-cli: postinstall downloads the `tree-sitter` binary used by
+#     scripts/build-grammar-wasm.ts to compile the vendored grammar wasm
+# tree-sitter-kotlin / tree-sitter-swift are intentionally excluded: this repo only
+# consumes their grammar *source* (to build vendored wasm) and never loads their
+# native node bindings, so compiling them via node-gyp is wasted work — and
+# tree-sitter-kotlin ships no darwin-arm64 prebuild, so that build hard-fails when
+# node-gyp isn't on PATH.
+onlyBuiltDependencies:
+  - better-sqlite3
+  - tree-sitter-cli
