@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { selectEvidenceSource, formatGitEvidence, parseNameOnlyLog } from "./git-evidence.js";
+import { selectEvidenceSource, formatGitEvidence, OrphanedCheckpointError } from "./git-evidence.js";
 import type { AgentState } from "./types.js";
 
 function makeAgent(overrides: Partial<AgentState> = {}): AgentState {
@@ -21,22 +21,23 @@ describe("selectEvidenceSource", () => {
     expect(selectEvidenceSource(agent, true)).toEqual({ kind: "range", from: "abc123" });
   });
 
-  it("falls back to since when lastSyncCommit is set but the commit no longer exists", () => {
+  it("throws OrphanedCheckpointError when lastSyncCommit is set but the commit no longer exists", () => {
     const agent = makeAgent({ lastSyncCommit: "abc123", lastSyncAt: "2026-01-02T00:00:00.000Z" });
-    expect(selectEvidenceSource(agent, false)).toEqual({ kind: "since", date: "2026-01-02T00:00:00.000Z" });
+    expect(() => selectEvidenceSource(agent, false)).toThrow(OrphanedCheckpointError);
+    expect(() => selectEvidenceSource(agent, false)).toThrow("abc123");
   });
 
-  it("falls back to since when lastSyncCommit is not set", () => {
+  it("throws even when no lastSyncAt timestamp exists — an orphaned checkpoint is never recovered from", () => {
+    const agent = makeAgent({ lastSyncCommit: "abc123", lastSyncAt: null });
+    expect(() => selectEvidenceSource(agent, false)).toThrow(OrphanedCheckpointError);
+  });
+
+  it("uses since for a never-checkpointed agent with a watch timestamp (initial state, not fallback)", () => {
     const agent = makeAgent({ lastSyncAt: "2026-01-02T00:00:00.000Z" });
     expect(selectEvidenceSource(agent, false)).toEqual({ kind: "since", date: "2026-01-02T00:00:00.000Z" });
   });
 
-  it("falls back to recent when neither lastSyncCommit nor lastSyncAt is usable", () => {
-    const agent = makeAgent({ lastSyncCommit: "abc123", lastSyncAt: null });
-    expect(selectEvidenceSource(agent, false)).toEqual({ kind: "recent", count: 20 });
-  });
-
-  it("falls back to recent when nothing is set at all", () => {
+  it("uses a recent window for a brand-new agent with no checkpoint and no timestamp", () => {
     const agent = makeAgent();
     expect(selectEvidenceSource(agent, false)).toEqual({ kind: "recent", count: 20 });
   });
@@ -92,32 +93,5 @@ describe("formatGitEvidence", () => {
     const log = "abc1234 Only commit";
     const result = formatGitEvidence(log, log.length);
     expect(result).not.toContain("omitted");
-  });
-});
-
-describe("parseNameOnlyLog", () => {
-  it("returns an empty array for empty output", () => {
-    expect(parseNameOnlyLog("")).toEqual([]);
-  });
-
-  it("splits blank-line-separated paths into a flat list", () => {
-    const raw = "src/a.ts\nsrc/b.ts\n\nsrc/c.ts\n";
-    expect(parseNameOnlyLog(raw)).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
-  });
-
-  it("dedupes paths that appear across multiple commits, preserving first-seen order", () => {
-    // `git log --name-only` repeats a path once per commit that touched it.
-    const raw = "src/a.ts\n\nsrc/b.ts\nsrc/a.ts\n";
-    expect(parseNameOnlyLog(raw)).toEqual(["src/a.ts", "src/b.ts"]);
-  });
-
-  it("ignores blank and whitespace-only lines", () => {
-    const raw = "src/a.ts\n   \n\nsrc/b.ts\n";
-    expect(parseNameOnlyLog(raw)).toEqual(["src/a.ts", "src/b.ts"]);
-  });
-
-  it("trims surrounding whitespace from each path", () => {
-    const raw = "  src/a.ts  \n";
-    expect(parseNameOnlyLog(raw)).toEqual(["src/a.ts"]);
   });
 });

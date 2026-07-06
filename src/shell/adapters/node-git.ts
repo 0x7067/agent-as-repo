@@ -97,14 +97,4 @@ export const nodeGit: GitPort = {
       return "";
     }
   },
-
-  logFileNamesSince(cwd: string, date: string): string {
-    try {
-      const args = ["--no-pager", "log", `--since=${date}`, "--name-only", "--pretty=format:"];
-      // eslint-disable-next-line sonarjs/no-os-command-from-path -- git must be resolved from PATH
-      return execFileSync("git", args, { cwd, encoding: "utf8", timeout: 10_000, maxBuffer: LOG_MAX_BUFFER_BYTES });
-    } catch {
-      return "";
-    }
-  },
 };

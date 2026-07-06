@@ -98,19 +98,4 @@ describe("nodeGit adapter against a real temp git repo", () => {
     expect(nodeGit.logNameStatus(dir, { kind: "range", from: "0000000000000000000000000000000000000000" })).toBe("");
   });
 
-  it("logFileNamesSince returns real name-only paths covering full history", async () => {
-    const dir = await makeTempRepo();
-    await commitFile(dir, "a.txt", "hello", "add a.txt");
-    await commitFile(dir, "b.txt", "world", "add b.txt");
-
-    const log = nodeGit.logFileNamesSince(dir, "2000-01-01");
-
-    expect(log).toContain("a.txt");
-    expect(log).toContain("b.txt");
-    expect(log).not.toContain("add a.txt"); // --pretty=format: omits commit subjects
-  });
-
-  it("logFileNamesSince returns empty string for a nonexistent cwd", () => {
-    expect(nodeGit.logFileNamesSince("/nonexistent-path-xyz-does-not-exist", "2000-01-01")).toBe("");
-  });
 });

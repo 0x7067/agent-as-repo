@@ -33,7 +33,7 @@ import { syncRepo } from "./shell/sync.js";
 import { consolidateAgentMemory } from "./shell/consolidate.js";
 import { shouldConsolidate, shouldSkipConsolidation } from "./core/consolidate.js";
 import { nodeGit } from "./shell/adapters/node-git.js";
-import { selectEvidenceSource, formatGitEvidence, parseNameOnlyLog } from "./core/git-evidence.js";
+import { selectEvidenceSource, formatGitEvidence, OrphanedCheckpointError, type EvidenceSource } from "./core/git-evidence.js";
 import { resolveTreeSitterWasmPaths } from "./shell/tree-sitter-paths.js";
 import { getAgentStatus, getAgentStatusData } from "./shell/status.js";
 import { exportAgent } from "./shell/export.js";
@@ -372,7 +372,12 @@ async function loadOptionalConfig(configPath: string): Promise<Config | null> {
 /** Max characters of formatted git log evidence embedded in a consolidation prompt. */
 const GIT_EVIDENCE_MAX_CHARS = 4000;
 
-/** Gather formatted git evidence for a consolidation prompt. Best-effort: never throws. */
+/**
+ * Gather formatted git evidence for a consolidation prompt. Throws
+ * `OrphanedCheckpointError` when the agent's stored checkpoint no longer
+ * exists — callers must surface that instead of consolidating against a
+ * silently different evidence window.
+ */
 function gatherGitEvidence(repoPath: string, agent: AgentState): string {
   const commitExists = agent.lastSyncCommit !== null && nodeGit.commitExists(repoPath, agent.lastSyncCommit);
   const source = selectEvidenceSource(agent, commitExists);
@@ -383,8 +388,7 @@ function gatherGitEvidence(repoPath: string, agent: AgentState): string {
 /**
  * Apply the same extension/ignore-dir filtering and submodule expansion to a
  * raw list of diff paths, regardless of which evidence source produced them
- * (an explicit --since ref, a valid checkpoint commit, or the since-fallback
- * used when the checkpoint has gone missing).
+ * (an explicit --since ref or a validated checkpoint commit).
  */
 async function filterChangedFiles(diffPaths: string[], repoConfig: RepoConfig): Promise<string[]> {
   if (repoConfig.includeSubmodules) {
@@ -427,7 +431,22 @@ async function consolidateRepoAgent(params: {
     return state;
   }
 
-  const gitEvidence = repoConfig ? gatherGitEvidence(repoConfig.path, agentInfo) : "";
+  let gitEvidence = "";
+  if (repoConfig) {
+    try {
+      gitEvidence = gatherGitEvidence(repoConfig.path, agentInfo);
+    } catch (error) {
+      if (error instanceof OrphanedCheckpointError) {
+        console.error(
+          `"${repoName}": checkpoint commit ${error.commit.slice(0, 7)} no longer exists (rebase, force-push, or gc?). ` +
+          `Re-establish it with "repo-expert sync --since <ref>" or "repo-expert sync --full", then consolidate.`,
+        );
+        process.exitCode = 1;
+        return state;
+      }
+      throw error;
+    }
+  }
   const result = await consolidateAgentMemory({
     provider,
     agentId: agentInfo.agentId,
@@ -1199,14 +1218,17 @@ program
       }
 
       let changedFiles: string[];
+      // The evidence window consolidation will use — always the same source
+      // the sync itself used, never re-derived from (possibly stale) state.
+      // Null only under --full, which has no diff window.
+      let syncEvidenceSource: EvidenceSource | null = null;
       if (opts.full) {
         const files = await collectFiles(repoConfig);
         changedFiles = files.map((f) => f.path);
         log(`Syncing "${repoName}" (full re-index, ${String(changedFiles.length)} files)...`);
       } else if (opts.since) {
         // Explicit override: the user named a specific ref, so an invalid one
-        // is a user error — fail loudly rather than degrade. Only the stored
-        // checkpoint (below) gets the fallback treatment.
+        // is a user error — fail loudly rather than degrade.
         const diff = nodeGit.diffFiles(repoConfig.path, opts.since);
         if (diff === null) {
           const message = `"${repoName}": git diff failed. Is "${opts.since}" a valid ref?`;
@@ -1216,34 +1238,33 @@ program
           continue;
         }
         changedFiles = await filterChangedFiles(diff, repoConfig);
+        syncEvidenceSource = { kind: "range", from: opts.since };
         log(`Syncing "${repoName}" (${String(changedFiles.length)} changed files since ${opts.since.slice(0, 7)})...`);
       } else if (agentInfo.lastSyncCommit) {
         const checkpoint = agentInfo.lastSyncCommit;
-        const commitExists = nodeGit.commitExists(repoConfig.path, checkpoint);
-        const source = selectEvidenceSource(agentInfo, commitExists);
-
-        if (source.kind === "range") {
-          const diff = nodeGit.diffFiles(repoConfig.path, source.from);
-          if (diff === null) {
-            const message = `"${repoName}": git diff failed. Is "${source.from}" a valid ref?`;
-            console.error(message);
-            syncResults.push({ repoName, status: "error", error: message });
-            process.exitCode = 1;
-            continue;
-          }
-          changedFiles = await filterChangedFiles(diff, repoConfig);
-          log(`Syncing "${repoName}" (${String(changedFiles.length)} changed files since ${source.from.slice(0, 7)})...`);
-        } else if (source.kind === "since") {
-          log(`  Warning: checkpoint commit ${checkpoint.slice(0, 7)} no longer exists in "${repoName}" (rebase or force-push?) — falling back to changes since ${source.date}.`);
-          const diff = parseNameOnlyLog(nodeGit.logFileNamesSince(repoConfig.path, source.date));
-          changedFiles = await filterChangedFiles(diff, repoConfig);
-          log(`Syncing "${repoName}" (${String(changedFiles.length)} changed files since ${source.date})...`);
-        } else {
-          log(`  Warning: checkpoint commit ${checkpoint.slice(0, 7)} no longer exists in "${repoName}" and no sync timestamp is available — falling back to a full re-index.`);
-          const files = await collectFiles(repoConfig);
-          changedFiles = files.map((f) => f.path);
-          log(`Syncing "${repoName}" (full re-index, ${String(changedFiles.length)} files)...`);
+        if (!nodeGit.commitExists(repoConfig.path, checkpoint)) {
+          // The stored checkpoint is authoritative. If it is gone (rebase,
+          // force-push, gc), refuse to guess a diff window — recovery is
+          // only ever explicit.
+          const message =
+            `"${repoName}": checkpoint commit ${checkpoint.slice(0, 7)} no longer exists (rebase, force-push, or gc?). ` +
+            `Refusing to guess a diff window — re-run with "repo-expert sync --since <ref>" or "repo-expert sync --full".`;
+          console.error(message);
+          syncResults.push({ repoName, status: "error", error: message });
+          process.exitCode = 1;
+          continue;
         }
+        const diff = nodeGit.diffFiles(repoConfig.path, checkpoint);
+        if (diff === null) {
+          const message = `"${repoName}": git diff failed. Is "${checkpoint}" a valid ref?`;
+          console.error(message);
+          syncResults.push({ repoName, status: "error", error: message });
+          process.exitCode = 1;
+          continue;
+        }
+        changedFiles = await filterChangedFiles(diff, repoConfig);
+        syncEvidenceSource = { kind: "range", from: checkpoint };
+        log(`Syncing "${repoName}" (${String(changedFiles.length)} changed files since ${checkpoint.slice(0, 7)})...`);
       } else {
         log(`No previous sync for "${repoName}". Run "repo-expert sync --full" or re-run "repo-expert setup".`);
         syncResults.push({ repoName, status: "skipped", reason: "no_previous_sync" });
@@ -1322,13 +1343,21 @@ program
       await saveState(STATE_FILE, state);
 
       if (shouldConsolidate(result, config.consolidateOnSync)) {
+        // Evidence comes from the exact window this sync just used — never
+        // re-derived from pre-sync state.
+        let gitEvidence = "";
+        if (syncEvidenceSource) {
+          gitEvidence = formatGitEvidence(nodeGit.logNameStatus(repoConfig.path, syncEvidenceSource), GIT_EVIDENCE_MAX_CHARS);
+        } else {
+          log(`  Git evidence omitted from consolidation: full re-index has no diff window.`);
+        }
         const consolidation = await consolidateAgentMemory({
           provider,
           agentId: agentInfo.agentId,
           changedFiles,
           syncResult: result,
           blockCharLimit: MEMORY_BLOCK_LIMIT,
-          gitEvidence: gatherGitEvidence(repoConfig.path, agentInfo),
+          gitEvidence,
           log,
         });
         if (consolidation.consolidated && consolidation.changed) {

@@ -6,16 +6,38 @@ export type EvidenceSource =
   | { kind: "since"; date: string }
   | { kind: "recent"; count: number };
 
-/** Default commit count for the last-resort "recent" fallback. */
+/** Commit count used when an agent has never synced or watched. */
 const RECENT_COMMIT_COUNT = 20;
 
 /**
- * Decide which git evidence source to use for an agent, following the
- * fallback chain: a still-valid checkpoint commit, then a last-sync
- * timestamp, then a fixed window of recent commits.
+ * Raised when an agent's stored checkpoint commit no longer exists in the
+ * repository (rebase, force-push, or gc). Deliberately not recovered from:
+ * callers must fail loudly and ask the user for an explicit new window
+ * (`sync --since <ref>` or `sync --full`) instead of guessing one.
+ */
+export class OrphanedCheckpointError extends Error {
+  readonly commit: string;
+
+  constructor(commit: string) {
+    super(`checkpoint commit ${commit} no longer exists in the repository`);
+    this.name = "OrphanedCheckpointError";
+    this.commit = commit;
+  }
+}
+
+/**
+ * Decide which git evidence source to use for an agent. A stored checkpoint
+ * is authoritative: if it no longer exists, this throws
+ * `OrphanedCheckpointError` rather than silently choosing a different window.
+ * The "since" and "recent" kinds are initial-state selection only — they
+ * apply to agents that have never recorded a checkpoint (watch-only agents
+ * have a `lastSyncAt` timestamp; brand-new agents have nothing).
  */
 export function selectEvidenceSource(agent: AgentState, commitExists: boolean): EvidenceSource {
-  if (agent.lastSyncCommit && commitExists) {
+  if (agent.lastSyncCommit) {
+    if (!commitExists) {
+      throw new OrphanedCheckpointError(agent.lastSyncCommit);
+    }
     return { kind: "range", from: agent.lastSyncCommit };
   }
   if (agent.lastSyncAt) {
@@ -60,24 +82,4 @@ export function formatGitEvidence(rawLog: string, maxChars: number): string {
   }
   lines.push("```");
   return lines.join("\n");
-}
-
-/**
- * Parse the raw output of `git log --name-only --pretty=format:` (blank-line
- * separated paths, no commit metadata) into a deduplicated, order-preserving
- * list of file paths. Used as a superset approximation of the true diff when
- * a sync's checkpoint commit is no longer reachable (see `selectEvidenceSource`'s
- * "since" branch) — re-indexing an unchanged file is idempotent, so the
- * superset is safe to feed through the normal sync path.
- */
-export function parseNameOnlyLog(rawLog: string): string[] {
-  const seen = new Set<string>();
-  const files: string[] = [];
-  for (const rawLine of rawLog.split("\n")) {
-    const line = rawLine.trim();
-    if (line.length === 0 || seen.has(line)) continue;
-    seen.add(line);
-    files.push(line);
-  }
-  return files;
 }

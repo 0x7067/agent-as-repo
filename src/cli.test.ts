@@ -583,7 +583,7 @@ describe("cli contract", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("1 changed files since");
-    expect(result.stdout).not.toContain("Warning: checkpoint commit");
+    expect(result.stderr).toBe("");
 
     const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
       agents: Record<string, { lastSyncCommit: string }>;
@@ -591,7 +591,7 @@ describe("cli contract", () => {
     expect(savedState.agents["my-app"].lastSyncCommit).toBe(headSha);
   });
 
-  it("degrades to a since-based fallback when the checkpoint commit is orphaned but a last-sync timestamp is available", async () => {
+  it("fails fast when the checkpoint commit is orphaned, even if a last-sync timestamp is available", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-sync-checkpoint-since-");
     const repoDir = path.join(cwd, "repo");
     await mkdirWorkspaceDir(repoDir, { recursive: true });
@@ -620,17 +620,20 @@ describe("cli contract", () => {
 
     const result = runCli(["sync", "--config", "config.yaml"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Warning: checkpoint commit");
-    expect(result.stdout).toContain("falling back to changes since");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`checkpoint commit ${orphanedSha.slice(0, 7)} no longer exists`);
+    expect(result.stderr).toContain("Refusing to guess a diff window");
+    expect(result.stdout).not.toContain("changed files since");
 
+    // The stored checkpoint is authoritative: state must be left untouched.
     const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
       agents: Record<string, { lastSyncCommit: string }>;
     };
-    expect(savedState.agents["my-app"].lastSyncCommit).toBe(headSha);
+    expect(savedState.agents["my-app"].lastSyncCommit).toBe(orphanedSha);
+    expect(headSha).not.toBe(orphanedSha);
   });
 
-  it("degrades to a full re-index when the checkpoint commit is orphaned and no last-sync timestamp is available", async () => {
+  it("fails fast when the checkpoint commit is orphaned and no last-sync timestamp is available", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-sync-checkpoint-recent-");
     const repoDir = path.join(cwd, "repo");
     await mkdirWorkspaceDir(repoDir, { recursive: true });
@@ -658,14 +661,17 @@ describe("cli contract", () => {
 
     const result = runCli(["sync", "--config", "config.yaml"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Warning: checkpoint commit");
-    expect(result.stdout).toContain("falling back to a full re-index");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`checkpoint commit ${orphanedSha.slice(0, 7)} no longer exists`);
+    expect(result.stderr).toContain("Refusing to guess a diff window");
+    expect(result.stdout).not.toContain("changed files since");
 
+    // The stored checkpoint is authoritative: state must be left untouched.
     const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
       agents: Record<string, { lastSyncCommit: string }>;
     };
-    expect(savedState.agents["my-app"].lastSyncCommit).toBe(headSha);
+    expect(savedState.agents["my-app"].lastSyncCommit).toBe(orphanedSha);
+    expect(headSha).not.toBe(orphanedSha);
   });
 
   it("supports status --json", async () => {

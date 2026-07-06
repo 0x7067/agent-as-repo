@@ -166,24 +166,4 @@ describe("nodeGit adapter", () => {
     expect(nodeGit.logNameStatus("/repo", { kind: "recent", count: 20 })).toBe("");
   });
 
-  it("satisfies GitPort interface with logFileNamesSince", () => {
-    const port: GitPort = nodeGit;
-    expect(typeof port.logFileNamesSince).toBe("function");
-  });
-
-  it("logFileNamesSince calls git log --since=<date> --name-only --pretty=format:", () => {
-    mockedExecFileSync.mockReturnValue("src/a.ts\n\nsrc/b.ts\n");
-    const result = nodeGit.logFileNamesSince("/repo", "2026-01-01T00:00:00.000Z");
-    expect(mockedExecFileSync).toHaveBeenCalledWith(
-      "git",
-      ["--no-pager", "log", "--since=2026-01-01T00:00:00.000Z", "--name-only", "--pretty=format:"],
-      expect.objectContaining({ cwd: "/repo", encoding: "utf8" }),
-    );
-    expect(result).toBe("src/a.ts\n\nsrc/b.ts\n");
-  });
-
-  it("logFileNamesSince returns empty string when git fails", () => {
-    mockedExecFileSync.mockImplementation(() => { throw new Error("git error"); });
-    expect(nodeGit.logFileNamesSince("/repo", "2026-01-01T00:00:00.000Z")).toBe("");
-  });
 });
