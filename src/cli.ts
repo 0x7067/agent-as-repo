@@ -314,7 +314,11 @@ function createProviderForCommands(config: Config | null): AgentProvider {
 }
 
 async function loadConfigForProvider(configPath: string): Promise<Config | null> {
-  if (process.env["REPO_EXPERT_TEST_FAKE_PROVIDER"] === "1") return null;
+  // The fake provider stands in for the LLM regardless of config, but git-backed
+  // commands (consolidate, sync's downstream helpers) still need real repo config
+  // to exercise their git wiring under test. Fall back to null only when no config
+  // file is present, same as loadOptionalConfig elsewhere.
+  if (process.env["REPO_EXPERT_TEST_FAKE_PROVIDER"] === "1") return loadOptionalConfig(configPath);
   return loadConfigSafe(configPath);
 }
 
