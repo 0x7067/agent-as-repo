@@ -1676,15 +1676,24 @@ program
       `Watching ${String(repoNames.length)} repo(s) (poll every ${String(intervalMs / 1000)}s, debounce ${String(debounceMs)}ms). Press Ctrl+C to stop.`,
     );
 
-    await watchRepos({
-      provider,
-      config,
-      repoNames,
-      statePath: STATE_FILE,
-      intervalMs,
-      debounceMs,
-      signal: ac.signal,
-    });
+    try {
+      await watchRepos({
+        provider,
+        config,
+        repoNames,
+        statePath: STATE_FILE,
+        intervalMs,
+        debounceMs,
+        signal: ac.signal,
+      });
+    } catch (error) {
+      if (error instanceof OrphanedCheckpointError) {
+        console.error(`Watch stopped: ${formatOrphanedCheckpointMessage(error.commit)}`);
+        process.exitCode = 1;
+        return;
+      }
+      throw error;
+    }
 
     console.log("Watch stopped.");
   });

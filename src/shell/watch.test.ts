@@ -52,6 +52,8 @@ function makeFakeGit(overrides: Partial<GitPort> = {}): GitPort {
     version: vi.fn().mockReturnValue("git version 2.39.0"),
     headCommit: vi.fn().mockReturnValue("abc1234"),
     diffFiles: vi.fn().mockReturnValue([]),
+    commitExists: vi.fn().mockReturnValue(true),
+    logNameStatus: vi.fn().mockReturnValue(""),
     ...overrides,
   };
 }
@@ -1336,5 +1338,225 @@ describe("watchRepos", () => {
     expect(syncCall[0].changedFiles).toEqual(
       expect.arrayContaining(WATCH_SUBMODULE_FILES),
     );
+  });
+});
+
+describe("watchRepos - orphaned checkpoint fail-fast", () => {
+  it("stops the loop and rejects when the stored checkpoint no longer exists", async () => {
+    const state = makeState("gone123");
+    mockedLoadState.mockResolvedValue(state);
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      commitExists: vi.fn().mockReturnValue(false),
+    });
+
+    const log = vi.fn();
+    const ac = new AbortController();
+
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
+      intervalMs: 5000,
+      signal: ac.signal,
+      log,
+      git: fakeGit,
+      fs: makeFakeFs(),
+    });
+
+    // Register the rejection handler on `watchPromise` in the same
+    // synchronous pass that kicks off the timer flush — otherwise Node
+    // flags a transient unhandled-rejection window even though the test
+    // does go on to handle it.
+    await Promise.all([
+      expect(watchPromise).rejects.toThrow(/checkpoint commit gone123 no longer exists/),
+      vi.advanceTimersByTimeAsync(0),
+    ]);
+
+    expect(mockedSyncRepo).not.toHaveBeenCalled();
+    expect(mockedSaveState).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("repo-expert sync --since <ref>"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("repo-expert sync --full"));
+  });
+
+  it("does not escalate a transient git failure (index.lock contention) to fatal", async () => {
+    // Regression guard distinguishing OrphanedCheckpointError from other
+    // git failures: commitExists true (checkpoint is fine), diffFiles null
+    // (transient failure) must skip this tick without rejecting the loop.
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      commitExists: vi.fn().mockReturnValue(true),
+      diffFiles: vi.fn().mockReturnValue(null),
+    });
+
+    const log = vi.fn();
+    const ac = new AbortController();
+
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: testConfig,
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
+      intervalMs: 5000,
+      signal: ac.signal,
+      log,
+      git: fakeGit,
+      fs: makeFakeFs(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+
+    await expect(watchPromise).resolves.toBeUndefined();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("git diff failed"));
+  });
+});
+
+function makeConsolidationSyncResult(overrides: Partial<Awaited<ReturnType<typeof syncRepo>>> = {}) {
+  return {
+    passages: { [WATCH_PASSAGE_FILE]: ["p-2"] },
+    lastSyncCommit: "def456",
+    filesRemoved: 0,
+    filesReIndexed: 5,
+    isFullReIndex: false,
+    failedFiles: [],
+    ...overrides,
+  };
+}
+
+describe("watchRepos - daemon consolidation parity", () => {
+  const consolidateConfig: Config = {
+    ...testConfig,
+    consolidateOnSync: true,
+  };
+
+  it("gathers git evidence from the agent's checkpoint and includes it in the consolidation prompt", async () => {
+    const state = makeState("abc123");
+    mockedLoadState.mockResolvedValue(state);
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
+      logNameStatus: vi.fn().mockReturnValue("def4567 M\tsrc/a.ts evidence-marker"),
+    });
+    mockedSyncRepo.mockResolvedValue(makeConsolidationSyncResult());
+
+    const consolidateMemory = vi.fn().mockResolvedValue();
+    const provider = makeMockProvider({ consolidateMemory });
+    const log = vi.fn();
+    const ac = new AbortController();
+
+    const watchPromise = watchRepos({
+      provider,
+      config: consolidateConfig,
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
+      intervalMs: 5000,
+      signal: ac.signal,
+      log,
+      git: fakeGit,
+      fs: makeFakeFs(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    expect(fakeGit.logNameStatus).toHaveBeenCalledWith(WATCH_REPO_PATH, { kind: "range", from: "abc123" });
+    expect(consolidateMemory).toHaveBeenCalledTimes(1);
+    const prompt = consolidateMemory.mock.calls[0]?.[1] as string;
+    expect(prompt).toContain("evidence-marker");
+  });
+
+  it("stamps lastConsolidatedCommit when consolidation changes the memory blocks", async () => {
+    const initialState = makeState("abc123");
+    let currentState: AppState = initialState;
+    mockedLoadState.mockImplementation(() => Promise.resolve(currentState));
+    mockedSaveState.mockImplementation((_path: string, next: AppState) => {
+      currentState = next;
+      return Promise.resolve();
+    });
+
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
+    });
+    mockedSyncRepo.mockResolvedValue(makeConsolidationSyncResult());
+
+    let callCount = 0;
+    const getBlock = vi.fn().mockImplementation((_agentId: string, label: string) => {
+      callCount++;
+      const value = callCount <= 2 ? `original-${label}` : `revised-${label}`;
+      return Promise.resolve({ value, limit: 5000 });
+    });
+    const provider = makeMockProvider({ getBlock, consolidateMemory: vi.fn().mockResolvedValue() });
+    const log = vi.fn();
+    const ac = new AbortController();
+
+    const watchPromise = watchRepos({
+      provider,
+      config: consolidateConfig,
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
+      intervalMs: 5000,
+      signal: ac.signal,
+      log,
+      git: fakeGit,
+      fs: makeFakeFs(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    expect(currentState.agents[WATCH_REPO_NAME].lastConsolidatedCommit).toBe("def456");
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("consolidated architecture/conventions memory blocks"));
+  });
+
+  it("leaves no lastConsolidatedCommit trace when consolidation is a no-op", async () => {
+    const initialState = makeState("abc123");
+    let currentState: AppState = initialState;
+    mockedLoadState.mockImplementation(() => Promise.resolve(currentState));
+    mockedSaveState.mockImplementation((_path: string, next: AppState) => {
+      currentState = next;
+      return Promise.resolve();
+    });
+
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue(["src/a.ts"]),
+    });
+    mockedSyncRepo.mockResolvedValue(makeConsolidationSyncResult());
+
+    // getBlock always returns the same value pre/post — fingerprint-identical no-op.
+    const getBlock = vi.fn().mockResolvedValue({ value: "same content", limit: 5000 });
+    const provider = makeMockProvider({ getBlock, consolidateMemory: vi.fn().mockResolvedValue() });
+    const log = vi.fn();
+    const ac = new AbortController();
+
+    const watchPromise = watchRepos({
+      provider,
+      config: consolidateConfig,
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
+      intervalMs: 5000,
+      signal: ac.signal,
+      log,
+      git: fakeGit,
+      fs: makeFakeFs(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    expect(currentState.agents[WATCH_REPO_NAME].lastConsolidatedCommit).toBeUndefined();
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining("consolidated architecture/conventions memory blocks"));
   });
 });

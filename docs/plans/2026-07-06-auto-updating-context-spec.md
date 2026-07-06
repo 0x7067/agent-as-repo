@@ -39,7 +39,7 @@ Explicitly **not** copying: openwiki's LLM-judgment dedup for the injected block
 - Two `GitPort` additions:
   - `commitExists(cwd, sha): boolean` — `git cat-file -e <sha>^{commit}`
   - `logNameStatus(cwd, source: EvidenceSource): string` — `git --no-pager log <from>..HEAD --name-status --oneline` / `--since=<date>` / `--max-count=20` variants. `execFileSync` arg arrays, `maxBuffer: 1 MiB`; on git error return `""` (evidence is best-effort — a broken log must never fail consolidation, mirroring openwiki's swallow-errors stance).
-- Callers: `sync` post-run consolidation (`src/cli.ts` around `shouldConsolidate`) and the manual `consolidate` command both gather evidence via the port before building the prompt. Manual runs finally get real context (today their `changedFiles` is empty).
+- Callers: `sync` post-run consolidation (`src/cli.ts` around `shouldConsolidate`), the manual `consolidate` command, and the `watch` daemon's post-sync consolidation (`src/shell/watch.ts`) all gather evidence via the port before building the prompt. Manual runs finally get real context (today their `changedFiles` is empty). The daemon and manual `consolidate` share the same evidence path (`gatherGitEvidence`, keyed off the agent's stored checkpoint); `sync` formats evidence from the exact diff window it just used instead.
 
 **Tests:** pure — fallback-chain selection (all three branches), truncation keeps newest commits, empty-log → empty string; prompt renders with/without evidence. Shell — `nodeGit` methods against a temp git repo fixture (pattern already used by adapter tests).
 
@@ -77,6 +77,8 @@ Explicitly **not** copying: openwiki's LLM-judgment dedup for the injected block
 **Tests:** temp-repo shell test — commit, sync, rebase/`commit --amend` away the checkpoint SHA, second sync exits 1 with recovery instructions and leaves `lastSyncCommit` untouched.
 
 **Decision (2026-07-06):** silent fallbacks replaced with fail-fast + explicit recovery — a wrong diff window silently corrupts memory scope; a hard stop is recoverable.
+
+**Daemon parity:** the `watch` command's continuous loop hits the same orphaned-checkpoint condition (its own polling diff, and its post-sync consolidation's evidence gathering). Because it's long-running, "fail fast" there means: stop the whole watch loop cleanly (finish in-flight work, close file watchers, clear timers), reject with the error so the CLI exits non-zero, and print the same recovery instructions (`--since <ref>` / `--full`) — never keep polling with a silently mis-scoped or skipped diff for that repo. A transient git failure that is not an orphaned checkpoint (e.g. index.lock contention) stays non-fatal, same as before — only `OrphanedCheckpointError` triggers the stop.
 
 ### 4. Agent-instructions injection — `repo-expert install-instructions`
 

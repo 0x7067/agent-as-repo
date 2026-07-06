@@ -6,6 +6,8 @@ import { syncRepo } from "./sync.js";
 import { consolidateAgentMemory } from "./consolidate.js";
 import { shouldConsolidate } from "../core/consolidate.js";
 import { shouldSync, formatSyncLog, computeBackoffDelay } from "../core/watch.js";
+import { OrphanedCheckpointError, formatOrphanedCheckpointMessage } from "../core/git-evidence.js";
+import { gatherGitEvidence } from "./git-evidence.js";
 import { updateAgentField } from "../core/state.js";
 import { repoFilterOptions, shouldIncludeFile } from "../core/filter.js";
 import { partitionDiffPaths } from "../core/submodule.js";
@@ -97,6 +99,7 @@ async function filterChangedFiles(repoConfig: RepoConfig, changedFiles: string[]
   return [...regularFiles, ...expanded];
 }
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- top-level daemon orchestration (setup, poll loop, fatal-stop teardown) intentionally stays in one function to keep the shutdown/reject wiring visible in one place
 export async function watchRepos(params: WatchParams): Promise<void> {
   const {
     provider,
@@ -122,10 +125,43 @@ export async function watchRepos(params: WatchParams): Promise<void> {
   let stateWriteChain: Promise<void> = Promise.resolve();
   let activeTick: Promise<void> = Promise.resolve();
 
+  // Orphaned-checkpoint fail-fast state. An orphaned checkpoint is
+  // unrecoverable without an explicit operator decision (see
+  // `OrphanedCheckpointError`), so once one is detected the whole daemon
+  // loop stops cleanly rather than silently mis-scoping or skipping diffs
+  // for that repo forever.
+  let fatalError: OrphanedCheckpointError | null = null;
+  let pollTimer: NodeJS.Timeout | undefined;
+  let shuttingDown = false;
+  let settle: { resolve: () => void; reject: (error: unknown) => void } | null = null;
+
+  async function shutdown(): Promise<void> {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    if (pollTimer !== undefined) clearInterval(pollTimer);
+    for (const debounceTimer of debounceTimers.values()) {
+      clearTimeout(debounceTimer);
+    }
+    debounceTimers.clear();
+    for (const watcher of watchers) {
+      watcher.close();
+    }
+    await activeTick;
+    await Promise.allSettled(runningTasks);
+    if (fatalError) {
+      settle?.reject(fatalError);
+    } else {
+      settle?.resolve();
+    }
+  }
+
   function trackTask(task: Promise<void>): Promise<void> {
     runningTasks.add(task);
     void task.finally(() => {
       runningTasks.delete(task);
+      if (fatalError) {
+        void shutdown();
+      }
     });
     return task;
   }
@@ -152,6 +188,13 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     await stateWriteChain;
   }
 
+  async function persistLastConsolidatedCommit(repoName: string, headCommit: string): Promise<void> {
+    stateWriteChain = stateWriteChain.then(() =>
+      updateAndSaveState(statePath, repoName, { lastConsolidatedCommit: headCommit }),
+    ).catch(() => {});
+    await stateWriteChain;
+  }
+
   async function resolveChangedFiles(params_: {
     repoConfig: RepoConfig;
     agentInfo: AgentState;
@@ -172,8 +215,16 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     }
 
     if (agentInfo.lastSyncCommit) {
+      // The stored checkpoint is authoritative. If it is gone (rebase,
+      // force-push, gc), refuse to guess a diff window — mirrors the sync
+      // command's fail-fast validation (6c49f3b), not a log-and-continue.
+      if (!git.commitExists(repoConfig.path, agentInfo.lastSyncCommit)) {
+        throw new OrphanedCheckpointError(agentInfo.lastSyncCommit);
+      }
       const diffResult = git.diffFiles(repoConfig.path, agentInfo.lastSyncCommit);
       if (diffResult === null) {
+        // A transient git failure (e.g. index.lock contention) — not an
+        // orphaned checkpoint. Skip this tick and let the next poll retry.
         log(`[${repoName}] git diff failed, skipping`);
         return undefined;
       }
@@ -274,15 +325,32 @@ export async function watchRepos(params: WatchParams): Promise<void> {
       await persistSyncResult(repoName, result.passages, result.lastSyncCommit);
 
       if (shouldConsolidate(result, config.consolidateOnSync)) {
+        // Same evidence-gathering path manual `consolidate` uses: derived
+        // from the agent's own checkpoint, not re-derived from this sync's
+        // (possibly event-driven) changed-file list.
+        let gitEvidence: string;
+        try {
+          gitEvidence = gatherGitEvidence(git, repoConfig.path, agentInfo);
+        } catch (error) {
+          if (error instanceof OrphanedCheckpointError) {
+            fatalError = error;
+            log(`[${repoName}] ${formatOrphanedCheckpointMessage(error.commit)}`);
+            return;
+          }
+          throw error;
+        }
+
         const consolidation = await consolidateAgentMemory({
           provider,
           agentId: agentInfo.agentId,
           changedFiles,
           syncResult: result,
           blockCharLimit: MEMORY_BLOCK_LIMIT,
+          gitEvidence,
           log,
         });
-        if (consolidation.consolidated) {
+        if (consolidation.consolidated && consolidation.changed) {
+          await persistLastConsolidatedCommit(repoName, currentHead);
           log(`[${repoName}] consolidated architecture/conventions memory blocks`);
         }
       }
@@ -295,6 +363,14 @@ export async function watchRepos(params: WatchParams): Promise<void> {
       consecutiveFailures.set(repoName, 0);
       backoffUntil.delete(repoName);
     } catch (error) {
+      if (error instanceof OrphanedCheckpointError) {
+        // Unrecoverable without an explicit operator decision — stop the
+        // whole daemon loop instead of backing off and retrying forever
+        // against a checkpoint that can never resolve on its own.
+        fatalError = error;
+        log(`[${repoName}] ${formatOrphanedCheckpointMessage(error.commit)}`);
+        return;
+      }
       const msg = error instanceof Error ? error.message : String(error);
       const failures = (consecutiveFailures.get(repoName) ?? 0) + 1;
       consecutiveFailures.set(repoName, failures);
@@ -379,34 +455,39 @@ export async function watchRepos(params: WatchParams): Promise<void> {
   activeTick = tick();
   await activeTick;
 
+  // `fatalError` is only ever reassigned from inside nested async closures
+  // (syncRepoNow's catch block, reached via the `tick()` call above) — the
+  // type checker's narrowing doesn't see across that await boundary, so it
+  // reports both the condition and the throw target as if the variable were
+  // still statically `null` here even though it can genuinely be set.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- see above
+  if (fatalError) {
+    // Orphaned checkpoint found on the very first tick — never entered the
+    // poll loop below, so tear down what the watcher-setup loop above
+    // already created and stop before scheduling anything.
+    for (const watcher of watchers) {
+      watcher.close();
+    }
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- narrowed to OrphanedCheckpointError by the `if` above
+    throw fatalError;
+  }
+
   // Poll loop
-  return new Promise<void>((resolve) => {
+  return new Promise<void>((resolve, reject) => {
+    settle = { resolve, reject };
+
     if (signal.aborted) {
       resolve();
       return;
     }
 
-    const timer = setInterval(() => {
+    pollTimer = setInterval(() => {
       if (signal.aborted) {
-        clearInterval(timer);
+        if (pollTimer !== undefined) clearInterval(pollTimer);
         return;
       }
       activeTick = trackTask(tick());
     }, intervalMs);
-
-    const shutdown = async (): Promise<void> => {
-      clearInterval(timer);
-      for (const debounceTimer of debounceTimers.values()) {
-        clearTimeout(debounceTimer);
-      }
-      debounceTimers.clear();
-      for (const watcher of watchers) {
-        watcher.close();
-      }
-      await activeTick;
-      await Promise.allSettled(runningTasks);
-      resolve();
-    };
 
     signal.addEventListener("abort", () => {
       void shutdown();
