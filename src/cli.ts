@@ -32,6 +32,8 @@ import { addAgentToState, removeAgentFromState, updateAgentField, updatePassageM
 import { syncRepo } from "./shell/sync.js";
 import { consolidateAgentMemory } from "./shell/consolidate.js";
 import { shouldConsolidate } from "./core/consolidate.js";
+import { nodeGit } from "./shell/adapters/node-git.js";
+import { selectEvidenceSource, formatGitEvidence } from "./core/git-evidence.js";
 import { resolveTreeSitterWasmPaths } from "./shell/tree-sitter-paths.js";
 import { getAgentStatus, getAgentStatusData } from "./shell/status.js";
 import { exportAgent } from "./shell/export.js";
@@ -374,6 +376,17 @@ function gitHeadCommit(cwd: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** Max characters of formatted git log evidence embedded in a consolidation prompt. */
+const GIT_EVIDENCE_MAX_CHARS = 4000;
+
+/** Gather formatted git evidence for a consolidation prompt. Best-effort: never throws. */
+function gatherGitEvidence(repoPath: string, agent: AgentState): string {
+  const commitExists = agent.lastSyncCommit !== null && nodeGit.commitExists(repoPath, agent.lastSyncCommit);
+  const source = selectEvidenceSource(agent, commitExists);
+  const rawLog = nodeGit.logNameStatus(repoPath, source);
+  return formatGitEvidence(rawLog, GIT_EVIDENCE_MAX_CHARS);
 }
 
 function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
@@ -1244,6 +1257,7 @@ program
           changedFiles,
           syncResult: result,
           blockCharLimit: MEMORY_BLOCK_LIMIT,
+          gitEvidence: gatherGitEvidence(repoConfig.path, agentInfo),
           log,
         });
         if (consolidation.consolidated) {
@@ -1376,12 +1390,15 @@ program
       if (!agentInfo) return;
 
       console.log(`Consolidating memory for "${repoName}"...`);
+      const repoConfig = config ? getOwnRecordValue(config.repos, repoName) : undefined;
+      const gitEvidence = repoConfig ? gatherGitEvidence(repoConfig.path, agentInfo) : "";
       const result = await consolidateAgentMemory({
         provider,
         agentId: agentInfo.agentId,
         changedFiles: [],
         syncResult: { filesReIndexed: 0, filesRemoved: 0 },
         blockCharLimit: MEMORY_BLOCK_LIMIT,
+        gitEvidence,
         log: (line: string) => { console.log(line); },
       });
 

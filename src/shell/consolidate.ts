@@ -10,6 +10,8 @@ export interface ConsolidateAgentMemoryParams {
   syncResult: { filesReIndexed: number; filesRemoved: number };
   /** Max characters allowed per memory block. */
   blockCharLimit: number;
+  /** Formatted git log evidence (see `formatGitEvidence`); omitted when unavailable. */
+  gitEvidence?: string;
   signal?: AbortSignal;
   log?: (msg: string) => void;
 }
@@ -30,7 +32,7 @@ export interface ConsolidateAgentMemoryResult {
 export async function consolidateAgentMemory(
   params: ConsolidateAgentMemoryParams,
 ): Promise<ConsolidateAgentMemoryResult> {
-  const { provider, agentId, changedFiles, syncResult, blockCharLimit, signal, log } = params;
+  const { provider, agentId, changedFiles, syncResult, blockCharLimit, gitEvidence, signal, log } = params;
 
   try {
     const [architecture, conventions] = await Promise.all([
@@ -45,6 +47,7 @@ export async function consolidateAgentMemory(
       filesReIndexed: syncResult.filesReIndexed,
       filesRemoved: syncResult.filesRemoved,
       blockCharLimit,
+      ...(gitEvidence === undefined ? {} : { gitEvidence }),
     });
 
     await provider.consolidateMemory(agentId, prompt, {

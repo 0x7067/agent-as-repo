@@ -54,6 +54,31 @@ describe("buildConsolidationPrompt", () => {
     const prompt = buildConsolidationPrompt({ ...base, architecture: "", conventions: "   " });
     expect(prompt).toContain("(empty)");
   });
+
+  it("omits gitEvidence entirely when absent, producing a byte-identical prompt", () => {
+    const withoutField = buildConsolidationPrompt(base);
+    const withUndefined = buildConsolidationPrompt({ ...base, gitEvidence: undefined });
+    expect(withUndefined).toBe(withoutField);
+    expect(withoutField).not.toContain("Commit log since the last sync");
+  });
+
+  it("omits the git evidence section when gitEvidence is an empty string", () => {
+    const prompt = buildConsolidationPrompt({ ...base, gitEvidence: "" });
+    expect(prompt).not.toContain("Commit log since the last sync");
+  });
+
+  it("renders the git evidence section with its preamble when present", () => {
+    const gitEvidence = ["```", "abc1234 Fix bug", "M\tsrc/a.ts", "```"].join("\n");
+    const prompt = buildConsolidationPrompt({ ...base, gitEvidence });
+    expect(prompt).toContain("Commit log since the last sync — treat as ground truth for what changed");
+    expect(prompt).toContain(gitEvidence);
+    // Rendered between the changed-files section and the current blocks.
+    const changedIdx = prompt.indexOf("Changed files:");
+    const evidenceIdx = prompt.indexOf("Commit log since the last sync");
+    const blockIdx = prompt.indexOf("## Current architecture block");
+    expect(changedIdx).toBeLessThan(evidenceIdx);
+    expect(evidenceIdx).toBeLessThan(blockIdx);
+  });
 });
 
 describe("shouldConsolidate", () => {
