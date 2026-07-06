@@ -96,10 +96,11 @@ etc.) stay non-fatal.
    consolidate git-wiring untested) in `5a696aa`+`7a797b8` (Phase A);
    MAJOR 2 (watch.ts daemon parity) this session (Phase B) — see Now/
    Decisions above. 9 new tests landed with Phase B (927→940).
-2. Open a PR for `claude/auto-updating-docs-spec-8gi079` — external
-   dependency, re-verify branch/PR state before building on it. Branch
-   pushed through `4d019f9`; Phase A + Phase B commits are local-only,
-   not yet pushed.
+2. ~~Open a PR~~ **DONE**: branch pushed through `32fa917` and PR #16
+   opened (https://github.com/0x7067/agent-as-repo/pull/16, created as
+   0x7067 — gh's active account `tc-pguimaraes` is not a collaborator;
+   switched back after). Awaiting pedro's review/merge — external
+   dependency; re-verify PR state before building on it.
 3. Follow-up: `lastSyncAt` is only written by watch.ts, so sync-only users
    can never reach the `since` fallback (they skip range → recent/full).
    Decide whether manual `sync` should also stamp `lastSyncAt`.

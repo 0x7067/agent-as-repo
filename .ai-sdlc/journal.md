@@ -113,3 +113,18 @@
   2-4 (lastSyncAt gap, includeSubmodules × fallback coverage, misc review
   minors) still open. Phase A + Phase B commits are local-only — branch
   was pushed through `4d019f9` only.
+
+## 2026-07-06 — Phase B landed, branch pushed, PR #16 opened
+- Phase B (subagent, Sonnet): `ee2ea9a` extracted shared shell
+  gatherGitEvidence; `f2c0598` watch daemon parity (evidence in daemon
+  consolidation, lastConsolidatedCommit stamp on change only, orphaned
+  checkpoint → clean loop teardown + exit 1 + shared recovery message via
+  formatOrphanedCheckpointMessage; transient git failures stay non-fatal);
+  `32fa917` state/journal/spec-doc sync. Suite 927 → 940 (940), 83 files.
+- Pushed 789d052..32fa917 to origin.
+- PR #16 opened: https://github.com/0x7067/agent-as-repo/pull/16. Note:
+  gh's active account tc-pguimaraes is not a collaborator on
+  0x7067/agent-as-repo — PR created after `gh auth switch --user 0x7067`,
+  then switched back. Future sessions hitting "must be a collaborator"
+  on this repo: same fix.
+- All review majors resolved; remaining minors tracked in state.md Next.
