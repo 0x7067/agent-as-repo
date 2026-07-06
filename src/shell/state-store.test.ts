@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadState, saveState } from "./state-store.js";
-import { STATE_SCHEMA_VERSION, addAgentToState, createEmptyState } from "../core/state.js";
+import { STATE_SCHEMA_VERSION, addAgentToState, createEmptyState, updateAgentField } from "../core/state.js";
 import { nodeFileSystem } from "./adapters/node-filesystem.js";
 import * as fs from "node:fs/promises";
 import path from "node:path";
@@ -119,6 +119,41 @@ describe("state store", () => {
       expect(loaded.agents["my-app"].lastBootstrap).toBeNull();
       expect(loaded.agents["my-app"].lastSyncCommit).toBeNull();
       expect(loaded.agents["my-app"].lastSyncAt).toBeNull();
+      expect(loaded.agents["my-app"].lastConsolidatedCommit).toBeNull();
+    });
+  });
+
+  it("defaults lastConsolidatedCommit to null for a v2 state file that predates the field", async () => {
+    await withTempDir(async (dir) => {
+      const filePath = path.join(dir, "state.json");
+      const v2WithoutField = {
+        stateVersion: 2,
+        agents: {
+          "my-app": {
+            agentId: "agent-1",
+            repoName: "my-app",
+            passages: {},
+            lastBootstrap: null,
+            lastSyncCommit: "abc123",
+            lastSyncAt: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      };
+      await writeStateTestFile(filePath, JSON.stringify(v2WithoutField));
+      const loaded = await loadState(filePath);
+      expect(loaded.agents["my-app"].lastConsolidatedCommit).toBeNull();
+    });
+  });
+
+  it("round-trips a set lastConsolidatedCommit through save and load", async () => {
+    await withTempDir(async (dir) => {
+      const filePath = path.join(dir, "state.json");
+      let state = addAgentToState(createEmptyState(), "my-app", "agent-123", "2026-01-01T00:00:00.000Z");
+      state = updateAgentField(state, "my-app", { lastConsolidatedCommit: "abc123" });
+      await saveState(filePath, state);
+      const loaded = await loadState(filePath);
+      expect(loaded.agents["my-app"].lastConsolidatedCommit).toBe("abc123");
     });
   });
 

@@ -1,4 +1,5 @@
 import { buildConsolidationPrompt } from "../core/consolidate.js";
+import { fingerprintBlocks } from "../core/fingerprint.js";
 import type { AgentProvider } from "../ports/agent-provider.js";
 
 export interface ConsolidateAgentMemoryParams {
@@ -18,6 +19,8 @@ export interface ConsolidateAgentMemoryParams {
 
 export interface ConsolidateAgentMemoryResult {
   consolidated: boolean;
+  /** False when the post-consolidation blocks fingerprint identically to the pre-consolidation blocks (no-op). */
+  changed: boolean;
   error?: string;
 }
 
@@ -55,10 +58,23 @@ export async function consolidateAgentMemory(
       ...(signal === undefined ? {} : { signal }),
     });
 
-    return { consolidated: true };
+    const [postArchitecture, postConventions] = await Promise.all([
+      provider.getBlock(agentId, "architecture"),
+      provider.getBlock(agentId, "conventions"),
+    ]);
+
+    const preHash = fingerprintBlocks({ architecture: architecture.value, conventions: conventions.value });
+    const postHash = fingerprintBlocks({ architecture: postArchitecture.value, conventions: postConventions.value });
+
+    if (preHash === postHash) {
+      log?.(`  consolidation: blocks unchanged`);
+      return { consolidated: true, changed: false };
+    }
+
+    return { consolidated: true, changed: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log?.(`  Warning: memory consolidation failed: ${message}`);
-    return { consolidated: false, error: message };
+    return { consolidated: false, changed: false, error: message };
   }
 }

@@ -23,6 +23,7 @@ export function addAgentToState(
         lastBootstrap: null,
         lastSyncCommit: null,
         lastSyncAt: null,
+        lastConsolidatedCommit: null,
         createdAt,
       },
     },

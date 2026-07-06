@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildConsolidationPrompt, shouldConsolidate } from "./consolidate.js";
+import { buildConsolidationPrompt, shouldConsolidate, shouldSkipConsolidation } from "./consolidate.js";
 
 describe("buildConsolidationPrompt", () => {
   const base = {
@@ -110,6 +110,56 @@ describe("shouldConsolidate", () => {
     const decision = shouldConsolidate(
       { filesReIndexed: 0, filesRemoved: 5 },
       true,
+    );
+    expect(decision).toBe(true);
+  });
+});
+
+describe("shouldSkipConsolidation", () => {
+  it("returns false when headCommit is null (no known git HEAD)", () => {
+    const decision = shouldSkipConsolidation(
+      { lastSyncCommit: "abc123", lastConsolidatedCommit: "abc123" },
+      null,
+    );
+    expect(decision).toBe(false);
+  });
+
+  it("returns false when HEAD has moved past the last sync commit", () => {
+    const decision = shouldSkipConsolidation(
+      { lastSyncCommit: "abc123", lastConsolidatedCommit: "abc123" },
+      "def456",
+    );
+    expect(decision).toBe(false);
+  });
+
+  it("returns false when lastSyncCommit matches HEAD but consolidation never ran at that commit", () => {
+    const decision = shouldSkipConsolidation(
+      { lastSyncCommit: "abc123", lastConsolidatedCommit: null },
+      "abc123",
+    );
+    expect(decision).toBe(false);
+  });
+
+  it("returns false when lastConsolidatedCommit is a stale commit, not the current HEAD", () => {
+    const decision = shouldSkipConsolidation(
+      { lastSyncCommit: "abc123", lastConsolidatedCommit: "def456" },
+      "abc123",
+    );
+    expect(decision).toBe(false);
+  });
+
+  it("returns false when lastConsolidatedCommit is omitted entirely", () => {
+    const decision = shouldSkipConsolidation(
+      { lastSyncCommit: "abc123" },
+      "abc123",
+    );
+    expect(decision).toBe(false);
+  });
+
+  it("returns true when HEAD, lastSyncCommit, and lastConsolidatedCommit all agree", () => {
+    const decision = shouldSkipConsolidation(
+      { lastSyncCommit: "abc123", lastConsolidatedCommit: "abc123" },
+      "abc123",
     );
     expect(decision).toBe(true);
   });

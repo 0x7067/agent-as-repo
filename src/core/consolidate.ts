@@ -96,3 +96,24 @@ export function shouldConsolidate(
   const filesChanged = sync.filesReIndexed + sync.filesRemoved;
   return filesChanged >= CONSOLIDATE_MIN_FILES_CHANGED;
 }
+
+/** Agent state fields consulted when deciding whether to skip a manual consolidation run. */
+export interface SkipConsolidationInput {
+  lastSyncCommit: string | null;
+  lastConsolidatedCommit?: string | null;
+}
+
+/**
+ * Decide whether a manual consolidation run has nothing new to do: the repo's
+ * current HEAD matches the commit the last sync ran against, and a
+ * consolidation already completed (with a real change) at that same commit.
+ *
+ * Openwiki's `getUpdateNoopStatus` equivalent — the scheduled run that finds
+ * nothing costs nothing. `headCommit === null` (git unavailable) never skips,
+ * since there is no evidence nothing changed.
+ */
+export function shouldSkipConsolidation(agent: SkipConsolidationInput, headCommit: string | null): boolean {
+  if (headCommit === null) return false;
+  if (agent.lastSyncCommit !== headCommit) return false;
+  return agent.lastConsolidatedCommit === headCommit;
+}

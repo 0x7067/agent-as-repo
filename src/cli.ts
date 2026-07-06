@@ -31,7 +31,7 @@ import { listSubmodules, expandSubmoduleFiles } from "./shell/submodule-collecto
 import { addAgentToState, removeAgentFromState, updateAgentField, updatePassageMap } from "./core/state.js";
 import { syncRepo } from "./shell/sync.js";
 import { consolidateAgentMemory } from "./shell/consolidate.js";
-import { shouldConsolidate } from "./core/consolidate.js";
+import { shouldConsolidate, shouldSkipConsolidation } from "./core/consolidate.js";
 import { nodeGit } from "./shell/adapters/node-git.js";
 import { selectEvidenceSource, formatGitEvidence } from "./core/git-evidence.js";
 import { resolveTreeSitterWasmPaths } from "./shell/tree-sitter-paths.js";
@@ -387,6 +387,58 @@ function gatherGitEvidence(repoPath: string, agent: AgentState): string {
   const source = selectEvidenceSource(agent, commitExists);
   const rawLog = nodeGit.logNameStatus(repoPath, source);
   return formatGitEvidence(rawLog, GIT_EVIDENCE_MAX_CHARS);
+}
+
+/**
+ * Run (or skip) manual consolidation for a single repo agent, returning the
+ * possibly-updated app state. Extracted from the `consolidate` command action
+ * to keep its cognitive complexity within budget.
+ */
+async function consolidateRepoAgent(params: {
+  state: AppState;
+  repoName: string;
+  agentInfo: AgentState;
+  config: Config | null;
+  provider: AgentProvider;
+}): Promise<AppState> {
+  const { repoName, agentInfo, config, provider } = params;
+  let state = params.state;
+
+  console.log(`Consolidating memory for "${repoName}"...`);
+  const repoConfig = config ? getOwnRecordValue(config.repos, repoName) : undefined;
+  const headCommit = repoConfig ? gitHeadCommit(repoConfig.path) : null;
+
+  if (shouldSkipConsolidation(agentInfo, headCommit)) {
+    console.log(`  Skipped: no repository changes since last consolidation.`);
+    return state;
+  }
+
+  const gitEvidence = repoConfig ? gatherGitEvidence(repoConfig.path, agentInfo) : "";
+  const result = await consolidateAgentMemory({
+    provider,
+    agentId: agentInfo.agentId,
+    changedFiles: [],
+    syncResult: { filesReIndexed: 0, filesRemoved: 0 },
+    blockCharLimit: MEMORY_BLOCK_LIMIT,
+    gitEvidence,
+    log: (line: string) => { console.log(line); },
+  });
+
+  if (!result.consolidated) {
+    console.log(`  Skipped: ${result.error ?? "nothing to consolidate"}.`);
+    return state;
+  }
+
+  if (result.changed) {
+    if (headCommit !== null) {
+      state = updateAgentField(state, repoName, { lastConsolidatedCommit: headCommit });
+      await saveState(STATE_FILE, state);
+    }
+    console.log(`  Done.`);
+  }
+  // else: "consolidation: blocks unchanged" was already logged inside consolidateAgentMemory.
+
+  return state;
 }
 
 function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
@@ -1260,7 +1312,9 @@ program
           gitEvidence: gatherGitEvidence(repoConfig.path, agentInfo),
           log,
         });
-        if (consolidation.consolidated) {
+        if (consolidation.consolidated && consolidation.changed) {
+          state = updateAgentField(state, repoName, { lastConsolidatedCommit: headCommit });
+          await saveState(STATE_FILE, state);
           log(`  Consolidated architecture/conventions memory blocks.`);
         }
       }
@@ -1380,7 +1434,7 @@ program
   .option("--repo <name>", "Consolidate a single repo agent")
   .option("--config <path>", "Config file path", "config.yaml")
   .action(async (opts: ConsolidateCliOpts) => {
-    const state = await loadState(STATE_FILE);
+    let state = await loadState(STATE_FILE);
     const config = await loadConfigForProvider(path.resolve(opts.config));
     const provider = createProviderForCommands(config);
     const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
@@ -1389,24 +1443,7 @@ program
       const agentInfo = requireAgent(state, repoName);
       if (!agentInfo) return;
 
-      console.log(`Consolidating memory for "${repoName}"...`);
-      const repoConfig = config ? getOwnRecordValue(config.repos, repoName) : undefined;
-      const gitEvidence = repoConfig ? gatherGitEvidence(repoConfig.path, agentInfo) : "";
-      const result = await consolidateAgentMemory({
-        provider,
-        agentId: agentInfo.agentId,
-        changedFiles: [],
-        syncResult: { filesReIndexed: 0, filesRemoved: 0 },
-        blockCharLimit: MEMORY_BLOCK_LIMIT,
-        gitEvidence,
-        log: (line: string) => { console.log(line); },
-      });
-
-      if (result.consolidated) {
-        console.log(`  Done.`);
-      } else {
-        console.log(`  Skipped: ${result.error ?? "nothing to consolidate"}.`);
-      }
+      state = await consolidateRepoAgent({ state, repoName, agentInfo, config, provider });
     }
   });
 

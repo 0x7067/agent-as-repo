@@ -15,6 +15,7 @@ const agentStateSchema = z.object({
   lastBootstrap: z.string().nullable().optional().default(null),
   lastSyncCommit: z.string().nullable().optional().default(null),
   lastSyncAt: z.string().nullable().optional().default(null),
+  lastConsolidatedCommit: z.string().nullable().optional().default(null),
   createdAt: z.string().optional().default(""),
 });
 
