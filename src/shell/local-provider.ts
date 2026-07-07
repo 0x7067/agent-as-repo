@@ -126,6 +126,23 @@ export class LocalProvider implements AgentProvider {
     return uuid;
   }
 
+  /**
+   * Batch write path: generates one UUID per text and writes them all
+   * through the store's batch method when available (fewer embedding round
+   * trips), falling back to sequential `writePassage` calls otherwise.
+   */
+  async storePassages(agentId: string, texts: string[]): Promise<string[]> {
+    const entries = texts.map((text) => ({ passageId: randomUUID(), text }));
+    if (this.store.writePassages) {
+      await this.store.writePassages(agentId, entries);
+    } else {
+      for (const entry of entries) {
+        await this.store.writePassage(agentId, entry.passageId, entry.text);
+      }
+    }
+    return entries.map((entry) => entry.passageId);
+  }
+
   async deletePassage(agentId: string, passageId: string): Promise<void> {
     await this.store.deletePassage(agentId, passageId);
   }

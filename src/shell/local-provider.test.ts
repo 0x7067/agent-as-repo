@@ -16,6 +16,7 @@ function makeMockStore() {
     deleteAgent: vi.fn().mockResolvedValue(),
     listAgents: vi.fn().mockResolvedValue([]),
     writePassage: vi.fn().mockResolvedValue(),
+    writePassages: vi.fn().mockResolvedValue(),
     readPassage: vi.fn().mockResolvedValue(""),
     deletePassage: vi.fn().mockResolvedValue(),
     listPassages: vi.fn().mockResolvedValue([]),
@@ -47,12 +48,9 @@ describe("LocalProvider", () => {
     vi.clearAllMocks();
     mockStore = makeMockStore();
     mockBlockStorage = makeMockBlockStorage();
-    provider = new LocalProvider(
-      mockStore as unknown as PassageStore,
-      DEFAULT_MODEL,
-      mockBlockStorage as unknown as BlockStorage,
-      { apiKey: API_KEY },
-    );
+    provider = new LocalProvider(mockStore as unknown as PassageStore, DEFAULT_MODEL, mockBlockStorage as unknown as BlockStorage, {
+      apiKey: API_KEY,
+    });
   });
 
   describe("createAgent", () => {
@@ -121,6 +119,32 @@ describe("LocalProvider", () => {
       expect(passageId.length).toBeGreaterThan(0);
 
       expect(mockStore.writePassage).toHaveBeenCalledWith("myrepo", passageId, "some passage text");
+    });
+  });
+
+  describe("storePassages", () => {
+    it("writes all passages via store.writePassages in one batch call and returns UUIDs in order", async () => {
+      const texts = ["text a", "text b", "text c"];
+      const passageIds = await provider.storePassages("myrepo", texts);
+
+      expect(passageIds).toHaveLength(3);
+      expect(mockStore.writePassage).not.toHaveBeenCalled();
+      expect(mockStore.writePassages).toHaveBeenCalledWith(
+        "myrepo",
+        texts.map((text, i) => ({ passageId: passageIds[i], text })),
+      );
+    });
+
+    it("falls back to per-text writePassage when the store has no writePassages method", async () => {
+      const legacyStore = { ...mockStore, writePassages: undefined } as unknown as PassageStore;
+      const blocks = mockBlockStorage as unknown as BlockStorage;
+      const legacyProvider = new LocalProvider(legacyStore, DEFAULT_MODEL, blocks, { apiKey: API_KEY });
+
+      const passageIds = await legacyProvider.storePassages("myrepo", ["text a", "text b"]);
+
+      expect(passageIds).toHaveLength(2);
+      expect(mockStore.writePassage).toHaveBeenCalledTimes(2);
+      expect(mockStore.writePassage).toHaveBeenNthCalledWith(1, "myrepo", passageIds[0], "text a");
     });
   });
 

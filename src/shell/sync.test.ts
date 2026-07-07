@@ -360,6 +360,73 @@ describe("syncRepo", () => {
     expect(result.passages["src/a.ts"]).not.toContain(undefined);
   });
 
+  describe("batched storePassages path", () => {
+    it("uses provider.storePassages for a file's chunks in one batch call when available", async () => {
+      const provider = makeBase({
+        storePassages: vi.fn().mockImplementation((_agentId: string, texts: string[]) =>
+          Promise.resolve(texts.map((_, i) => `batch-p-${String(i)}`)),
+        ),
+      });
+
+      const result = await syncRepo({
+        provider,
+        agent: testAgent,
+        changedFiles: ["src/a.ts"],
+        collectFile: (path) => Promise.resolve({ path, content: NEW_CONTENT, sizeKb: 1 }),
+        headCommit: "def456",
+      });
+
+      expect(provider.storePassages).toHaveBeenCalledTimes(1);
+      expect(provider.storePassage).not.toHaveBeenCalled();
+      expect(result.passages["src/a.ts"]).toBeDefined();
+    });
+
+    it("passes the agent id and all chunk texts for the file to storePassages", async () => {
+      const provider = makeBase({
+        storePassages: vi.fn().mockImplementation((_agentId: string, texts: string[]) =>
+          Promise.resolve(texts.map((_, i) => `batch-p-${String(i)}`)),
+        ),
+      });
+
+      await syncRepo({
+        provider,
+        agent: testAgent,
+        changedFiles: ["src/a.ts"],
+        collectFile: (path) => Promise.resolve({ path, content: "const x = 1;", sizeKb: 0.01 }),
+        headCommit: "def456",
+        chunking: "raw",
+      });
+
+      const [agentId, texts] = (provider.storePassages as ReturnType<typeof vi.fn>).mock.calls[0] as [
+        string,
+        string[],
+      ];
+      expect(agentId).toBe("agent-abc");
+      expect(texts.some((text) => text.includes("FILE: src/a.ts"))).toBe(true);
+    });
+
+    it("treats a storePassages batch failure as a per-file failure, keeping old passages intact", async () => {
+      const provider = makeBase({
+        storePassages: vi.fn().mockRejectedValue(new Error("embed endpoint down")),
+      });
+
+      const errors: Array<{ file: string; error: Error }> = [];
+      const result = await syncRepo({
+        provider,
+        agent: testAgent,
+        changedFiles: ["src/a.ts"],
+        collectFile: (path) => Promise.resolve({ path, content: NEW_CONTENT, sizeKb: 1 }),
+        headCommit: "def456",
+        onFileError: (file, error) => errors.push({ file, error }),
+      });
+
+      expect(result.failedFiles).toEqual(["src/a.ts"]);
+      expect(result.passages["src/a.ts"]).toEqual(["p-1", "p-2"]);
+      expect(errors).toHaveLength(1);
+      expect(errors[0].file).toBe("src/a.ts");
+    });
+  });
+
   describe("per-file error isolation", () => {
     it("continues syncing other files when one file upload fails", async () => {
       const provider = makeMockProvider();

@@ -13,6 +13,12 @@ export interface StoredPassage {
   text: string;
 }
 
+/** One passage to write in a batch call: caller-generated ID + full text. */
+export interface PassageWriteEntry {
+  passageId: string;
+  text: string;
+}
+
 /** A semantic-search hit over an agent's passages. */
 export interface PassageSearchResult {
   id: string;
@@ -31,6 +37,13 @@ export interface PassageStore {
   deleteAgent(this: void, agentId: string): Promise<void>;
   listAgents(this: void): Promise<string[]>;
   writePassage(this: void, agentId: string, passageId: string, text: string): Promise<void>;
+  /**
+   * Batch write path: embeds all entries' texts together (fewer HTTP round
+   * trips than one `writePassage` per entry) and inserts them atomically per
+   * internal batch. Optional — callers must fall back to per-entry
+   * `writePassage` when an implementation doesn't provide this.
+   */
+  writePassages?(this: void, agentId: string, entries: PassageWriteEntry[]): Promise<void>;
   readPassage(this: void, agentId: string, passageId: string): Promise<string>;
   deletePassage(this: void, agentId: string, passageId: string): Promise<void>;
   listPassages(this: void, agentId: string): Promise<StoredPassage[]>;

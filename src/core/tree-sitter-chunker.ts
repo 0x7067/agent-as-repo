@@ -266,8 +266,13 @@ export async function initTreeSitterChunker(options: TreeSitterInitOptions): Pro
     await Parser.init({ locateFile: () => options.webTreeSitterWasm });
     parser = new Parser();
 
-    for (const [label, wasmPath] of Object.entries(options.grammarWasmByLabel) as [GrammarLabel, string][]) {
-      languageByLabel.set(label, await Language.load(wasmPath));
+    const grammarEntries = Object.entries(options.grammarWasmByLabel) as [GrammarLabel, string][];
+    const grammars = await Promise.all(
+      grammarEntries.map(([, wasmPath]) => Language.load(wasmPath)),
+    );
+    for (const [index, [label]] of grammarEntries.entries()) {
+      const language = grammars.at(index);
+      if (language !== undefined) languageByLabel.set(label, language);
     }
 
     initialized = true;

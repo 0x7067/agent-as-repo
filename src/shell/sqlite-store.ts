@@ -4,6 +4,7 @@ import type {
   AgentManifest,
   PassageSearchResult,
   PassageStore,
+  PassageWriteEntry,
   StoredPassage,
 } from "../ports/passage-store.js";
 import { openVectorDatabase, type VectorDatabase } from "./sqlite-native.js";
@@ -66,6 +67,12 @@ END;
 
 const DIMENSION_META_KEY = "embedding_dimension";
 
+/** Max rowids per `WHERE rowid IN (...)` statement in deleteAgent's vector cleanup. */
+const DELETE_CHUNK_SIZE = 500;
+
+/** Max texts per embedTexts call in writePassages' batch write path. */
+const EMBED_BATCH_SIZE = 32;
+
 function normalizeVector(vector: number[]): number[] {
   let sumOfSquares = 0;
   for (const component of vector) sumOfSquares += component * component;
@@ -114,9 +121,13 @@ export class SqlitePassageStore implements PassageStore {
       const seqs = this.db
         .prepare("SELECT seq FROM passages WHERE agent_id = ?")
         .all(agentId) as Array<{ seq: number | bigint }>;
-      const deleteVector = this.db.prepare("DELETE FROM passage_vectors WHERE rowid = ?");
-      for (const { seq } of seqs) {
-        if (this.vectorTableReady) deleteVector.run(BigInt(seq));
+      if (this.vectorTableReady) {
+        for (let i = 0; i < seqs.length; i += DELETE_CHUNK_SIZE) {
+          const batch = seqs.slice(i, i + DELETE_CHUNK_SIZE);
+          const placeholders = batch.map(() => "?").join(", ");
+          const sql = `DELETE FROM passage_vectors WHERE rowid IN (${placeholders})`;
+          this.db.prepare(sql).run(...batch.map(({ seq }) => BigInt(seq)));
+        }
       }
       this.db.prepare("DELETE FROM passages WHERE agent_id = ?").run(agentId);
       this.db.prepare("DELETE FROM agents WHERE agent_id = ?").run(agentId);
@@ -133,31 +144,58 @@ export class SqlitePassageStore implements PassageStore {
   }
 
   async writePassage(agentId: string, passageId: string, text: string): Promise<void> {
-    const vectors = await this.embedTexts([text]);
-    const vector = vectors.at(0);
-    if (vector === undefined) {
-      throw new Error("Embedding endpoint returned no vector for the passage text");
+    await this.writeBatch(agentId, [{ passageId, text }]);
+  }
+
+  /**
+   * Batch write path: embeds all entries in groups of EMBED_BATCH_SIZE (one
+   * embedTexts HTTP round trip per group instead of one per entry), each
+   * group committed atomically. Validation (embedding + dimension check)
+   * happens entirely before the transaction opens, so a failing embed call
+   * — or a dimension mismatch — leaves no partial rows for that group.
+   */
+  async writePassages(agentId: string, entries: PassageWriteEntry[]): Promise<void> {
+    for (let i = 0; i < entries.length; i += EMBED_BATCH_SIZE) {
+      await this.writeBatch(agentId, entries.slice(i, i + EMBED_BATCH_SIZE));
     }
-    this.assertDimension(vector.length);
-    const encoded = encodeVector(normalizeVector(vector));
-    const filePath = extractSourcePath(text);
+  }
+
+  private async writeBatch(agentId: string, batch: PassageWriteEntry[]): Promise<void> {
+    if (batch.length === 0) return;
+
+    const vectors = await this.embedTexts(batch.map((entry) => entry.text));
+    const rows = batch.map((entry, index) => {
+      const vector = vectors.at(index);
+      if (vector === undefined) {
+        throw new Error("Embedding endpoint returned no vector for the passage text");
+      }
+      this.assertDimension(vector.length);
+      return {
+        passageId: entry.passageId,
+        text: entry.text,
+        encoded: encodeVector(normalizeVector(vector)),
+        filePath: extractSourcePath(entry.text),
+      };
+    });
+
+    const insertPassage = this.db.prepare(
+      "INSERT INTO passages (id, agent_id, file_path, text, created_at) VALUES (?, ?, ?, ?, ?)",
+    );
+    const insertVector = this.db.prepare("INSERT INTO passage_vectors (rowid, embedding) VALUES (?, ?)");
+    const findExisting = this.db.prepare("SELECT seq FROM passages WHERE agent_id = ? AND id = ?");
+    const deleteVector = this.db.prepare("DELETE FROM passage_vectors WHERE rowid = ?");
+    const deletePassageRow = this.db.prepare("DELETE FROM passages WHERE seq = ?");
 
     const write = this.db.transaction(() => {
-      const existing = this.db
-        .prepare("SELECT seq FROM passages WHERE agent_id = ? AND id = ?")
-        .get(agentId, passageId) as { seq: number | bigint } | undefined;
-      if (existing !== undefined) {
-        this.db.prepare("DELETE FROM passage_vectors WHERE rowid = ?").run(BigInt(existing.seq));
-        this.db.prepare("DELETE FROM passages WHERE seq = ?").run(existing.seq);
+      for (const row of rows) {
+        const existing = findExisting.get(agentId, row.passageId) as { seq: number | bigint } | undefined;
+        if (existing !== undefined) {
+          deleteVector.run(BigInt(existing.seq));
+          deletePassageRow.run(existing.seq);
+        }
+        const info = insertPassage.run(row.passageId, agentId, row.filePath, row.text, new Date().toISOString());
+        insertVector.run(BigInt(info.lastInsertRowid), row.encoded);
       }
-      const info = this.db
-        .prepare(
-          "INSERT INTO passages (id, agent_id, file_path, text, created_at) VALUES (?, ?, ?, ?, ?)",
-        )
-        .run(passageId, agentId, filePath, text, new Date().toISOString());
-      this.db
-        .prepare("INSERT INTO passage_vectors (rowid, embedding) VALUES (?, ?)")
-        .run(BigInt(info.lastInsertRowid), encoded);
     });
     write();
   }
@@ -273,9 +311,7 @@ export class SqlitePassageStore implements PassageStore {
         this.db.prepare("SELECT COUNT(*) AS count FROM passages").get() as { count: number }
       ).count;
       const indexedCount = (
-        this.db.prepare("SELECT COUNT(*) AS count FROM passage_fts_docsize").get() as {
-          count: number;
-        }
+        this.db.prepare("SELECT COUNT(*) AS count FROM passage_fts_docsize").get() as { count: number }
       ).count;
       if (passageCount !== indexedCount) {
         this.db.prepare("INSERT INTO passage_fts(passage_fts) VALUES ('rebuild')").run();

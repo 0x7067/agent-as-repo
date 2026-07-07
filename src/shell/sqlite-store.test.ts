@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { SqlitePassageStore } from "./sqlite-store.js";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { SqlitePassageStore, type EmbedTexts } from "./sqlite-store.js";
 import { openVectorDatabase } from "./sqlite-native.js";
 
 const MANIFEST = {
@@ -20,6 +20,44 @@ function constantEmbed(dimension: number): (texts: string[]) => Promise<number[]
       vector[Math.abs(text.length) % dimension] = 1;
       return vector;
     }));
+}
+
+function fakeVector(seed: number): number[] {
+  const vector = Array.from({ length: 8 }, () => 0);
+  vector[seed % 8] = 1;
+  return vector;
+}
+
+function embedByIndex() {
+  return vi.fn((texts: string[]) => Promise.resolve(texts.map((_, i) => fakeVector(i))));
+}
+
+async function makeBatchStore(dir: string, name: string, embed: EmbedTexts): Promise<SqlitePassageStore> {
+  const store = new SqlitePassageStore({ dbPath: path.join(dir, name), embed });
+  await store.initAgent("repo-a", MANIFEST);
+  return store;
+}
+
+interface MinimalStatement {
+  run: (...args: unknown[]) => unknown;
+}
+interface MinimalDb {
+  prepare: (sql: string) => MinimalStatement;
+}
+
+/** Counts actual DELETE *executions* against passage_vectors, not prepare()
+ * calls — a single prepared statement can still be .run() once per row. */
+function countVectorDeleteRuns(store: SqlitePassageStore): { count: () => number } {
+  const dbHandle = (store as unknown as { db: MinimalDb }).db;
+  const originalPrepare = dbHandle.prepare.bind(dbHandle);
+  let calls = 0;
+  vi.spyOn(dbHandle, "prepare").mockImplementation((sql: string) => {
+    const statement = originalPrepare(sql);
+    if (!sql.includes("DELETE FROM passage_vectors")) return statement;
+    const originalRun = statement.run.bind(statement);
+    return { run: (...args: unknown[]) => { calls++; return originalRun(...args); } };
+  });
+  return { count: () => calls };
 }
 
 describe("SqlitePassageStore", () => {
@@ -207,6 +245,106 @@ describe("SqlitePassageStore", () => {
 
     const results = await store.semanticSearch("repo-a", "resilient passage text", 5);
     expect(results[0]).toMatchObject({ id: "p-1" });
+  });
+
+  it("deletes vectors via chunked IN clauses instead of one DELETE per row", async () => {
+    await store.initAgent("repo-a", MANIFEST);
+    await store.initAgent("repo-b", { ...MANIFEST, agentId: "repo-b" });
+    // Establishes the vector table/dimension and vectorTableReady, and gives
+    // repo-b a passage that must survive repo-a's deletion untouched.
+    await store.writePassage("repo-b", "keep-1", "keep me");
+
+    const seed = openVectorDatabase(dbPath);
+    const insertPassageSql = "INSERT INTO passages (id, agent_id, text, created_at) VALUES (?, 'repo-a', ?, '2026-07-04T00:00:00.000Z')";
+    const insertPassage = seed.prepare(insertPassageSql);
+    const insertVector = seed.prepare("INSERT INTO passage_vectors (rowid, embedding) VALUES (?, ?)");
+    const zeroVector = Buffer.from(new Float32Array(8).buffer);
+    for (let i = 0; i < 1200; i++) { // spans multiple 500-row chunks
+      const info = insertPassage.run(`p-${String(i)}`, `bulk passage ${String(i)}`);
+      insertVector.run(BigInt(info.lastInsertRowid), zeroVector);
+    }
+    seed.close();
+
+    const vectorDeletes = countVectorDeleteRuns(store);
+    await store.deleteAgent("repo-a");
+    // One IN-clause execution per 500-row chunk (3 for 1200 rows), never one per row.
+    expect(vectorDeletes.count()).toBeLessThanOrEqual(3);
+
+    const verify = openVectorDatabase(dbPath);
+    const remaining = (sql: string): number => (verify.prepare(sql).get() as { count: number }).count;
+    expect(remaining("SELECT COUNT(*) AS count FROM passages WHERE agent_id = 'repo-a'")).toBe(0);
+    // Only repo-b's "keep-1" vector should remain.
+    expect(remaining("SELECT COUNT(*) AS count FROM passage_vectors")).toBe(1);
+    expect(await store.listAgents()).toEqual(["repo-b"]);
+    verify.close();
+  });
+
+  describe("writePassages (batch write path)", () => {
+    it("embeds all texts in a single embedTexts call, not one per chunk", async () => {
+      const embedSpy = embedByIndex();
+      const batchStore = await makeBatchStore(dir, "batch.db", embedSpy);
+      const entries = Array.from({ length: 5 }, (_, i) => ({ passageId: `p-${String(i)}`, text: `t${String(i)}` }));
+
+      await batchStore.writePassages("repo-a", entries);
+
+      expect(embedSpy).toHaveBeenCalledTimes(1);
+      expect(embedSpy.mock.calls[0][0]).toHaveLength(5);
+      expect(await batchStore.listPassages("repo-a")).toHaveLength(5);
+      batchStore.close();
+    });
+
+    it("splits large batches into multiple embedTexts calls of at most 32 texts each", async () => {
+      const embedSpy = embedByIndex();
+      const batchStore = await makeBatchStore(dir, "batch-large.db", embedSpy);
+      const entries = Array.from({ length: 70 }, (_, i) => ({ passageId: `p-${String(i)}`, text: `t${String(i)}` }));
+
+      await batchStore.writePassages("repo-a", entries);
+
+      expect(embedSpy).toHaveBeenCalledTimes(3);
+      expect(embedSpy.mock.calls[0][0]).toHaveLength(32);
+      expect(embedSpy.mock.calls[1][0]).toHaveLength(32);
+      expect(embedSpy.mock.calls[2][0]).toHaveLength(6);
+      expect(await batchStore.listPassages("repo-a")).toHaveLength(70);
+      batchStore.close();
+    });
+
+    it("leaves no partial rows for a batch whose embedTexts call fails", async () => {
+      const embedSpy = vi.fn().mockRejectedValue(new Error("embed endpoint down"));
+      const batchStore = await makeBatchStore(dir, "batch-fail.db", embedSpy);
+      const entries = [{ passageId: "p-1", text: "one" }, { passageId: "p-2", text: "two" }];
+
+      await expect(batchStore.writePassages("repo-a", entries)).rejects.toThrow("embed endpoint down");
+      expect(await batchStore.listPassages("repo-a")).toEqual([]);
+      batchStore.close();
+    });
+
+    it("commits earlier successful batches even when a later batch's embed fails", async () => {
+      let call = 0;
+      const embedSpy = vi.fn((texts: string[]) => {
+        call++;
+        if (call === 2) return Promise.reject(new Error("second batch embed failed"));
+        return Promise.resolve(texts.map((_, i) => fakeVector(i)));
+      });
+      const batchStore = await makeBatchStore(dir, "batch-partial.db", embedSpy);
+      const entries = Array.from({ length: 40 }, (_, i) => ({ passageId: `p-${String(i)}`, text: `t${String(i)}` }));
+
+      await expect(batchStore.writePassages("repo-a", entries)).rejects.toThrow("second batch embed failed");
+      // First batch (32 entries) committed; second batch (8 entries) never wrote rows.
+      expect(await batchStore.listPassages("repo-a")).toHaveLength(32);
+      batchStore.close();
+    });
+
+    it("parses FILE: headers and supports overwriting an existing passage id, same as writePassage", async () => {
+      await store.initAgent("repo-a", MANIFEST);
+      await store.writePassages("repo-a", [{ passageId: "p-1", text: "FILE: src/auth.ts\n\noriginal" }]);
+      await store.writePassages("repo-a", [{ passageId: "p-1", text: "FILE: src/auth.ts\n\nupdated" }]);
+
+      expect(await store.readPassage("repo-a", "p-1")).toBe("FILE: src/auth.ts\n\nupdated");
+      const db = openVectorDatabase(dbPath);
+      const rows = db.prepare("SELECT id, file_path FROM passages WHERE agent_id = 'repo-a'").all();
+      expect(rows).toEqual([{ id: "p-1", file_path: "src/auth.ts" }]);
+      db.close();
+    });
   });
 
   it("creates the parent directory for the DB file when missing", async () => {
