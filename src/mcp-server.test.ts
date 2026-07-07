@@ -12,6 +12,7 @@ import {
   parseNonNegativeInt,
   parsePositiveInt,
   readPackageVersion,
+  readPackageVersionFromRequire,
   registerTools,
 } from "./mcp-server.js";
 import type { AgentProvider } from "./ports/agent-provider.js";
@@ -132,6 +133,18 @@ describe("readPackageVersion", () => {
     const pkgPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json");
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
     expect(readPackageVersion()).toBe(pkg.version);
+  });
+
+  it("falls back to the dist/bin-relative package.json path for bundled output", () => {
+    const requireFromHere = vi.fn((id: string): unknown => {
+      if (id === "../package.json") throw new Error("missing dist/package.json");
+      if (id === "../../package.json") return { version: "2.3.4" };
+      throw new Error(`unexpected require path: ${id}`);
+    });
+
+    expect(readPackageVersionFromRequire(requireFromHere)).toBe("2.3.4");
+    expect(requireFromHere).toHaveBeenCalledWith("../package.json");
+    expect(requireFromHere).toHaveBeenCalledWith("../../package.json");
   });
 });
 
@@ -444,6 +457,14 @@ describe("MCP Server tools", () => {
       expect(mockAdmin.searchPassages).toHaveBeenCalledWith("agent-1", "auth", 5);
     });
 
+    it("returns a clear 'agent not found' error for a nonexistent agent instead of succeeding empty", async () => {
+      const handler = extractToolHandler(server, "agent_search_archival");
+      const result = await handler({ agent_id: "bad-id", query: "auth" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("agent not found: bad-id");
+      expect(mockAdmin.searchPassages).not.toHaveBeenCalled();
+    });
+
     it("rejects non-integer/non-positive top_k at the schema level", () => {
       const registeredTools = (server as unknown as {
         _registeredTools: Record<
@@ -469,6 +490,14 @@ describe("MCP Server tools", () => {
       expect(data.id).toBe("p-new");
       expect(provider.storePassage).toHaveBeenCalledWith("agent-1", "new passage");
     });
+
+    it("returns a clear 'agent not found' error for a nonexistent agent instead of inserting", async () => {
+      const handler = extractToolHandler(server, "agent_insert_passage");
+      const result = await handler({ agent_id: "bad-id", text: "new passage" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("agent not found: bad-id");
+      expect(provider.storePassage).not.toHaveBeenCalled();
+    });
   });
 
   describe("agent_delete_passage", () => {
@@ -484,6 +513,15 @@ describe("MCP Server tools", () => {
       const result = await handler({ agent_id: "agent-1", passage_id: "does-not-exist" });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toBe("passage not found: does-not-exist");
+      expect(provider.deletePassage).not.toHaveBeenCalled();
+    });
+
+    it("returns a clear 'agent not found' error for a nonexistent agent instead of checking passages", async () => {
+      const handler = extractToolHandler(server, "agent_delete_passage");
+      const result = await handler({ agent_id: "bad-id", passage_id: "p-1" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("agent not found: bad-id");
+      expect(provider.listPassages).not.toHaveBeenCalled();
       expect(provider.deletePassage).not.toHaveBeenCalled();
     });
   });
@@ -528,6 +566,14 @@ describe("MCP Server tools", () => {
       const result = await handler({ agent_id: "agent-1", label: "architecture", value: atLimit });
       expect(result.isError).toBeFalsy();
       expect(provider.updateBlock).toHaveBeenCalledWith("agent-1", "architecture", atLimit);
+    });
+
+    it("returns a clear 'agent not found' error for a nonexistent agent instead of updating", async () => {
+      const handler = extractToolHandler(server, "agent_update_block");
+      const result = await handler({ agent_id: "bad-id", label: "architecture", value: "Updated." });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("agent not found: bad-id");
+      expect(provider.updateBlock).not.toHaveBeenCalled();
     });
   });
 });

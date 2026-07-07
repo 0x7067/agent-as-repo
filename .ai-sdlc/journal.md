@@ -128,3 +128,25 @@
   then switched back. Future sessions hitting "must be a collaborator"
   on this repo: same fix.
 - All review majors resolved; remaining minors tracked in state.md Next.
+
+## 2026-07-07 — Addressed PR #17 MCP review threads
+- Did: fetched thread-aware GitHub review data for PR #17 on branch
+  `claude/product-refinement-polish-so4rj9` and addressed both unresolved,
+  non-outdated Devin threads. `readPackageVersion` now tries both source
+  (`../package.json`) and bundled `dist/bin` (`../../package.json`) layouts,
+  preserving the SEA fallback. `agent_search_archival`,
+  `agent_insert_passage`, `agent_delete_passage`, and `agent_update_block`
+  now call the existing `assertAgentExists` guard before provider/store side
+  effects so bad `agent_id` values consistently return `agent not found`.
+- Verified: `pnpm test src/mcp-server.test.ts` passed 49 tests;
+  `pnpm run typecheck` clean; `pnpm build` clean; `node -e` import of
+  `dist/bin/mcp-server.mjs` returned
+  `{"version":"1.0.0","expected":"1.0.0","matches":true}`;
+  `pnpm run lint` clean; `pnpm test` passed 1015 tests across 85 files
+  (invalid-ref `fatal:` stderr is expected test coverage); `git diff --check`
+  clean.
+- Learned: changing the version path directly to `../../package.json` would
+  fix bundled output but break the source/tsx path, so the reader needs
+  layout candidates rather than one relative path.
+- Left: re-fetch PR #17 review/CI state before further changes; do not stage
+  the pre-existing `.codex/config.toml` deletion unless Pedro asks for it.

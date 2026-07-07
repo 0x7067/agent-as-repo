@@ -20,6 +20,7 @@ const DEFAULT_LLM_MODEL = "qwen3-coder:30b";
 const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
 const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
 const FALLBACK_VERSION = "0.0.0";
+const PACKAGE_JSON_REQUIRE_PATHS = ["../package.json", "../../package.json"] as const;
 
 export interface Runtime {
   provider: AgentProvider;
@@ -102,18 +103,25 @@ export function buildRuntime(): Runtime {
  * Read the running package's version for the MCP server handshake. Reads
  * from `package.json` relative to this module rather than hardcoding a
  * string that inevitably drifts. Runs from both `src/` (tsx) and the
- * esbuild-bundled `dist/mcp-server.mjs` (one directory under the repo
- * root either way), and from the SEA build where `import.meta.url` is a
- * synthetic path and this read is expected to fail — hence the fallback.
+ * esbuild-bundled `dist/bin/mcp-server.mjs`; from the SEA build,
+ * `import.meta.url` is a synthetic path and this read is expected to fail
+ * — hence the fallback.
  */
 export function readPackageVersion(): string {
-  try {
-    const requireFromHere = createRequire(import.meta.url);
-    const pkg = requireFromHere("../package.json") as { version?: unknown };
-    return typeof pkg.version === "string" && pkg.version.length > 0 ? pkg.version : FALLBACK_VERSION;
-  } catch {
-    return FALLBACK_VERSION;
+  const requireFromHere = createRequire(import.meta.url);
+  return readPackageVersionFromRequire(requireFromHere);
+}
+
+export function readPackageVersionFromRequire(requireFromHere: (id: string) => unknown): string {
+  for (const packageJsonPath of PACKAGE_JSON_REQUIRE_PATHS) {
+    try {
+      const pkg = requireFromHere(packageJsonPath) as { version?: unknown };
+      if (typeof pkg.version === "string" && pkg.version.length > 0) return pkg.version;
+    } catch {
+      // Try the next layout before falling back for SEA and other synthetic paths.
+    }
   }
+  return FALLBACK_VERSION;
 }
 
 /** Look up an agent by ID against the admin registry (agent_list's source of truth). */
@@ -205,6 +213,7 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
     },
     ({ agent_id, query, top_k }) =>
       handleTool(async () => {
+        await assertAgentExists(admin, agent_id);
         const results = await admin.searchPassages(agent_id, query, top_k);
         return JSON.stringify(results, null, 2);
       }),
@@ -221,6 +230,7 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
     },
     ({ agent_id, text }) =>
       handleTool(async () => {
+        await assertAgentExists(admin, agent_id);
         const id = await provider.storePassage(agent_id, text);
         return JSON.stringify({ id }, null, 2);
       }),
@@ -237,6 +247,7 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
     },
     ({ agent_id, passage_id }) =>
       handleTool(async () => {
+        await assertAgentExists(admin, agent_id);
         // The provider/store don't report affected rows for a delete, so the
         // only honest way to distinguish "deleted" from "nothing to delete"
         // from this file is to check existence first.
@@ -261,6 +272,7 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
     },
     ({ agent_id, label, value }) =>
       handleTool(async () => {
+        await assertAgentExists(admin, agent_id);
         if (label === "persona") {
           throw new Error("Cannot update the persona block via agent_update_block; it is managed internally.");
         }
