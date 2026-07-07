@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import type { CheckResult } from "../core/doctor.js";
 import { createEmptyState } from "../core/state.js";
@@ -11,17 +12,42 @@ import { nodeGit } from "./adapters/node-git.js";
 const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
 const LLM_ENDPOINT_TIMEOUT_MS = 3000;
 
+/**
+ * The repo name + path config.example.yaml ships as its sample entry. Seeded
+ * verbatim by `runDoctorFixes` when no config.yaml exists yet — flagged
+ * distinctly from a "real" missing repo path so the next doctor run doesn't
+ * just repeat a generic "does not exist" for a path nobody set on purpose.
+ */
+const PLACEHOLDER_REPO_NAME = "my-app";
+const PLACEHOLDER_REPO_PATH = path.join(os.homedir(), "repos", "my-app");
+
+function isPlaceholderRepoPath(name: string, resolvedPath: string): boolean {
+  return name === PLACEHOLDER_REPO_NAME && resolvedPath === PLACEHOLDER_REPO_PATH;
+}
+
 function isLocalUrl(url: string): boolean {
   return /localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]/.test(url);
 }
 
-async function loadProviderBaseUrl(configPath: string, fs: FileSystemPort = nodeFileSystem): Promise<string> {
+interface ProviderModelInfo {
+  baseUrl: string;
+  model: string | null;
+  embeddingEngine: string | null;
+  embeddingModel: string | null;
+}
+
+async function loadProviderModelInfo(configPath: string, fs: FileSystemPort = nodeFileSystem): Promise<ProviderModelInfo> {
   try {
     const { loadConfig } = await import("./config-loader.js");
     const config = await loadConfig(configPath, fs);
-    return config.provider.baseUrl;
+    return {
+      baseUrl: config.provider.baseUrl,
+      model: config.provider.model,
+      embeddingEngine: config.provider.embeddingEngine,
+      embeddingModel: config.provider.embeddingModel,
+    };
   } catch {
-    return DEFAULT_LLM_BASE_URL;
+    return { baseUrl: DEFAULT_LLM_BASE_URL, model: null, embeddingEngine: null, embeddingModel: null };
   }
 }
 
@@ -34,33 +60,34 @@ export function checkApiKey(baseUrl: string = DEFAULT_LLM_BASE_URL): CheckResult
     return { name: "LLM API key", status: "pass", message: `Local LLM endpoint (${baseUrl}) needs no API key` };
   }
   if (!process.env["LLM_API_KEY"]) {
-    return {
-      name: "LLM API key",
-      status: "warn",
-      message: `LLM_API_KEY not set for non-local endpoint ${baseUrl}. Set it in .env if the endpoint requires auth.`,
-    };
+    const message = `LLM_API_KEY not set for non-local endpoint ${baseUrl}. Set it in .env if the endpoint requires auth.`;
+    return { name: "LLM API key", status: "warn", message };
   }
   return { name: "LLM API key", status: "pass", message: "Set in environment" };
 }
 
-export async function checkApiConnection(
-  provider: AgentProvider,
-  agentId: string,
-): Promise<CheckResult> {
+export async function checkApiConnection(provider: AgentProvider, agentId: string): Promise<CheckResult> {
   try {
     await provider.listPassages(agentId);
-    return {
-      name: "API connection",
-      status: "pass",
-      message: "Passage store is readable",
-    };
+    return { name: "API connection", status: "pass", message: "Passage store is readable" };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    return {
-      name: "API connection",
-      status: "fail",
-      message: `Cannot read the passage store: ${msg}`,
-    };
+    return { name: "API connection", status: "fail", message: `Cannot read the passage store: ${msg}` };
+  }
+}
+
+type ModelsFetchResult = { res: Response } | { error: string };
+
+/** Shared `GET {baseUrl}/models` + timeout/abort plumbing for checkLlmEndpoint and checkModelAvailable. */
+async function fetchModelsList(baseUrl: string, fetchImpl: typeof fetch): Promise<ModelsFetchResult> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => { controller.abort(); }, LLM_ENDPOINT_TIMEOUT_MS);
+  try {
+    return { res: await fetchImpl(`${baseUrl}/models`, { method: "GET", signal: controller.signal }) };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -68,22 +95,56 @@ export async function checkLlmEndpoint(
   baseUrl: string = DEFAULT_LLM_BASE_URL,
   fetchImpl: typeof fetch = fetch,
 ): Promise<CheckResult> {
+  const result = await fetchModelsList(baseUrl, fetchImpl);
+  // Warn (not fail): the endpoint may simply not be running yet (e.g. Ollama not started).
+  if ("error" in result) {
+    return { name: "LLM endpoint", status: "warn", message: `Cannot reach LLM endpoint ${baseUrl}: ${result.error}` };
+  }
+  if (result.res.ok) {
+    return { name: "LLM endpoint", status: "pass", message: `Reachable at ${baseUrl}` };
+  }
+  return { name: "LLM endpoint", status: "warn", message: `${baseUrl}/models returned HTTP ${String(result.res.status)}` };
+}
+
+interface ModelsListResponse {
+  data?: Array<{ id?: string }>;
+}
+
+/**
+ * Verify `model` actually exists on the endpoint, not just that it responds.
+ * A models-listing failure (unreachable, non-OK, or unimplemented `/models`)
+ * degrades to a warning; only a confirmed absence from the list fails.
+ */
+export async function checkModelAvailable(
+  baseUrl: string,
+  model: string,
+  label: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<CheckResult> {
   const url = `${baseUrl}/models`;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => { controller.abort(); }, LLM_ENDPOINT_TIMEOUT_MS);
+  const result = await fetchModelsList(baseUrl, fetchImpl);
+  if ("error" in result) {
+    return { name: label, status: "warn", message: `Could not verify model "${model}" at ${url}: ${result.error}` };
+  }
+  if (!result.res.ok) {
+    return { name: label, status: "warn", message: `${url} returned HTTP ${String(result.res.status)}; could not verify model "${model}" is available` };
+  }
+
+  let ids: string[];
   try {
-    const res = await fetchImpl(url, { method: "GET", signal: controller.signal });
-    if (res.ok) {
-      return { name: "LLM endpoint", status: "pass", message: `Reachable at ${baseUrl}` };
-    }
-    return { name: "LLM endpoint", status: "warn", message: `${url} returned HTTP ${String(res.status)}` };
+    const payload = await result.res.json() as ModelsListResponse;
+    ids = (payload.data ?? []).map((entry) => entry.id).filter((id): id is string => typeof id === "string");
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    // Warn (not fail): the endpoint may simply not be running yet (e.g. Ollama not started).
-    return { name: "LLM endpoint", status: "warn", message: `Cannot reach LLM endpoint ${baseUrl}: ${msg}` };
-  } finally {
-    clearTimeout(timeoutId);
+    return { name: label, status: "warn", message: `Could not parse models list from ${url}: ${msg}` };
   }
+  if (ids.length === 0) {
+    return { name: label, status: "warn", message: `${url} returned no models; could not verify model "${model}" is available` };
+  }
+  if (ids.includes(model)) {
+    return { name: label, status: "pass", message: `Model "${model}" is available at ${baseUrl}` };
+  }
+  return { name: label, status: "fail", message: `Model "${model}" not found at ${baseUrl}. Try: ollama pull ${model}` };
 }
 
 export async function checkConfigFile(configPath: string, fs: FileSystemPort = nodeFileSystem): Promise<CheckResult> {
@@ -116,7 +177,10 @@ export async function checkRepoPaths(configPath: string, fs: FileSystemPort = no
         results.push({ name: `Repo "${name}"`, status: "fail", message: `${repo.path} is not a directory` });
       }
     } catch {
-      results.push({ name: `Repo "${name}"`, status: "fail", message: `${repo.path} does not exist` });
+      const message = isPlaceholderRepoPath(name, repo.path)
+        ? `${repo.path} is a placeholder from config.example.yaml — edit repos.${name}.path to your real repo, or run "repo-expert init".`
+        : `${repo.path} does not exist`;
+      results.push({ name: `Repo "${name}"`, status: "fail", message });
     }
   }
 
@@ -155,21 +219,15 @@ export async function checkStateConsistency(configPath: string): Promise<CheckRe
 
   for (const name of stateAgents) {
     if (!configRepos.has(name)) {
-      results.push({
-        name: "State consistency",
-        status: "warn",
-        message: `Agent "${name}" in state but not in config (orphaned)`,
-      });
+      const message = `Agent "${name}" in state but not in config (orphaned)`;
+      results.push({ name: "State consistency", status: "warn", message });
     }
   }
 
   for (const name of configRepos) {
     if (!stateAgents.has(name)) {
-      results.push({
-        name: "State consistency",
-        status: "warn",
-        message: `Repo "${name}" in config but no agent created yet`,
-      });
+      const message = `Repo "${name}" in config but no agent created yet`;
+      results.push({ name: "State consistency", status: "warn", message });
     }
   }
 
@@ -186,9 +244,17 @@ export async function runAllChecks(
   fetchImpl: typeof fetch = fetch,
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
-  const baseUrl = await loadProviderBaseUrl(configPath);
+  const providerInfo = await loadProviderModelInfo(configPath);
+  const baseUrl = providerInfo.baseUrl;
 
   results.push(checkApiKey(baseUrl), await checkLlmEndpoint(baseUrl, fetchImpl));
+
+  if (providerInfo.model !== null) {
+    results.push(await checkModelAvailable(baseUrl, providerInfo.model, "LLM model", fetchImpl));
+  }
+  if (providerInfo.embeddingEngine === "http" && providerInfo.embeddingModel !== null) {
+    results.push(await checkModelAvailable(baseUrl, providerInfo.embeddingModel, "Embedding model", fetchImpl));
+  }
 
   if (provider) {
     try {
@@ -264,6 +330,7 @@ export async function runDoctorFixes(
     try {
       await fs.copyFile(examplePath, configPath);
       applied.push(`Copied ${examplePath} to ${configPath}.`);
+      suggestions.push(`Edit ${configPath}: set repos.<name>.path to a real repo, or run "repo-expert init".`);
     } catch {
       suggestions.push(`Create ${configPath} manually or run "repo-expert init".`);
     }

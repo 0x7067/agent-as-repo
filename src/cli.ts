@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { loadConfig } from "./shell/config-loader.js";
 import { runInit } from "./shell/init.js";
-import { runAllChecks, runDoctorFixes } from "./shell/doctor.js";
+import { checkLlmEndpoint, checkModelAvailable, runAllChecks, runDoctorFixes } from "./shell/doctor.js";
 import { formatSelfChecks, runSelfChecks } from "./shell/self-check.js";
 import { completionFileName, generateCompletionScript, type CompletionShell } from "./core/completion.js";
 import { computeDoctorExitCode, formatDoctorReport } from "./core/doctor.js";
@@ -62,6 +62,7 @@ interface SetupOpts {
   bootstrapRetries: string;
   loadTimeoutMs: string;
   bootstrapTimeoutMs: string;
+  skipPreflight?: boolean;
 }
 
 interface ProgramOpts {
@@ -74,6 +75,7 @@ interface InitOpts {
   repoPath?: string;
   model?: string;
   baseUrl?: string;
+  embeddingEngine?: string;
   yes?: boolean;
 }
 
@@ -110,6 +112,10 @@ interface SyncOpts {
 interface RepoOpts {
   repo?: string;
   json?: boolean;
+}
+
+interface OnboardOpts {
+  timeoutMs?: string;
 }
 
 interface ConsolidateCliOpts {
@@ -316,6 +322,51 @@ function createProviderForCommands(config: Config | null): AgentProvider {
     throw new CliUserError('Config required. Run "repo-expert init" or ensure config.yaml exists.');
   }
   return createProvider(config);
+}
+
+interface SetupPreflightResult {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+/**
+ * Fail fast, before any indexing work: confirm the configured LLM endpoint is
+ * reachable and that the chat/embedding models it names actually exist there.
+ * Reuses the same doctor.ts checks `repo-expert doctor` runs, so the verdict
+ * is consistent between the two commands. A models-endpoint-unavailable
+ * result degrades to a warning (some proxies don't implement `/models`), but
+ * an unreachable endpoint or a confirmed-missing model blocks setup.
+ */
+async function runSetupPreflight(config: Config): Promise<SetupPreflightResult> {
+  const baseUrl = config.provider.baseUrl;
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  const endpointResult = await checkLlmEndpoint(baseUrl);
+  if (endpointResult.status !== "pass") {
+    errors.push(`LLM endpoint unreachable at ${baseUrl} — is Ollama running? Try: ollama serve`);
+    return { ok: false, errors, warnings };
+  }
+
+  const modelResult = await checkModelAvailable(baseUrl, config.provider.model, "LLM model");
+  if (modelResult.status === "fail") {
+    errors.push(`Model "${config.provider.model}" not found at ${baseUrl} — try: ollama pull ${config.provider.model}`);
+  } else if (modelResult.status === "warn") {
+    warnings.push(modelResult.message);
+  }
+
+  if (config.provider.embeddingEngine === "http") {
+    const embeddingModel = config.provider.embeddingModel;
+    const embeddingResult = await checkModelAvailable(baseUrl, embeddingModel, "Embedding model");
+    if (embeddingResult.status === "fail") {
+      errors.push(`Embedding model "${embeddingModel}" not found at ${baseUrl} — try: ollama pull ${embeddingModel}`);
+    } else if (embeddingResult.status === "warn") {
+      warnings.push(embeddingResult.message);
+    }
+  }
+
+  return { ok: errors.length === 0, errors, warnings };
 }
 
 async function loadConfigForProvider(configPath: string): Promise<Config | null> {
@@ -570,6 +621,10 @@ async function destroyAgents(
   }
 }
 
+function isValidEmbeddingEngine(value: string): value is "http" | "transformersjs" {
+  return value === "http" || value === "transformersjs";
+}
+
 function parseIntOrDefault(value: string, fallback: number): number {
   const n = Number.parseInt(value, 10);
   return Number.isNaN(n) ? fallback : n;
@@ -670,6 +725,8 @@ function question(rl: ReadlineInterface, prompt: string): Promise<string> {
 }
 
 const ASK_DEFAULT_TIMEOUT_MS = 60_000;
+/** Onboarding walks the full memory + archival search, so it gets a longer budget than `ask` (consistent with setup's bootstrap-timeout-ms default). */
+const ONBOARD_DEFAULT_TIMEOUT_MS = 120_000;
 
 async function loadAskConfigDefaults(configPath: string | undefined): Promise<{
   askTimeoutMs: number;
@@ -825,10 +882,16 @@ program
   .description("Interactive setup: pick model + LLM endpoint, scan a repo, generate config.yaml")
   .option("--model <model>", "Chat model id as the LLM endpoint knows it")
   .option("--base-url <url>", "OpenAI-compatible LLM base URL (default: local Ollama)")
+  .option("--embedding-engine <engine>", "Embedding engine: http (default) or transformersjs")
   .option("--api-key <key>", "Optional LLM Bearer key to write to .env as LLM_API_KEY (non-interactive)")
   .option("--repo-path <path>", "Repository path to configure")
   .option("-y, --yes", "Accept defaults and skip confirmation prompts")
   .action(async (opts: InitOpts) => {
+    if (opts.embeddingEngine !== undefined && !isValidEmbeddingEngine(opts.embeddingEngine)) {
+      console.error(`Invalid --embedding-engine "${opts.embeddingEngine}". Use "http" or "transformersjs".`);
+      process.exitCode = 1;
+      return;
+    }
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     try {
       const initOptions = {
@@ -836,6 +899,7 @@ program
         ...(opts.repoPath === undefined ? {} : { repoPath: opts.repoPath }),
         ...(opts.model === undefined ? {} : { model: opts.model }),
         ...(opts.baseUrl === undefined ? {} : { baseUrl: opts.baseUrl }),
+        ...(opts.embeddingEngine === undefined ? {} : { embeddingEngine: opts.embeddingEngine }),
         assumeYes: Boolean(opts.yes),
         allowPrompts: !noInputEnabled() && interactiveInputAvailable(),
       };
@@ -911,6 +975,7 @@ program
   .option("--bootstrap-retries <n>", "Retries for bootstrap stage", "2")
   .option("--load-timeout-ms <ms>", "Timeout for passage loading stage", "300000")
   .option("--bootstrap-timeout-ms <ms>", "Timeout for bootstrap stage", "120000")
+  .option("--skip-preflight", "Skip the LLM endpoint/model reachability check before indexing")
   // eslint-disable-next-line sonarjs/cognitive-complexity
   .action(async (opts: SetupOpts) => {
     if (opts.resume && opts.reindex) {
@@ -928,6 +993,19 @@ program
 
     const configPath = path.resolve(opts.config);
     const config = await loadConfigSafe(configPath);
+
+    const skipPreflight = Boolean(opts.skipPreflight) || process.env["REPO_EXPERT_TEST_FAKE_PROVIDER"] === "1";
+    if (!skipPreflight) {
+      const preflight = await runSetupPreflight(config);
+      for (const warning of preflight.warnings) console.warn(warning);
+      if (!preflight.ok) {
+        for (const message of preflight.errors) console.error(message);
+        console.error('Run with --skip-preflight to bypass this check.');
+        process.exitCode = 1;
+        return;
+      }
+    }
+
     const chunkingStrategy = await prepareChunking();
     const provider = createProviderForCommands(config);
     let state = await loadState(STATE_FILE);
@@ -1485,14 +1563,21 @@ program
 program
   .command("onboard <repo>")
   .description("Guided codebase walkthrough for new developers")
-  .action(async (repo: string) => {
+  .option("--timeout-ms <ms>", "Timeout for the onboarding walkthrough", String(ONBOARD_DEFAULT_TIMEOUT_MS))
+  .action(async (repo: string, opts: OnboardOpts) => {
     const state = await loadState(STATE_FILE);
     const agentInfo = requireAgent(state, repo);
     if (!agentInfo) return;
 
     const onboardConfig = await loadConfigSafe(path.resolve("config.yaml"));
-    const provider = createProvider(onboardConfig);
-    const walkthrough = await onboardAgent(provider, repo, agentInfo.agentId);
+    const provider = createProviderForCommands(onboardConfig);
+    const timeoutMs = parseOptionalPositiveInt(opts.timeoutMs, ONBOARD_DEFAULT_TIMEOUT_MS);
+    console.error(`Generating onboarding walkthrough for "${repo}" (this can take a while)...`);
+    const walkthrough = await withTimeoutSignal(
+      `Onboarding "${repo}"`,
+      timeoutMs,
+      (signal) => onboardAgent(provider, repo, agentInfo.agentId, { signal }),
+    );
     console.log(walkthrough);
   });
 

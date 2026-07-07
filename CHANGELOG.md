@@ -26,6 +26,16 @@ process" at the bottom for how entries are generated from here on.
   `--remove`/`--dry-run`); `mcp-install` now hints at it.
 - `self-check` probes that `better-sqlite3`/`sqlite-vec` actually load and
   run a query, with ABI-mismatch/`pnpm approve-builds` guidance on failure.
+- `setup` preflight: the LLM endpoint and configured models are verified
+  before any indexing starts, with actionable failures ("is Ollama
+  running? Try: ollama serve" / "try: ollama pull <model>"); skip with
+  `--skip-preflight`. `doctor` gained the same model-existence checks.
+- `init` probes the chosen LLM base URL and warns immediately if it's
+  unreachable, and now offers the embedding engine choice
+  (`http` vs in-process `transformersjs`) interactively and via
+  `--embedding-engine`.
+- `onboard` gained a timeout (`--timeout-ms`, default 120s) and a progress
+  line instead of appearing to hang on slow local models.
 
 ### Changed
 
@@ -44,6 +54,16 @@ process" at the bottom for how entries are generated from here on.
   (now-ignored) `package.json` `pnpm` block to `pnpm-workspace.yaml`, and
   trimmed to only `better-sqlite3`/`tree-sitter-cli` (dropping unused
   `tree-sitter-kotlin`/`tree-sitter-swift` native builds).
+
+### Performance
+
+- Embeddings are batched during indexing: one embedding request per 32
+  chunks instead of one per chunk, with per-batch transactional inserts
+  (a failed embed leaves no partial rows).
+- Tree-sitter grammars load in parallel at startup; agent deletion uses
+  chunked `WHERE rowid IN (...)` deletes instead of one statement per row.
+- `doctor --fix`'s seeded placeholder config now explains it needs editing
+  instead of failing the next `doctor` run with a generic error.
 
 ### Fixed
 
