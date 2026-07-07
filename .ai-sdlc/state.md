@@ -3,21 +3,18 @@ updated: 2026-07-07
 
 ## Goal
 repo-expert is a local-first CLI + MCP server that keeps semantic memory for
-one or more git repos (sqlite passage store + agent memory blocks) and answers
-questions about them. The codebase follows functional core / imperative shell,
-TDD, pnpm, Vitest, and Zod v4 (`zod/v4` import path).
+git repos and answers questions about them. The codebase follows functional
+core / imperative shell, TDD, pnpm, Vitest, and Zod v4 (`zod/v4` import path).
 
 ## Now
 Current checkout is branch `claude/product-refinement-polish-so4rj9`, backing
 GitHub PR #17: https://github.com/0x7067/agent-as-repo/pull/17. On
-2026-07-07, two unresolved Devin review threads were addressed locally:
+2026-07-07, two unresolved Devin review threads were addressed and pushed:
 `readPackageVersion` now supports both source (`src/`) and bundled
 (`dist/bin/`) package layouts, and every agent-scoped MCP tool checks agent
 existence before provider/store side effects.
 
-The user had a pre-existing local deletion in `.codex/config.toml`; it is
-unrelated to PR #17 comment work and should stay out of commits unless Pedro
-asks for it.
+Pedro then asked to commit the tracked `.codex/config.toml` deletion too.
 
 ## Verification path
 - `pnpm test src/mcp-server.test.ts` — 49 passed (49), run 2026-07-07.
@@ -55,11 +52,9 @@ asks for it.
 
 ## Next
 1. If resuming PR #17, re-fetch GitHub review threads and CI before acting.
-2. Leave the unrelated `.codex/config.toml` deletion unstaged unless Pedro
-   asks for it.
-3. Follow-up: `lastSyncAt` is only written by watch.ts, so sync-only users can
+2. Follow-up: `lastSyncAt` is only written by watch.ts, so sync-only users can
    never reach the `since` fallback; decide whether manual `sync` should stamp
    it too.
-4. Follow-up coverage: `includeSubmodules: true` across the shared sync
+3. Follow-up coverage: `includeSubmodules: true` across the shared sync
    evidence paths, `sync --since <ref>` CLI-level coverage, and additional
    `install-instructions` CLI option tests.

@@ -150,3 +150,10 @@
   layout candidates rather than one relative path.
 - Left: re-fetch PR #17 review/CI state before further changes; do not stage
   the pre-existing `.codex/config.toml` deletion unless Pedro asks for it.
+
+## 2026-07-07 — Committed repo-local Codex config deletion
+- Did: at Pedro's follow-up request, included the tracked deletion of
+  `.codex/config.toml` as a separate commit on the PR #17 branch.
+- Verified: `check-state.sh` OK and `git diff --check` clean.
+- Learned: nothing new.
+- Left: re-fetch PR #17 review/CI state before further changes.
