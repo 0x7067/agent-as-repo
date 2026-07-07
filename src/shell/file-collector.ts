@@ -6,6 +6,7 @@ import { nodeFileSystem } from "./adapters/node-filesystem.js";
 export async function collectFiles(
   config: RepoConfig,
   fs: FileSystemPort = nodeFileSystem,
+  onFileError?: (filePath: string, error: Error) => void,
 ): Promise<FileInfo[]> {
   const cwd = config.basePath ? path.join(config.path, config.basePath) : config.path;
   const patterns = config.extensions.map((ext) => `**/*${ext}`);
@@ -22,12 +23,19 @@ export async function collectFiles(
   const files: FileInfo[] = [];
   for (const relPath of entries) {
     const absPath = path.join(cwd, relPath);
-    const stat = await fs.stat(absPath);
-    const sizeKb = stat.size / 1024;
+    // A single permission-denied file or broken/stale symlink must not abort
+    // collection for the rest of the repo — skip it and report why.
+    try {
+      const stat = await fs.stat(absPath);
+      const sizeKb = stat.size / 1024;
 
-    if (sizeKb <= MAX_FILE_SIZE_KB) {
-      const content = await fs.readFile(absPath, "utf8");
-      files.push({ path: relPath, content, sizeKb });
+      if (sizeKb <= MAX_FILE_SIZE_KB) {
+        const content = await fs.readFile(absPath, "utf8");
+        files.push({ path: relPath, content, sizeKb });
+      }
+    } catch (error_) {
+      const error = error_ instanceof Error ? error_ : new Error(String(error_));
+      onFileError?.(relPath, error);
     }
   }
 

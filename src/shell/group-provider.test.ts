@@ -128,17 +128,40 @@ describe("broadcastAsk", () => {
     const agents = [{ repoName: "repo", agentId: "a1" }];
     await broadcastAsk(provider, agents, "q", { overrideModel: "llama3.2:3b" });
 
-    expect(provider.sendMessage).toHaveBeenCalledWith("a1", "q", { overrideModel: "llama3.2:3b" });
+    expect(provider.sendMessage).toHaveBeenCalledWith("a1", "q", {
+      overrideModel: "llama3.2:3b",
+      signal: expect.any(AbortSignal) as AbortSignal,
+    });
   });
 
-  it("omits send options when no overrideModel is given", async () => {
+  it("omits overrideModel (but always threads an AbortSignal) when none is given", async () => {
     const provider = makeMockProvider();
     (provider.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce("answer");
 
     const agents = [{ repoName: "repo", agentId: "a1" }];
     await broadcastAsk(provider, agents, "q");
 
-    expect(provider.sendMessage).toHaveBeenCalledWith("a1", "q", undefined);
+    const call = (provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0] as
+      | [string, string, { overrideModel?: string; signal?: AbortSignal }]
+      | undefined;
+    expect(call?.[2].signal).toBeInstanceOf(AbortSignal);
+    expect("overrideModel" in (call?.[2] ?? {})).toBe(false);
+  });
+
+  it("aborts the signal passed to sendMessage when the per-agent timeout fires (no orphaned call)", async () => {
+    const provider = makeMockProvider();
+    let observedSignal: AbortSignal | undefined;
+    vi.mocked(provider.sendMessage).mockImplementation((_agentId, _content, options) => {
+      observedSignal = (options as { signal?: AbortSignal } | undefined)?.signal;
+      return new Promise((resolve) => setTimeout(() => { resolve("late"); }, 5000));
+    });
+
+    const agents = [{ repoName: "slow-repo", agentId: "a1" }];
+    const results = await broadcastAsk(provider, agents, "hello", { timeoutMs: 10 });
+
+    expect(results[0].error).toContain("timed out");
+    expect(observedSignal).toBeInstanceOf(AbortSignal);
+    expect(observedSignal?.aborted).toBe(true);
   });
 
   it("clears timeout after successful response (no timer leak)", async () => {

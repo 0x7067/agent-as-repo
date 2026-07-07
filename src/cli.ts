@@ -42,6 +42,7 @@ import { onboardAgent } from "./shell/onboard.js";
 import { installInstructions } from "./shell/agent-instructions.js";
 import { BROADCAST_ASK_DEFAULT_TIMEOUT_MS, broadcastAsk } from "./shell/group-provider.js";
 import { watchRepos } from "./shell/watch.js";
+import { withTimeoutSignal } from "./shell/with-timeout.js";
 import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
 import { generateMcpEntry, checkMcpEntry, type McpProviderConfig } from "./core/mcp-config.js";
@@ -616,29 +617,6 @@ async function withTimeout<T>(label: string, timeoutMs: number, fn: () => Promis
       fn(),
       new Promise<T>((_resolve, reject) => {
         timeoutId = setTimeout(() => { reject(new Error(`${label} timed out after ${String(timeoutMs)}ms`)); }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
-}
-
-async function withTimeoutSignal<T>(
-  label: string,
-  timeoutMs: number,
-  fn: (signal: AbortSignal) => Promise<T>,
-): Promise<T> {
-  const controller = new AbortController();
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      fn(controller.signal),
-      new Promise<T>((_resolve, reject) => {
-        timeoutId = setTimeout(() => {
-          const error = new Error(`${label} timed out after ${String(timeoutMs)}ms`);
-          controller.abort(error);
-          reject(error);
-        }, timeoutMs);
       }),
     ]);
   } finally {

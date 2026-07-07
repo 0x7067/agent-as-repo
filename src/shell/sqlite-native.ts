@@ -94,5 +94,9 @@ export function openVectorDatabase(dbPath: string): VectorDatabase {
   const sea = tryGetSea();
   const db = sea === undefined ? openNodeModulesDatabase(dbPath) : openSeaDatabase(sea, dbPath);
   db.pragma("journal_mode = WAL");
+  // Explicit: a watch daemon and ad hoc CLI writes may hit this file
+  // concurrently. Without this, SQLITE_BUSY surfaces immediately instead of
+  // the writer retrying for up to 5s while the other connection finishes.
+  db.pragma("busy_timeout = 5000");
   return db;
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { z } from "zod/v4";
 import type { AgentProvider, SendMessageOptions } from "./ports/agent-provider.js";
@@ -11,11 +12,14 @@ import { SqlitePassageStore } from "./shell/sqlite-store.js";
 import { SqliteBlockStorage } from "./shell/sqlite-block-storage.js";
 import { resolveStoreDbPath } from "./shell/repo-expert-paths.js";
 import { createEmbedder, parseEmbeddingEngine } from "./shell/embedder-factory.js";
+import { withTimeoutSignal } from "./shell/with-timeout.js";
+import { MEMORY_BLOCK_LIMIT } from "./core/types.js";
 
 const ASK_DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_LLM_MODEL = "qwen3-coder:30b";
 const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
 const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
+const FALLBACK_VERSION = "0.0.0";
 
 export interface Runtime {
   provider: AgentProvider;
@@ -94,18 +98,29 @@ export function buildRuntime(): Runtime {
   return { provider, admin: new AdminAdapter(provider, store) };
 }
 
-export async function withTimeout<T>(label: string, timeoutMs: number, fn: () => Promise<T>): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+/**
+ * Read the running package's version for the MCP server handshake. Reads
+ * from `package.json` relative to this module rather than hardcoding a
+ * string that inevitably drifts. Runs from both `src/` (tsx) and the
+ * esbuild-bundled `dist/mcp-server.mjs` (one directory under the repo
+ * root either way), and from the SEA build where `import.meta.url` is a
+ * synthetic path and this read is expected to fail — hence the fallback.
+ */
+export function readPackageVersion(): string {
   try {
-    return await Promise.race([
-      fn(),
-      new Promise<T>((_resolve, reject) => {
-        timeoutId = setTimeout(() => { reject(new Error(`${label} timed out after ${String(timeoutMs)}ms`)); }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    // Stryker disable next-line ConditionalExpression,EqualityOperator -- timeoutId is always set by Promise executor; if (true) is equivalent
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    const requireFromHere = createRequire(import.meta.url);
+    const pkg = requireFromHere("../package.json") as { version?: unknown };
+    return typeof pkg.version === "string" && pkg.version.length > 0 ? pkg.version : FALLBACK_VERSION;
+  } catch {
+    return FALLBACK_VERSION;
+  }
+}
+
+/** Look up an agent by ID against the admin registry (agent_list's source of truth). */
+async function assertAgentExists(admin: AdminPort, agentId: string): Promise<void> {
+  const agents = await admin.listAgents();
+  if (!agents.some((agent) => agent.id === agentId)) {
+    throw new Error(`agent not found: ${agentId}`);
   }
 }
 
@@ -129,6 +144,7 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
     },
     ({ agent_id }) =>
       handleTool(async () => {
+        await assertAgentExists(admin, agent_id);
         const agent = await admin.getAgent(agent_id);
         return JSON.stringify(agent, null, 2);
       }),
@@ -148,16 +164,17 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
     },
     ({ agent_id, content, override_model, timeout_ms, max_steps }) =>
       handleTool(async () => {
+        await assertAgentExists(admin, agent_id);
         const askTimeoutMs = timeout_ms ?? parsePositiveInt(process.env["REPO_EXPERT_ASK_TIMEOUT_MS"], ASK_DEFAULT_TIMEOUT_MS);
 
         const options: SendMessageOptions = {};
         if (override_model) options.overrideModel = override_model;
         if (max_steps !== undefined) options.maxSteps = max_steps;
 
-        return await withTimeout(
+        return await withTimeoutSignal(
           `agent_call (${override_model ?? "agent-default"})`,
           askTimeoutMs,
-          () => provider.sendMessage(agent_id, content, options),
+          (signal) => provider.sendMessage(agent_id, content, { ...options, signal }),
         );
       }),
   );
@@ -170,6 +187,7 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
     },
     ({ agent_id }) =>
       handleTool(async () => {
+        await assertAgentExists(admin, agent_id);
         const blocks = await admin.getCoreMemory(agent_id);
         return JSON.stringify(blocks, null, 2);
       }),
@@ -182,7 +200,7 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
       inputSchema: {
         agent_id: z.string().describe("The agent ID"),
         query: z.string().describe("Search query"),
-        top_k: z.number().optional().describe("Max results to return"),
+        top_k: z.number().int().positive().optional().describe("Max results to return"),
       },
     },
     ({ agent_id, query, top_k }) =>
@@ -219,6 +237,13 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
     },
     ({ agent_id, passage_id }) =>
       handleTool(async () => {
+        // The provider/store don't report affected rows for a delete, so the
+        // only honest way to distinguish "deleted" from "nothing to delete"
+        // from this file is to check existence first.
+        const passages = await provider.listPassages(agent_id);
+        if (!passages.some((passage) => passage.id === passage_id)) {
+          throw new Error(`passage not found: ${passage_id}`);
+        }
         await provider.deletePassage(agent_id, passage_id);
         return "Deleted";
       }),
@@ -236,6 +261,14 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
     },
     ({ agent_id, label, value }) =>
       handleTool(async () => {
+        if (label === "persona") {
+          throw new Error("Cannot update the persona block via agent_update_block; it is managed internally.");
+        }
+        if (value.length > MEMORY_BLOCK_LIMIT) {
+          throw new Error(
+            `Value for '${label}' is ${String(value.length)} chars, over the ${String(MEMORY_BLOCK_LIMIT)}-char limit.`,
+          );
+        }
         const block = await provider.updateBlock(agent_id, label, value);
         return JSON.stringify(block, null, 2);
       }),
@@ -248,7 +281,7 @@ function errorMessage(err: unknown): string {
 }
 
 export async function main(): Promise<void> {
-  const server = new McpServer({ name: "repo-expert-mcp", version: "1.0.0" });
+  const server = new McpServer({ name: "repo-expert-mcp", version: readPackageVersion() });
   const runtime = buildRuntime();
   registerTools(server, runtime.provider, runtime.admin);
   const transport = new StdioServerTransport();

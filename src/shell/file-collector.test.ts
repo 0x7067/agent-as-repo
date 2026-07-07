@@ -5,6 +5,7 @@ import path from "node:path";
 import * as os from "node:os";
 import type { RepoConfig } from "../core/types.js";
 import type { FileSystemPort } from "../ports/filesystem.js";
+import { nodeFileSystem } from "./adapters/node-filesystem.js";
 
 async function withTempRepo(
   files: Record<string, string>,
@@ -219,6 +220,70 @@ describe("collectFiles", () => {
     const files = await collectFiles(config, mockFs);
     // sizeKb > maxFileSizeKb → should be excluded
     expect(files).toHaveLength(0);
+  });
+
+  it("skips a broken symlink instead of aborting collection for the whole repo", async () => {
+    await withTempRepo(
+      {
+        "src/good.ts": "export const ok = true;",
+      },
+      async (repoPath) => {
+        const brokenLinkPath = path.join(repoPath, "src/broken.ts");
+        // Path is constrained under the mkdtemp-created test directory.
+        // eslint-disable-next-line security/detect-non-literal-fs-filename
+        await fs.symlink(path.join(repoPath, "src/does-not-exist.ts"), brokenLinkPath);
+
+        // fast-glob itself already drops entries it can't stat, so the broken
+        // link never reaches the loop through the real glob() call. Force it
+        // into the entry list — as another glob() implementation/options, or
+        // a symlink going stale between the glob() and our own stat(), would
+        // — to exercise the real fs.stat()/readFile() ELOOP-or-ENOENT failure
+        // against the real broken symlink sitting on disk.
+        const fsWithForcedBrokenEntry: FileSystemPort = {
+          ...nodeFileSystem,
+          glob: async (patterns, options) => {
+            const entries = await nodeFileSystem.glob(patterns, options);
+            return [...entries, "src/broken.ts"];
+          },
+        };
+
+        const errors: Array<{ filePath: string; message: string }> = [];
+        const files = await collectFiles(makeConfig(repoPath), fsWithForcedBrokenEntry, (filePath, error) => {
+          errors.push({ filePath, message: error.message });
+        });
+
+        const paths = files.map((f) => f.path);
+        expect(paths).toContain("src/good.ts");
+        expect(paths).not.toContain("src/broken.ts");
+        expect(errors).toHaveLength(1);
+        expect(errors[0].filePath).toBe("src/broken.ts");
+      },
+    );
+  });
+
+  it("skips a permission-denied file instead of aborting collection for the whole repo", async () => {
+    const mockFs: FileSystemPort = {
+      readFile: (p: string) => {
+        if (p.includes("secret.ts")) return Promise.reject(new Error("EACCES: permission denied"));
+        return Promise.resolve("export const ok = true;");
+      },
+      writeFile: () => Promise.resolve(),
+      stat: () => Promise.resolve({ size: 10, isDirectory: () => false }),
+      access: () => Promise.resolve(),
+      rename: () => Promise.resolve(),
+      copyFile: () => Promise.resolve(),
+      glob: () => Promise.resolve(["src/good.ts", "src/secret.ts"]),
+    };
+
+    const errors: Array<{ filePath: string; message: string }> = [];
+    const files = await collectFiles(makeConfig(FAKE_REPO_PATH), mockFs, (filePath, error) => {
+      errors.push({ filePath, message: error.message });
+    });
+
+    const paths = files.map((f) => f.path);
+    expect(paths).toContain("src/good.ts");
+    expect(paths).not.toContain("src/secret.ts");
+    expect(errors).toEqual([{ filePath: "src/secret.ts", message: "EACCES: permission denied" }]);
   });
 
   it("meets collection performance budget on medium fixture repo", async () => {
