@@ -1,0 +1,85 @@
+name: Release
+
+# Changesets-driven release flow:
+#   1. Every PR that changes user-facing behavior adds a changeset
+#      (`pnpm changeset`), committed alongside the PR.
+#   2. On push to main, this workflow either:
+#      - opens/updates a "Version Packages" PR that applies the pending
+#        changesets (bumps package.json + writes CHANGELOG.md), or
+#      - if that PR has already been merged (i.e. main's package.json
+#        version has no unreleased changesets left), publishes to npm.
+#   changesets/action decides which of those two to do on each run.
+#
+# Requires a maintainer-provided secret:
+#   NPM_TOKEN — an npm automation token with publish rights for this
+#   package (npmjs.com -> Access Tokens -> Automation). Add it under
+#   Settings -> Secrets and variables -> Actions. Without it the publish
+#   step will fail with an auth error; the version PR step still works.
+on:
+  push:
+    branches:
+      - main
+
+# Cancel a superseded run rather than racing two publishes/version PRs
+# against the same branch.
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # changesets/action pushes the version PR / release commit
+      pull-requests: write # changesets/action opens/updates the version PR
+      id-token: write # OIDC token for npm provenance on publish
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # changesets needs the full history to diff against the base
+          # branch when computing the release plan.
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.20.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Gate publish on the same checks CI runs, so a version bump can't
+      # ship a build that doesn't compile or a red test suite.
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Smoke test CLI bundle
+        run: node dist/bin/cli.mjs --help
+
+      - name: Create Release Pull Request or Publish to npm
+        uses: changesets/action@v1
+        with:
+          version: pnpm version-packages
+          publish: pnpm release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # pnpm reads npm-style `npm_config_*` env vars, so this turns on
+          # npm provenance attestation for `pnpm publish` (run by `pnpm
+          # release` -> `changeset publish`) without needing a config file
+          # change. Requires the `id-token: write` permission above.
+          NPM_CONFIG_PROVENANCE: "true"

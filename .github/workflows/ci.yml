@@ -51,6 +51,18 @@ jobs:
       - name: Run tests
         run: pnpm test
 
+      - name: Build
+        run: pnpm build
+
+      - name: Smoke test CLI bundle
+        run: node dist/bin/cli.mjs --help
+
+      - name: Smoke test MCP server bundle
+        # mcp-server.mjs has no arg parser (it connects an MCP stdio
+        # transport unconditionally), so `--help` isn't a thing to run —
+        # confirm the esbuild output landed instead.
+        run: test -s dist/bin/mcp-server.mjs
+
       - name: Dependency audit (report only)
         if: always()
         run: pnpm audit --prod || true
