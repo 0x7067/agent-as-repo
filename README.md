@@ -137,3 +137,5 @@ Conventions:
 - Core modules (`src/core/`) have no side effects and require no mocks in tests
 - Shell modules (`src/shell/`) mock external boundaries (LLM endpoint, filesystem); the sqlite store is exercised against real temp-file DBs in contract tests
 - Package manager: pnpm (never npm or yarn)
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, dev commands, and how to submit changes.

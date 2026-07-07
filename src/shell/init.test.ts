@@ -65,8 +65,8 @@ describe("runInit", { concurrent: false }, () => {
     await writeWorkspaceFile(path.join(repoDir, "src.ts"), "export const x = 1;\n");
 
     process.chdir(workspace);
-    // answers: model, base URL, repo path
-    const rl = makeRl(["", "", repoDir]);
+    // answers: model, base URL, embedding engine, repo path
+    const rl = makeRl(["", "", "", repoDir]);
 
     await expect(runInit(rl)).rejects.toThrow("Not a git repository");
     expect(process.exitCode).toBe(1);
@@ -79,7 +79,7 @@ describe("runInit", { concurrent: false }, () => {
     await writeWorkspaceFile(path.join(repoDir, "image.png"), "not-really-a-png");
 
     process.chdir(workspace);
-    const rl = makeRl(["", "", repoDir]);
+    const rl = makeRl(["", "", "", repoDir]);
 
     await expect(runInit(rl)).rejects.toThrow("No code files detected");
     expect(process.exitCode).toBe(1);
@@ -92,8 +92,8 @@ describe("runInit", { concurrent: false }, () => {
     await writeWorkspaceFile(path.join(repoDir, INDEX_FILE), READY_FILE_CONTENT);
 
     process.chdir(workspace);
-    // answers: model, base URL, repo path, description, confirm
-    const rl = makeRl(["", "", repoDir, "", "y"]);
+    // answers: model, base URL, embedding engine, repo path, description, confirm
+    const rl = makeRl(["", "", "", repoDir, "", "y"]);
 
     const result = await runInit(rl);
     expect(result.repoName).toBe("repo");
@@ -150,6 +150,99 @@ describe("runInit", { concurrent: false }, () => {
     expect(envContent).toContain("LLM_API_KEY=or-abc123");
     expect(configContent).toContain("model: llama3.1:8b");
     expect(configContent).toContain("base_url: https://openrouter.ai/api/v1");
+  });
+
+  it("warns (but does not fail) when the chosen LLM endpoint is unreachable", async () => {
+    const workspace = await makeTempDir(INIT_WORKSPACE_PREFIX);
+    const repoDir = path.join(workspace, "repo");
+    await mkdirInWorkspace(path.join(repoDir, ".git"));
+    await writeWorkspaceFile(path.join(repoDir, INDEX_FILE), READY_FILE_CONTENT);
+    process.chdir(workspace);
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchImpl = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+
+    await runInit({ question: vi.fn().mockResolvedValue("") }, {
+      repoPath: repoDir,
+      assumeYes: true,
+      allowPrompts: false,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(fetchImpl).toHaveBeenCalled();
+    expect(warnSpy.mock.calls.flat().join(" ")).toContain("ECONNREFUSED");
+    warnSpy.mockRestore();
+  });
+
+  it("does not warn when the chosen LLM endpoint is reachable", async () => {
+    const workspace = await makeTempDir(INIT_WORKSPACE_PREFIX);
+    const repoDir = path.join(workspace, "repo");
+    await mkdirInWorkspace(path.join(repoDir, ".git"));
+    await writeWorkspaceFile(path.join(repoDir, INDEX_FILE), READY_FILE_CONTENT);
+    process.chdir(workspace);
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 200 } as unknown as Response);
+
+    await runInit({ question: vi.fn().mockResolvedValue("") }, {
+      repoPath: repoDir,
+      assumeYes: true,
+      allowPrompts: false,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("prompts for embedding engine and writes transformersjs choice into config.yaml", async () => {
+    const workspace = await makeTempDir(INIT_WORKSPACE_PREFIX);
+    const repoDir = path.join(workspace, "repo");
+    await mkdirInWorkspace(path.join(repoDir, ".git"));
+    await writeWorkspaceFile(path.join(repoDir, INDEX_FILE), READY_FILE_CONTENT);
+    process.chdir(workspace);
+
+    // answers: model, base URL, embedding engine, repo path, description, confirm
+    const rl = makeRl(["", "", "transformersjs", repoDir, "", "y"]);
+    await runInit(rl);
+
+    const configContent = await readWorkspaceFile(path.join(workspace, CONFIG_YAML_FILE));
+    expect(configContent).toContain("embedding_engine: transformersjs");
+  });
+
+  it("defaults embedding engine to http (omitted from config) when --yes is used", async () => {
+    const workspace = await makeTempDir(INIT_WORKSPACE_PREFIX);
+    const repoDir = path.join(workspace, "repo");
+    await mkdirInWorkspace(path.join(repoDir, ".git"));
+    await writeWorkspaceFile(path.join(repoDir, INDEX_FILE), READY_FILE_CONTENT);
+    process.chdir(workspace);
+
+    await runInit({ question: vi.fn().mockResolvedValue("") }, {
+      repoPath: repoDir,
+      assumeYes: true,
+      allowPrompts: false,
+    });
+
+    const configContent = await readWorkspaceFile(path.join(workspace, CONFIG_YAML_FILE));
+    expect(configContent).not.toContain("embedding_engine");
+  });
+
+  it("honors an --embedding-engine flag override without prompting", async () => {
+    const workspace = await makeTempDir(INIT_WORKSPACE_PREFIX);
+    const repoDir = path.join(workspace, "repo");
+    await mkdirInWorkspace(path.join(repoDir, ".git"));
+    await writeWorkspaceFile(path.join(repoDir, INDEX_FILE), READY_FILE_CONTENT);
+    process.chdir(workspace);
+
+    await runInit({ question: vi.fn().mockResolvedValue("") }, {
+      repoPath: repoDir,
+      assumeYes: true,
+      allowPrompts: false,
+      embeddingEngine: "transformersjs",
+    });
+
+    const configContent = await readWorkspaceFile(path.join(workspace, CONFIG_YAML_FILE));
+    expect(configContent).toContain("embedding_engine: transformersjs");
   });
 });
 
@@ -246,5 +339,74 @@ describe("runInit (port-injected)", () => {
     await expect(
       runInit(rl, { repoPath: "/repo", assumeYes: true, allowPrompts: false, cwd: "/project", fs: fakeFs }),
     ).rejects.toThrow();
+  });
+
+  it("backs up an existing config.yaml to config.yaml.bak before overwriting", async () => {
+    delete process.env.LLM_API_KEY;
+    const oldConfig = "repo: old-repo\nmodel: old-model\n";
+    const fakeFs = makeFakeFs({
+      "/repo": "__DIR__",
+      "/repo/.git": "__DIR__",
+      [PROJECT_CONFIG_PATH]: oldConfig,
+    });
+    const rl: MockRl = { question: vi.fn().mockResolvedValue("") };
+
+    await runInit(rl, {
+      apiKey: FLAG_API_KEY,
+      repoPath: "/repo",
+      assumeYes: true,
+      allowPrompts: false,
+      cwd: "/project",
+      fs: fakeFs,
+    });
+
+    expect(fakeFs.store.get(`${PROJECT_CONFIG_PATH}.bak`)).toBe(oldConfig);
+    expect(fakeFs.store.get(PROJECT_CONFIG_PATH)).toContain("repo:");
+    expect(fakeFs.store.get(PROJECT_CONFIG_PATH)).not.toBe(oldConfig);
+  });
+
+  it("overwrites a previous .bak when config.yaml already existed once before", async () => {
+    delete process.env.LLM_API_KEY;
+    const staleBak = "repo: stale-bak\n";
+    const oldConfig = "repo: current-config\n";
+    const fakeFs = makeFakeFs({
+      "/repo": "__DIR__",
+      "/repo/.git": "__DIR__",
+      [PROJECT_CONFIG_PATH]: oldConfig,
+      [`${PROJECT_CONFIG_PATH}.bak`]: staleBak,
+    });
+    const rl: MockRl = { question: vi.fn().mockResolvedValue("") };
+
+    await runInit(rl, {
+      apiKey: FLAG_API_KEY,
+      repoPath: "/repo",
+      assumeYes: true,
+      allowPrompts: false,
+      cwd: "/project",
+      fs: fakeFs,
+    });
+
+    expect(fakeFs.store.get(`${PROJECT_CONFIG_PATH}.bak`)).toBe(oldConfig);
+    expect(fakeFs.store.get(`${PROJECT_CONFIG_PATH}.bak`)).not.toBe(staleBak);
+  });
+
+  it("does not create a .bak file when no config.yaml previously existed", async () => {
+    delete process.env.LLM_API_KEY;
+    const fakeFs = makeFakeFs({
+      "/repo": "__DIR__",
+      "/repo/.git": "__DIR__",
+    });
+    const rl: MockRl = { question: vi.fn().mockResolvedValue("") };
+
+    await runInit(rl, {
+      apiKey: FLAG_API_KEY,
+      repoPath: "/repo",
+      assumeYes: true,
+      allowPrompts: false,
+      cwd: "/project",
+      fs: fakeFs,
+    });
+
+    expect(fakeFs.store.has(`${PROJECT_CONFIG_PATH}.bak`)).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 import pLimit from "p-limit";
-import type { AgentState, ChunkingStrategy, FileInfo, PassageMap } from "../core/types.js";
+import type { AgentState, ChunkingStrategy, Chunk, FileInfo, PassageMap } from "../core/types.js";
 import { computeSyncPlan } from "../core/sync.js";
 import { selectChunkingStrategy } from "../core/chunker.js";
 import type { AgentProvider } from "../ports/agent-provider.js";
@@ -37,6 +37,35 @@ function removeFilePassages(passages: PassageMap, filePath: string): PassageMap 
   return Object.fromEntries(
     Object.entries(passages).filter(([entryPath]) => entryPath !== filePath),
   );
+}
+
+/**
+ * Stores one file's chunks, preferring provider.storePassages (all of a
+ * file's chunks in one batched embedding round trip — the store further
+ * splits internally at its own batch size) and falling back to the
+ * pLimit-bounded per-chunk storePassage loop when the provider doesn't
+ * implement the batch method.
+ */
+async function storeFileChunks(
+  provider: AgentProvider,
+  agentId: string,
+  chunks: Chunk[],
+  limit: ReturnType<typeof pLimit>,
+): Promise<string[]> {
+  if (provider.storePassages) {
+    return provider.storePassages(agentId, chunks.map((chunk) => chunk.text));
+  }
+
+  const passageIds: string[] = Array.from({ length: chunks.length });
+  await Promise.all(
+    chunks.map((chunk, i) =>
+      limit(async () => {
+        const id = await provider.storePassage(agentId, chunk.text);
+        passageIds[i] = id;
+      }),
+    ),
+  );
+  return passageIds;
 }
 
 function getIndexableFileInfo(
@@ -91,16 +120,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
         filesRemoved++;
       } else {
         const chunks = effectiveChunkingStrategy(indexableFileInfo);
-        const passageIds: string[] = Array.from({ length: chunks.length });
-
-        await Promise.all(
-          chunks.map((chunk, i) =>
-            limit(async () => {
-              const id = await provider.storePassage(agent.agentId, chunk.text);
-              passageIds[i] = id;
-            }),
-          ),
-        );
+        const passageIds = await storeFileChunks(provider, agent.agentId, chunks, limit);
 
         // Upload succeeded — queue old passages for deletion, update map
         stalePassageIds.push(...getOldPassageIds(agent.passages, filePath));

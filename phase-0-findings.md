@@ -1,3 +1,9 @@
+> **Superseded.** This document describes the original Letta Cloud design. The
+> project has since been implemented as a local sqlite-vec + any
+> OpenAI-compatible LLM tool instead — see `README.md` and
+> `docs/architecture.md` for the current design. Kept here for historical
+> context.
+
 # Phase 0 Findings — Repo Expert Agents
 
 ## Executive Summary

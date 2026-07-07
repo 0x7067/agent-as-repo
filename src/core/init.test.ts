@@ -232,6 +232,41 @@ describe("generateConfigYaml", () => {
     expect(output).toContain('"App: a test # with special chars"');
   });
 
+  it("writes embedding_engine: transformersjs when explicitly chosen", () => {
+    const output = generateConfigYaml({
+      repoName: "app",
+      repoPath: APP_REPO_PATH,
+      description: "test",
+      extensions: [".ts"],
+      ignoreDirs: [],
+      embeddingEngine: "transformersjs",
+    });
+    expect(output).toContain("embedding_engine: transformersjs");
+  });
+
+  it("omits embedding_engine when it is the default http", () => {
+    const output = generateConfigYaml({
+      repoName: "app",
+      repoPath: APP_REPO_PATH,
+      description: "test",
+      extensions: [".ts"],
+      ignoreDirs: [],
+      embeddingEngine: "http",
+    });
+    expect(output).not.toContain("embedding_engine");
+  });
+
+  it("omits embedding_engine when unset", () => {
+    const output = generateConfigYaml({
+      repoName: "app",
+      repoPath: APP_REPO_PATH,
+      description: "test",
+      extensions: [".ts"],
+      ignoreDirs: [],
+    });
+    expect(output).not.toContain("embedding_engine");
+  });
+
   it("uses tilde path when under home directory", () => {
     const output = generateConfigYaml({
       repoName: "app",

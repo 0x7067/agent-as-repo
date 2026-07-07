@@ -222,8 +222,8 @@ describe("runInit (port-injected, stryker)", () => {
       "/repo/.git": "__DIR__",
     });
 
-    // answers: model, base URL, description, confirm
-    const answers = ["", "", "", "n"];
+    // answers: model, base URL, embedding engine, description, confirm
+    const answers = ["", "", "", "", "n"];
     const rl: MockRl = {
       question: vi.fn(() => Promise.resolve(answers.shift() ?? "")),
     };

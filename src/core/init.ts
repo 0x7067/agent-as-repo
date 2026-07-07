@@ -71,6 +71,8 @@ export interface InitConfig {
   model?: string;
   /** OpenAI-compatible base URL (default: local Ollama). */
   baseUrl?: string;
+  /** Embedding engine (default "http"); only written to the config when non-default. */
+  embeddingEngine?: "http" | "transformersjs";
 }
 
 const DEFAULT_MODEL = "qwen3-coder:30b";
@@ -84,6 +86,7 @@ export function generateConfigYaml(config: InitConfig): string {
     provider: {
       model: config.model ?? DEFAULT_MODEL,
       base_url: config.baseUrl ?? DEFAULT_LLM_BASE_URL,
+      ...(config.embeddingEngine === "transformersjs" ? { embedding_engine: "transformersjs" } : {}),
     },
     repos: {
       [config.repoName]: {

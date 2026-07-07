@@ -164,6 +164,21 @@ async function writeWarnDoctorWorkspace(cwd: string): Promise<string> {
   return repoDir;
 }
 
+async function writeUnreachableSetupWorkspace(cwd: string): Promise<void> {
+  const repoDir = path.join(cwd, "repo");
+  await mkdirWorkspaceDir(repoDir, { recursive: true });
+  const config = [
+    "provider:",
+    "  model: qwen3-coder:30b",
+    "  base_url: http://127.0.0.1:1",
+    "repos:",
+    "  my-app:",
+    `    path: ${repoDir}`,
+    "    description: test repo",
+  ].join("\n");
+  await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
+}
+
 async function writeAskWorkspace(cwd: string, providerLines: string[]): Promise<void> {
   const repoDir = path.join(cwd, "repo");
   await mkdirWorkspaceDir(repoDir, { recursive: true });
@@ -228,7 +243,7 @@ describe("cli contract", () => {
       status [options] Show agent memory stats and health
       consolidate [options] Consolidate architecture/conventions memory blocks via the LLM
       export [options] Export agent memory to markdown
-      onboard <repo> Guided codebase walkthrough for new developers
+      onboard [options] <repo> Guided codebase walkthrough for new developers
       destroy [options] Delete agents
       reconcile [options] Compare local passage state against the provider's actual state and report drift
       watch [options] Watch repos and auto-sync on repo changes
@@ -269,6 +284,7 @@ describe("cli contract", () => {
       --bootstrap-retries <n> Retries for bootstrap stage (default: "2")
       --load-timeout-ms <ms> Timeout for passage loading stage (default: "300000")
       --bootstrap-timeout-ms <ms> Timeout for bootstrap stage (default: "120000")
+      --skip-preflight Skip the LLM endpoint/model reachability check before indexing
       -h, --help display help for command"
     `);
   });
@@ -504,6 +520,38 @@ describe("cli contract", () => {
     expect(result.status).toBe(0);
     await expect(fs.access(path.join(cwd, ".env"))).resolves.toBeUndefined();
     await expect(fs.access(path.join(cwd, "config.yaml"))).resolves.toBeUndefined();
+  });
+
+  it("supports --embedding-engine transformersjs on non-interactive init", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-init-embedding-engine-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(path.join(repoDir, ".git"), { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "index.ts"), "export const ok = true;\n", "utf8");
+
+    const result = runCli(
+      ["--no-input", "init", "--repo-path", repoDir, "--embedding-engine", "transformersjs", "--yes"],
+      cwd,
+    );
+
+    expect(result.status).toBe(0);
+    const config = await readWorkspaceFile(path.join(cwd, "config.yaml"), "utf8");
+    expect(config).toContain("embedding_engine: transformersjs");
+  });
+
+  it("rejects an invalid --embedding-engine value", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-init-embedding-engine-invalid-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(path.join(repoDir, ".git"), { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "index.ts"), "export const ok = true;\n", "utf8");
+
+    const result = runCli(
+      ["--no-input", "init", "--repo-path", repoDir, "--embedding-engine", "webgpu", "--yes"],
+      cwd,
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Invalid --embedding-engine");
+    await expect(fs.access(path.join(cwd, "config.yaml"))).rejects.toThrow();
   });
 
   it("supports destroy --dry-run", async () => {
@@ -1124,6 +1172,39 @@ describe("cli contract", () => {
     expect(result.stdout).toContain("model=default");
   });
 
+  it("prints a walkthrough for onboard", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-onboard-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+
+    const result = runCli(["onboard", "my-app"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("ok");
+  });
+
+  it("shows a progress indicator while generating the onboarding walkthrough", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-onboard-progress-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+
+    const result = runCli(["onboard", "my-app"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("Generating onboarding walkthrough");
+  });
+
+  it("times out onboard when the LLM call exceeds --timeout-ms", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-onboard-timeout-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+
+    const result = runCli(["onboard", "my-app", "--timeout-ms", "50"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_DELAY_BOOTSTRAP_MS: "500",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr.toLowerCase()).toContain("timed out");
+  });
+
   it("supports self-check --json", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-self-check-");
     await writeWorkspaceFile(
@@ -1218,6 +1299,32 @@ describe("cli contract", () => {
     expect(result.stdout).toContain("Completion script written");
     const script = await readWorkspaceFile(path.join(installDir, "repo-expert.fish"), "utf8");
     expect(script).toContain("fish completion for repo-expert");
+  });
+
+  it("setup fails fast with an actionable message when the LLM endpoint is unreachable", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-preflight-fail-");
+    await writeUnreachableSetupWorkspace(cwd);
+
+    const result = runCli(["setup", "--config", "config.yaml"], cwd);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("http://127.0.0.1:1");
+    expect(result.stderr.toLowerCase()).toContain("ollama serve");
+    // No indexing work should have started — no state file should be created.
+    await expect(fs.access(path.join(cwd, ".repo-expert-state.json"))).rejects.toThrow();
+  });
+
+  it("setup --skip-preflight bypasses the endpoint check and proceeds", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-preflight-skip-");
+    await writeUnreachableSetupWorkspace(cwd);
+
+    const result = runCli(["setup", "--config", "config.yaml", "--skip-preflight", "--no-bootstrap"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Setup complete.");
+    expect(result.stderr).not.toContain("ollama serve");
   });
 
   it("supports setup --reindex and emits JSON timings", async () => {

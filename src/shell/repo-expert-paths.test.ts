@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { resolveRepoExpertDataDir, resolveStoreDbPath } from "./repo-expert-paths.js";
@@ -52,6 +52,18 @@ describe("resolveRepoExpertDataDir", () => {
     });
 
     expect(result).toBe(expected);
+  });
+
+  it("creates the resolved data directory with mode 0o700 (private to owner)", () => {
+    const home = makeTempDir("repo-expert-home-perm-");
+    const dataDir = path.join(home, ".repo-expert");
+
+    resolveRepoExpertDataDir({ cwd: home, homeDir: home, env: {} });
+
+    // dataDir is derived from a mkdtemp-created temp directory for this test run.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    const mode = statSync(dataDir).mode & 0o777;
+    expect(mode).toBe(0o700);
   });
 
   it("throws when all candidates are not writable", () => {

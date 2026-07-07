@@ -253,10 +253,10 @@ describe("self-check", () => {
     });
   });
 
-  it("runSelfChecks returns exactly 4 results (no extra)", async () => {
+  it("runSelfChecks returns exactly 5 results (no extra)", async () => {
     await withTempDir("repo-expert-self-check-count-", async (dir) => {
       const results = await runSelfChecks(dir, 1);
-      expect(results).toHaveLength(4);
+      expect(results).toHaveLength(5);
     });
   });
 
@@ -428,6 +428,66 @@ describe("runSelfChecks (port-injected)", () => {
     const results = await runSelfChecks(PROJECT_DIR, 18, fakeFs, fakeRunCommand);
     const pkg = results.find((r) => r.name === PACKAGE_JSON_CHECK);
     expect(pkg?.status).toBe("warn");
+  });
+});
+
+describe("native modules check", () => {
+  it("passes when better-sqlite3 + sqlite-vec load and execute a trivial query for real", async () => {
+    // No injected openDatabase: exercises the real loader from sqlite-native.ts
+    // against the real installed native addons in this environment.
+    await withTempDir("repo-expert-self-check-native-real-", async (dir) => {
+      const results = await runSelfChecks(dir, 1);
+      const nativeResult = results.find((r) => r.name === "native modules");
+      expect(nativeResult?.status).toBe("pass");
+      expect(nativeResult?.message).toContain("v0.1.9");
+    });
+  });
+
+  it("passes when the injected loader opens a database and returns a version row", async () => {
+    await withTempDir("repo-expert-self-check-native-mock-pass-", async (dir) => {
+      const fakeDb = {
+        prepare: () => ({ get: () => ({ version: "v9.9.9" }) }),
+        close: vi.fn(),
+      };
+      const fakeOpenDatabase = vi.fn().mockReturnValue(fakeDb);
+
+      const results = await runSelfChecks(dir, 1, undefined, undefined, fakeOpenDatabase);
+      const nativeResult = results.find((r) => r.name === "native modules");
+      expect(nativeResult?.status).toBe("pass");
+      expect(nativeResult?.message).toContain("v9.9.9");
+      expect(fakeOpenDatabase).toHaveBeenCalledWith(":memory:");
+      expect(fakeDb.close).toHaveBeenCalled();
+    });
+  });
+
+  it("fails with a helpful message (Node version / pnpm approve-builds) when the loader throws", async () => {
+    await withTempDir("repo-expert-self-check-native-mock-fail-", async (dir) => {
+      const fakeOpenDatabase = vi.fn().mockImplementation(() => {
+        throw new Error("The module was compiled against a different Node.js ABI version");
+      });
+
+      const results = await runSelfChecks(dir, 1, undefined, undefined, fakeOpenDatabase);
+      const nativeResult = results.find((r) => r.name === "native modules");
+      expect(nativeResult?.status).toBe("fail");
+      expect(nativeResult?.message).toContain("ABI version");
+      expect(nativeResult?.message).toContain("Node");
+      expect(nativeResult?.message).toContain("pnpm approve-builds");
+    });
+  });
+
+  it("fails when the query returns no version row", async () => {
+    await withTempDir("repo-expert-self-check-native-mock-noversion-", async (dir) => {
+      const fakeDb = {
+        prepare: () => ({ get: () => {} }),
+        close: vi.fn(),
+      };
+      const fakeOpenDatabase = vi.fn().mockReturnValue(fakeDb);
+
+      const results = await runSelfChecks(dir, 1, undefined, undefined, fakeOpenDatabase);
+      const nativeResult = results.find((r) => r.name === "native modules");
+      expect(nativeResult?.status).toBe("fail");
+      expect(fakeDb.close).toHaveBeenCalled();
+    });
   });
 });
 

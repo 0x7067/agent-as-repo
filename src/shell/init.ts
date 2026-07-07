@@ -2,12 +2,14 @@ import * as os from "node:os";
 import path from "node:path";
 import type { FileSystemPort } from "../ports/filesystem.js";
 import { nodeFileSystem } from "./adapters/node-filesystem.js";
+import { checkLlmEndpoint } from "./doctor.js";
 import {
   detectExtensions,
   suggestIgnoreDirs,
   detectRepoName,
   generateConfigYaml,
 } from "../core/init.js";
+import type { EmbeddingEngine } from "../core/types.js";
 
 interface InitResult {
   configPath: string;
@@ -27,10 +29,14 @@ export interface RunInitOptions {
   model?: string;
   /** OpenAI-compatible base URL. */
   baseUrl?: string;
+  /** Embedding engine (default "http" when neither this nor a prompt answer is given). */
+  embeddingEngine?: EmbeddingEngine;
   assumeYes?: boolean;
   allowPrompts?: boolean;
   cwd?: string;
   fs?: FileSystemPort;
+  /** Injectable fetch for the best-effort LLM endpoint reachability probe. */
+  fetchImpl?: typeof fetch;
 }
 
 const DEFAULT_MODEL = "qwen3-coder:30b";
@@ -69,10 +75,12 @@ export async function runInit(rl: PromptReader, options: RunInitOptions = {}): P
     repoPath: repoPathFromFlag,
     model: modelFromFlag,
     baseUrl: baseUrlFromFlag,
+    embeddingEngine: embeddingEngineFromFlag,
     assumeYes = false,
     allowPrompts = true,
     cwd = process.cwd(),
     fs = nodeFileSystem,
+    fetchImpl,
   } = options;
   console.log("repo-expert init — set up your first agent\n");
 
@@ -85,6 +93,26 @@ export async function runInit(rl: PromptReader, options: RunInitOptions = {}): P
   };
   const model = modelFromFlag ?? (await askWithDefault(`Chat model [${DEFAULT_MODEL}]: `, DEFAULT_MODEL));
   const baseUrl = baseUrlFromFlag ?? (await askWithDefault(`LLM base URL [${DEFAULT_LLM_BASE_URL}]: `, DEFAULT_LLM_BASE_URL));
+
+  // 1a. Best-effort reachability probe. Non-fatal: the user learns right away
+  // instead of only discovering an unreachable endpoint much later during "setup".
+  const endpointCheck = await checkLlmEndpoint(baseUrl, fetchImpl);
+  if (endpointCheck.status !== "pass") {
+    console.warn(`\nWarning: ${endpointCheck.message}`);
+    console.warn(`  "repo-expert setup" will fail until the LLM endpoint is reachable.`);
+  }
+
+  // 1b. Embedding engine: the OpenAI-compatible endpoint (needs a second model
+  // pull) or an in-process transformers.js pipeline (no extra pull, downloads
+  // weights from Hugging Face on first use).
+  const askEmbeddingEngine = async (): Promise<EmbeddingEngine> => {
+    if (!allowPrompts || assumeYes) return "http";
+    const response = await rl.question(
+      "Embedding engine — http (default, needs `ollama pull nomic-embed-text`) or transformersjs (in-process, downloads weights from HF on first use) [http]: ",
+    );
+    return response.trim().toLowerCase() === "transformersjs" ? "transformersjs" : "http";
+  };
+  const embeddingEngine: EmbeddingEngine = embeddingEngineFromFlag ?? (await askEmbeddingEngine());
 
   // 2. Optional API key (only remote endpoints need one; local Ollama does not).
   const envPath = path.resolve(cwd, ".env");
@@ -177,6 +205,7 @@ export async function runInit(rl: PromptReader, options: RunInitOptions = {}): P
   console.log(`  Description: ${description}`);
   console.log(`  Model: ${model}`);
   console.log(`  LLM base URL: ${baseUrl}`);
+  console.log(`  Embedding engine: ${embeddingEngine}`);
   console.log(`  Extensions: ${extensions.join(", ")}`);
   console.log(`  Ignore dirs: ${ignoreDirs.join(", ")}`);
 
@@ -190,8 +219,20 @@ export async function runInit(rl: PromptReader, options: RunInitOptions = {}): P
     throw new Error("Aborted by user");
   }
 
-  // 7. Write config.yaml
+  // 7. Write config.yaml (back up any existing one first)
   const configPath = path.resolve(cwd, "config.yaml");
+  const backupPath = `${configPath}.bak`;
+  let hasExistingConfig = true;
+  try {
+    await fs.access(configPath);
+  } catch {
+    hasExistingConfig = false;
+  }
+  if (hasExistingConfig) {
+    await fs.copyFile(configPath, backupPath);
+    console.log(`\nExisting ${configPath} found — backed up to ${backupPath}`);
+  }
+
   const yamlContent = generateConfigYaml({
     repoName,
     repoPath: displayPath,
@@ -200,6 +241,7 @@ export async function runInit(rl: PromptReader, options: RunInitOptions = {}): P
     ignoreDirs,
     model,
     baseUrl,
+    embeddingEngine,
   });
 
   await fs.writeFile(configPath, yamlContent);

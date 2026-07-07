@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
@@ -10,8 +11,9 @@ import {
   parseModelCsv,
   parseNonNegativeInt,
   parsePositiveInt,
+  readPackageVersion,
+  readPackageVersionFromRequire,
   registerTools,
-  withTimeout,
 } from "./mcp-server.js";
 import type { AgentProvider } from "./ports/agent-provider.js";
 import type { AdminPort } from "./ports/admin.js";
@@ -22,7 +24,7 @@ function makeMockProvider(): AgentProvider {
     deleteAgent: vi.fn(),
     storePassage: vi.fn<[], Promise<string>>().mockResolvedValue("p-new"),
     deletePassage: vi.fn<[], Promise<void>>().mockResolvedValue(),
-    listPassages: vi.fn().mockResolvedValue([]),
+    listPassages: vi.fn().mockResolvedValue([{ id: "p-1", text: "found it" }]),
     getBlock: vi.fn().mockResolvedValue({ value: "block value", limit: 5000 }),
     updateBlock: vi.fn().mockResolvedValue({ value: "Updated.", limit: 5000 }),
     sendMessage: vi.fn<[], Promise<string>>().mockResolvedValue("Hello from agent"),
@@ -74,9 +76,11 @@ function parseToolJson(result: ToolResult): unknown {
   return JSON.parse(result.content[0].text);
 }
 
-function getSendMessageOptions(provider: AgentProvider): { overrideModel?: string; maxSteps?: number } {
+function getSendMessageOptions(
+  provider: AgentProvider,
+): { overrideModel?: string; maxSteps?: number; signal?: AbortSignal } {
   const firstCall = (provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0] as
-    | [string, string, { overrideModel?: string; maxSteps?: number }]
+    | [string, string, { overrideModel?: string; maxSteps?: number; signal?: AbortSignal }]
     | undefined;
   if (firstCall === undefined) {
     throw new Error("Expected provider.sendMessage to have been called at least once");
@@ -124,23 +128,23 @@ describe("parseModelCsv", () => {
   });
 });
 
-describe("withTimeout", () => {
-  it("resolves with the function result when it completes in time", async () => {
-    const result = await withTimeout("test", 1000, () => Promise.resolve("ok"));
-    expect(result).toBe("ok");
+describe("readPackageVersion", () => {
+  it("returns the version string from the repo's package.json", () => {
+    const pkgPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
+    expect(readPackageVersion()).toBe(pkg.version);
   });
 
-  it("rejects with a timeout error when function exceeds timeoutMs", async () => {
-    await expect(
-      withTimeout("my-op", 10, () => new Promise((resolve) => setTimeout(resolve, 5000))),
-    ).rejects.toThrow("my-op timed out after 10ms");
-  });
+  it("falls back to the dist/bin-relative package.json path for bundled output", () => {
+    const requireFromHere = vi.fn((id: string): unknown => {
+      if (id === "../package.json") throw new Error("missing dist/package.json");
+      if (id === "../../package.json") return { version: "2.3.4" };
+      throw new Error(`unexpected require path: ${id}`);
+    });
 
-  it("clears timeout after function resolves (no timer leak)", async () => {
-    const spy = vi.spyOn(globalThis, "clearTimeout");
-    await withTimeout("test", 5000, () => Promise.resolve("done"));
-    expect(spy).toHaveBeenCalledOnce();
-    spy.mockRestore();
+    expect(readPackageVersionFromRequire(requireFromHere)).toBe("2.3.4");
+    expect(requireFromHere).toHaveBeenCalledWith("../package.json");
+    expect(requireFromHere).toHaveBeenCalledWith("../../package.json");
   });
 });
 
@@ -285,9 +289,17 @@ describe("MCP Server tools", () => {
     it("returns isError on failure", async () => {
       (admin.getAgent as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("not found"));
       const handler = extractToolHandler(server, "agent_get");
-      const result = await handler({ agent_id: "bad-id" });
+      const result = await handler({ agent_id: "agent-1" });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toBe("not found");
+    });
+
+    it("returns a clear 'agent not found' error for a nonexistent agent instead of succeeding empty", async () => {
+      const handler = extractToolHandler(server, "agent_get");
+      const result = await handler({ agent_id: "bad-id" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("agent not found: bad-id");
+      expect(mockAdmin.getAgent).not.toHaveBeenCalled();
     });
   });
 
@@ -296,7 +308,30 @@ describe("MCP Server tools", () => {
       const handler = extractToolHandler(server, "agent_call");
       const result = await handler({ agent_id: "agent-1", content: "Hi" });
       expect(result.content[0].text).toBe("Hello from agent");
-      expect(provider.sendMessage).toHaveBeenCalledWith("agent-1", "Hi", {});
+      expect(provider.sendMessage).toHaveBeenCalledWith("agent-1", "Hi", {
+        signal: expect.any(AbortSignal) as AbortSignal,
+      });
+    });
+
+    it("returns a clear 'agent not found' error for a nonexistent agent instead of succeeding empty", async () => {
+      const handler = extractToolHandler(server, "agent_call");
+      const result = await handler({ agent_id: "missing-agent", content: "Hi" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("agent not found: missing-agent");
+      expect(provider.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("aborts the signal passed to provider.sendMessage when the request times out (no orphaned call)", async () => {
+      let observedSignal: AbortSignal | undefined;
+      vi.mocked(provider.sendMessage).mockImplementation((_agentId, _content, options) => {
+        observedSignal = (options as { signal?: AbortSignal } | undefined)?.signal;
+        return new Promise((resolve) => setTimeout(() => { resolve("late"); }, 5000));
+      });
+      const handler = extractToolHandler(server, "agent_call");
+      const result = await handler({ agent_id: "agent-1", content: "Hi", timeout_ms: 10 });
+      expect(result.isError).toBe(true);
+      expect(observedSignal).toBeInstanceOf(AbortSignal);
+      expect(observedSignal?.aborted).toBe(true);
     });
 
     it("returns isError on failure", async () => {
@@ -318,16 +353,17 @@ describe("MCP Server tools", () => {
       expect(provider.sendMessage).toHaveBeenCalledWith("agent-1", "Hi", {
         overrideModel: "llama3.1:8b",
         maxSteps: 3,
+        signal: expect.any(AbortSignal) as AbortSignal,
       });
     });
 
-    it("does not set overrideModel/maxSteps when absent", async () => {
+    it("does not set overrideModel/maxSteps when absent, but always threads an AbortSignal", async () => {
       const handler = extractToolHandler(server, "agent_call");
       await handler({ agent_id: "agent-1", content: "Hi" });
       const options = getSendMessageOptions(provider);
-      expect(options).toEqual({});
       expect("overrideModel" in options).toBe(false);
       expect("maxSteps" in options).toBe(false);
+      expect(options.signal).toBeInstanceOf(AbortSignal);
     });
 
     it("reads timeout from REPO_EXPERT_ASK_TIMEOUT_MS env var", async () => {
@@ -392,9 +428,17 @@ describe("MCP Server tools", () => {
     it("returns isError on failure", async () => {
       (admin.getCoreMemory as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("agent gone"));
       const handler = extractToolHandler(server, "agent_get_core_memory");
-      const result = await handler({ agent_id: "bad-id" });
+      const result = await handler({ agent_id: "agent-1" });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toBe("agent gone");
+    });
+
+    it("returns a clear 'agent not found' error for a nonexistent agent instead of succeeding empty", async () => {
+      const handler = extractToolHandler(server, "agent_get_core_memory");
+      const result = await handler({ agent_id: "bad-id" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("agent not found: bad-id");
+      expect(mockAdmin.getCoreMemory).not.toHaveBeenCalled();
     });
   });
 
@@ -412,6 +456,30 @@ describe("MCP Server tools", () => {
       await handler({ agent_id: "agent-1", query: "auth", top_k: 5 });
       expect(mockAdmin.searchPassages).toHaveBeenCalledWith("agent-1", "auth", 5);
     });
+
+    it("returns a clear 'agent not found' error for a nonexistent agent instead of succeeding empty", async () => {
+      const handler = extractToolHandler(server, "agent_search_archival");
+      const result = await handler({ agent_id: "bad-id", query: "auth" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("agent not found: bad-id");
+      expect(mockAdmin.searchPassages).not.toHaveBeenCalled();
+    });
+
+    it("rejects non-integer/non-positive top_k at the schema level", () => {
+      const registeredTools = (server as unknown as {
+        _registeredTools: Record<
+          string,
+          { inputSchema?: { shape?: Record<string, { safeParse: (v: unknown) => { success: boolean } }> } } | undefined
+        >;
+      })._registeredTools;
+      const tool = registeredTools["agent_search_archival"];
+      const topKSchema = tool?.inputSchema?.shape?.["top_k"];
+      expect(topKSchema).toBeDefined();
+      expect(topKSchema?.safeParse(5).success).toBe(true);
+      expect(topKSchema?.safeParse(0).success).toBe(false);
+      expect(topKSchema?.safeParse(-1).success).toBe(false);
+      expect(topKSchema?.safeParse(1.5).success).toBe(false);
+    });
   });
 
   describe("agent_insert_passage", () => {
@@ -422,6 +490,14 @@ describe("MCP Server tools", () => {
       expect(data.id).toBe("p-new");
       expect(provider.storePassage).toHaveBeenCalledWith("agent-1", "new passage");
     });
+
+    it("returns a clear 'agent not found' error for a nonexistent agent instead of inserting", async () => {
+      const handler = extractToolHandler(server, "agent_insert_passage");
+      const result = await handler({ agent_id: "bad-id", text: "new passage" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("agent not found: bad-id");
+      expect(provider.storePassage).not.toHaveBeenCalled();
+    });
   });
 
   describe("agent_delete_passage", () => {
@@ -431,23 +507,73 @@ describe("MCP Server tools", () => {
       expect(result.content[0].text).toBe("Deleted");
       expect(provider.deletePassage).toHaveBeenCalledWith("agent-1", "p-1");
     });
+
+    it("returns a not-found error instead of a false 'Deleted' for a nonexistent passage_id", async () => {
+      const handler = extractToolHandler(server, "agent_delete_passage");
+      const result = await handler({ agent_id: "agent-1", passage_id: "does-not-exist" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("passage not found: does-not-exist");
+      expect(provider.deletePassage).not.toHaveBeenCalled();
+    });
+
+    it("returns a clear 'agent not found' error for a nonexistent agent instead of checking passages", async () => {
+      const handler = extractToolHandler(server, "agent_delete_passage");
+      const result = await handler({ agent_id: "bad-id", passage_id: "p-1" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("agent not found: bad-id");
+      expect(provider.listPassages).not.toHaveBeenCalled();
+      expect(provider.deletePassage).not.toHaveBeenCalled();
+    });
   });
 
   describe("agent_update_block", () => {
     it("updates and returns the block", async () => {
       const handler = extractToolHandler(server, "agent_update_block");
-      const result = await handler({ agent_id: "agent-1", label: "persona", value: "Updated." });
+      const result = await handler({ agent_id: "agent-1", label: "architecture", value: "Updated." });
       const data = parseToolJson(result) as { value: string; limit: number };
       expect(data.value).toBe("Updated.");
-      expect(provider.updateBlock).toHaveBeenCalledWith("agent-1", "persona", "Updated.");
+      expect(provider.updateBlock).toHaveBeenCalledWith("agent-1", "architecture", "Updated.");
     });
 
     it("returns isError on failure", async () => {
       (provider.updateBlock as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("not found"));
       const handler = extractToolHandler(server, "agent_update_block");
-      const result = await handler({ agent_id: "agent-1", label: "persona", value: "x" });
+      const result = await handler({ agent_id: "agent-1", label: "architecture", value: "x" });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toBe("not found");
+    });
+
+    it("rejects persona block writes instead of silently overwriting the managed persona", async () => {
+      const handler = extractToolHandler(server, "agent_update_block");
+      const result = await handler({ agent_id: "agent-1", label: "persona", value: "New persona" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("persona");
+      expect(provider.updateBlock).not.toHaveBeenCalled();
+    });
+
+    it("rejects a value over the memory block char limit", async () => {
+      const handler = extractToolHandler(server, "agent_update_block");
+      const oversized = "x".repeat(5001);
+      const result = await handler({ agent_id: "agent-1", label: "architecture", value: oversized });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("limit");
+      expect(provider.updateBlock).not.toHaveBeenCalled();
+    });
+
+    it("accepts a value exactly at the char limit", async () => {
+      const handler = extractToolHandler(server, "agent_update_block");
+      const atLimit = "x".repeat(5000);
+      const result = await handler({ agent_id: "agent-1", label: "architecture", value: atLimit });
+      expect(result.isError).toBeFalsy();
+      expect(provider.updateBlock).toHaveBeenCalledWith("agent-1", "architecture", atLimit);
+    });
+
+    it("returns a clear 'agent not found' error for a nonexistent agent instead of updating", async () => {
+      const handler = extractToolHandler(server, "agent_update_block");
+      const result = await handler({ agent_id: "bad-id", label: "architecture", value: "Updated." });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("agent not found: bad-id");
+      expect(provider.updateBlock).not.toHaveBeenCalled();
     });
   });
 });

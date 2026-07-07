@@ -7,6 +7,8 @@ import {
   checkConfigFile,
   checkGit,
   checkLlmEndpoint,
+  checkModelAvailable,
+  checkRepoPaths,
   runAllChecks,
   runDoctorFixes,
 } from "./doctor.js";
@@ -26,6 +28,18 @@ function okResponse(): Response {
 
 function stubFetchOk(): void {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okResponse()));
+}
+
+function stubFetchOkWithModels(ids: string[]): void {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(modelsResponse(ids)));
+}
+
+function modelsResponse(ids: string[]): Response {
+  return {
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve({ data: ids.map((id) => ({ id })) }),
+  } as unknown as Response;
 }
 
 const providerYaml = (repoDir: string, repoName = "my-app"): string =>
@@ -88,6 +102,33 @@ describe("doctor shell checks", () => {
     expect(result.message).toContain("ECONNREFUSED");
   });
 
+  it("checkModelAvailable passes when the model is in the endpoint's model list", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(modelsResponse(["qwen3-coder:30b", "llama3.2:3b"]));
+    const result = await checkModelAvailable(LOCAL_BASE_URL, "qwen3-coder:30b", "LLM model", fetchImpl as unknown as typeof fetch);
+    expect(result.status).toBe("pass");
+    expect(result.name).toBe("LLM model");
+  });
+
+  it("checkModelAvailable fails when the model is missing from the endpoint's model list", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(modelsResponse(["llama3.2:3b"]));
+    const result = await checkModelAvailable(LOCAL_BASE_URL, "qwen3-coder:30b", "LLM model", fetchImpl as unknown as typeof fetch);
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("qwen3-coder:30b");
+    expect(result.message).toContain("ollama pull qwen3-coder:30b");
+  });
+
+  it("checkModelAvailable degrades to a warning when the models endpoint returns a non-OK status", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 502 } as unknown as Response);
+    const result = await checkModelAvailable(LOCAL_BASE_URL, "qwen3-coder:30b", "LLM model", fetchImpl as unknown as typeof fetch);
+    expect(result.status).toBe("warn");
+  });
+
+  it("checkModelAvailable degrades to a warning when the models endpoint fetch rejects", async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+    const result = await checkModelAvailable(LOCAL_BASE_URL, "qwen3-coder:30b", "LLM model", fetchImpl as unknown as typeof fetch);
+    expect(result.status).toBe("warn");
+  });
+
   it("checkConfigFile reports missing config", async () => {
     const missingPath = path.join(await makeTempDir("doctor-"), "missing.yaml");
     const result = await checkConfigFile(missingPath);
@@ -96,7 +137,7 @@ describe("doctor shell checks", () => {
   });
 
   it("runAllChecks includes config and git checks when config exists", async () => {
-    stubFetchOk();
+    stubFetchOkWithModels(["qwen3-coder:30b", "nomic-embed-text"]);
     const tempDir = await makeTempDir("doctor-");
     const repoDir = path.join(tempDir, "repo");
     // eslint-disable-next-line security/detect-non-literal-fs-filename
@@ -112,6 +153,26 @@ describe("doctor shell checks", () => {
     expect(names).toContain("Config file");
     expect(names).toContain("Git");
     expect(names).toContain('Repo "my-app"');
+    expect(names).toContain("LLM model");
+    expect(names).toContain("Embedding model");
+    const modelCheck = results.find((r) => r.name === "LLM model");
+    expect(modelCheck?.status).toBe("pass");
+  });
+
+  it("runAllChecks reports a failing LLM model check when the configured model is missing from the endpoint", async () => {
+    stubFetchOkWithModels(["some-other-model"]);
+    const tempDir = await makeTempDir("doctor-");
+    const repoDir = path.join(tempDir, "repo");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.mkdir(repoDir, { recursive: true });
+    const configPath = path.join(tempDir, "config.yaml");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.writeFile(configPath, providerYaml(repoDir), "utf8");
+
+    const results = await runAllChecks(null, configPath);
+    const modelCheck = results.find((r) => r.name === "LLM model");
+    expect(modelCheck?.status).toBe("fail");
+    expect(modelCheck?.message).toContain("qwen3-coder:30b");
   });
 
   it("runDoctorFixes creates missing config, env, and state", async () => {
@@ -130,6 +191,58 @@ describe("doctor shell checks", () => {
     await expect(fs.access(path.join(tempDir, ".env"))).resolves.toBeUndefined();
     await expect(fs.access(path.join(tempDir, "config.yaml"))).resolves.toBeUndefined();
     await expect(fs.access(path.join(tempDir, ".repo-expert-state.json"))).resolves.toBeUndefined();
+  });
+
+  it("runDoctorFixes tells the user to edit the placeholder repo path after seeding config from the example", async () => {
+    const tempDir = await makeTempDir("doctor-fix-");
+    process.chdir(tempDir);
+    const configPath = path.join(tempDir, "config.yaml");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.writeFile(
+      path.join(tempDir, "config.example.yaml"),
+      "provider:\n  model: x\nrepos:\n  my-app:\n    path: ~/repos/my-app\n",
+      "utf8",
+    );
+
+    const result = await runDoctorFixes(configPath);
+
+    expect(
+      result.suggestions.some((s) => s.includes("repos.<name>.path") && s.includes(configPath) && s.includes("repo-expert init")),
+    ).toBe(true);
+  });
+
+  it("checkRepoPaths flags the known config.example.yaml placeholder path distinctly from a generic missing path", async () => {
+    const tempDir = await makeTempDir("doctor-");
+    const configPath = path.join(tempDir, "config.yaml");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.writeFile(
+      configPath,
+      ["provider:", "  model: x", "repos:", "  my-app:", "    path: ~/repos/my-app", "    description: placeholder"].join("\n"),
+      "utf8",
+    );
+
+    const results = await checkRepoPaths(configPath);
+    const repoCheck = results.find((r) => r.name === 'Repo "my-app"');
+    expect(repoCheck?.status).toBe("fail");
+    expect(repoCheck?.message).toContain("placeholder");
+    expect(repoCheck?.message).toContain("repo-expert init");
+  });
+
+  it("checkRepoPaths reports a generic missing-path message for a non-placeholder missing repo", async () => {
+    const tempDir = await makeTempDir("doctor-");
+    const configPath = path.join(tempDir, "config.yaml");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.writeFile(
+      configPath,
+      ["provider:", "  model: x", "repos:", "  real-repo:", "    path: /nonexistent/real-repo", "    description: x"].join("\n"),
+      "utf8",
+    );
+
+    const results = await checkRepoPaths(configPath);
+    const repoCheck = results.find((r) => r.name === 'Repo "real-repo"');
+    expect(repoCheck?.status).toBe("fail");
+    expect(repoCheck?.message).toContain("does not exist");
+    expect(repoCheck?.message).not.toContain("placeholder");
   });
 
   it("runAllChecks prefers agent from configured repos when state has orphan first", async () => {

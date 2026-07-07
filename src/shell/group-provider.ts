@@ -17,6 +17,7 @@
  */
 
 import type { AgentProvider } from "../ports/agent-provider.js";
+import { withTimeoutSignal } from "./with-timeout.js";
 
 export const BROADCAST_ASK_DEFAULT_TIMEOUT_MS = 60_000;
 
@@ -88,24 +89,24 @@ export async function broadcastAsk(
   options: BroadcastOptions = {},
 ): Promise<BroadcastResult[]> {
   const timeoutMs = options.timeoutMs ?? BROADCAST_ASK_DEFAULT_TIMEOUT_MS;
-  const sendOptions = options.overrideModel === undefined ? undefined : { overrideModel: options.overrideModel };
+  const overrideModel = options.overrideModel;
 
   return Promise.all(
     agents.map(async ({ repoName, agentId }): Promise<BroadcastResult> => {
-      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
-        const response = await Promise.race([
-          provider.sendMessage(agentId, question, sendOptions),
-          new Promise<never>((_resolve, reject) => {
-            timeoutId = setTimeout(() => { reject(new Error(`Agent "${repoName}" timed out after ${String(timeoutMs)}ms`)); }, timeoutMs);
-          }),
-        ]);
+        const response = await withTimeoutSignal(
+          `Agent "${repoName}"`,
+          timeoutMs,
+          (signal) =>
+            provider.sendMessage(agentId, question, {
+              ...(overrideModel === undefined ? {} : { overrideModel }),
+              signal,
+            }),
+        );
         return { repoName, response, error: null };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return { repoName, response: null, error: message };
-      } finally {
-        if (timeoutId !== undefined) clearTimeout(timeoutId);
       }
     }),
   );

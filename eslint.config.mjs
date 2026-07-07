@@ -86,6 +86,20 @@ export default tseslint.config(
 			...nodePlugin.configs["flat/recommended"].rules,
 			// Handled by TypeScript / bundler resolution
 			"n/no-missing-import": "off",
+			// package.json bin points at built dist/bin/*.mjs; esbuild preserves
+			// the source shebang, so map entry-point sources to their build
+			// outputs when checking against bin
+			"n/hashbang": [
+				"error",
+				{
+					convertPath: [
+						{
+							include: ["src/*.ts"],
+							replace: [String.raw`^src/(.+)\.ts$`, "dist/bin/$1.mjs"],
+						},
+					],
+				},
+			],
 			// Not published as a package
 			"n/no-unpublished-import": "off",
 			"n/no-unsupported-features/node-builtins": [
@@ -218,6 +232,8 @@ export default tseslint.config(
 			"src/core/config.test.ts",
 			"src/core/tree-sitter-chunker.test.ts",
 			"src/mcp-server.test.ts",
+			"src/shell/doctor.test.ts",
+			"src/shell/init.test.ts",
 			"src/shell/llm-client.test.ts",
 			"src/shell/self-check.test.ts",
 			"src/shell/state-store.test.ts",

@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { completionFileName, generateCompletionScript } from "./completion.js";
 
+// Kept in sync with the top-level `program.command(...)` registrations in
+// src/cli.ts (READ-ONLY here — owned by another workstream). A core module
+// cannot import node:fs/node:child_process (see eslint.config.mjs's
+// no-restricted-imports rule on src/core/**), even from its test file, so
+// this list can't be derived from cli.ts's source without leaving core.
+// Keep it complete and alphabetically-obvious-per-cli.ts-order so drift is
+// easy to spot on review.
 const ALL_COMMANDS = [
   "init", "doctor", "self-check", "setup", "config", "ask", "sync",
-  "list", "status", "export", "onboard", "destroy", "watch",
-  "install-daemon", "uninstall-daemon", "mcp-install", "mcp-check",
-  "completion", "help",
+  "list", "status", "consolidate", "export", "onboard", "destroy",
+  "reconcile", "watch", "install-daemon", "uninstall-daemon",
+  "install-instructions", "mcp-install", "mcp-check", "completion", "help",
 ];
 
 const ALL_FLAGS = ["--help", "--version", "--no-input", "--debug"];
@@ -91,5 +98,14 @@ describe("completion", () => {
     const bash = generateCompletionScript("bash");
     expect(bash).toContain("repo-expert");
     expect(completionFileName("bash")).toBe("repo-expert.bash");
+  });
+
+  it("zsh and fish scripts also include every known command (anti-drift across all shells)", () => {
+    const zsh = generateCompletionScript("zsh", DEFAULT_COMMAND_NAME);
+    const fish = generateCompletionScript("fish", DEFAULT_COMMAND_NAME);
+    for (const cmd of ALL_COMMANDS) {
+      expect(zsh).toContain(cmd);
+      expect(fish).toContain(cmd);
+    }
   });
 });

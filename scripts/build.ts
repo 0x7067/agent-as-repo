@@ -13,7 +13,17 @@ const shared: esbuild.BuildOptions = {
     // Native-addon packages resolve from node_modules at runtime.
     "better-sqlite3",
     "sqlite-vec",
+    // Transitive dep of @huggingface/transformers; loads platform-specific
+    // .node binaries via a dynamic require esbuild can't bundle.
+    "onnxruntime-node",
   ],
+  // esbuild's ESM output emits a `require` shim for bundled CJS deps that
+  // falls back to throwing when no global `require` exists (real ESM has
+  // none). Polyfill it via createRequire so those deps' `require("fs")`
+  // etc. resolve normally at runtime.
+  banner: {
+    js: "import { createRequire as __repoExpertCreateRequire } from \"node:module\";\nconst require = __repoExpertCreateRequire(import.meta.url);",
+  },
 };
 
 const seaShared: esbuild.BuildOptions = {
@@ -31,22 +41,27 @@ const seaShared: esbuild.BuildOptions = {
 };
 
 async function buildEsm(): Promise<void> {
+  // Output under dist/bin/ (two levels below the package root), not dist/
+  // directly (one level). src/shell/tree-sitter-paths.ts's
+  // resolvePackageRoot() walks up two directories from import.meta.url to
+  // find the package root (matching its own original src/shell/ depth); once
+  // bundled, import.meta.url is the *output* file's URL, so the output must
+  // sit at the same depth or that walk lands one directory short and the
+  // installed package can't find vendor/wasm and node_modules.
   await Promise.all([
     esbuild.build({
       ...shared,
       entryPoints: ["src/cli.ts"],
-      outfile: "dist/cli.mjs",
-      banner: { js: "#!/usr/bin/env node" },
+      outfile: "dist/bin/cli.mjs",
     }),
     esbuild.build({
       ...shared,
       entryPoints: ["src/mcp-server.ts"],
-      outfile: "dist/mcp-server.mjs",
-      banner: { js: "#!/usr/bin/env node" },
+      outfile: "dist/bin/mcp-server.mjs",
     }),
   ]);
 
-  console.log("Build complete: dist/cli.mjs, dist/mcp-server.mjs");
+  console.log("Build complete: dist/bin/cli.mjs, dist/bin/mcp-server.mjs");
 }
 
 async function buildSea(): Promise<void> {

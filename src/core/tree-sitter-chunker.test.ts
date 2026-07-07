@@ -207,6 +207,32 @@ describe("treeSitterStrategy", () => {
     }
   });
 
+  it("loads every grammar via the parallelized init so all languages parse correctly afterward", () => {
+    // Regression for initTreeSitterChunker switching its grammar-loading loop
+    // from sequential await-in-a-loop to Promise.all: exercise a spread of
+    // distinct grammars (not just TS/JS) to prove every entry in
+    // languageByLabel actually got populated, not just the first/last one.
+    const pyFile: FileInfo = {
+      path: "src/example.py",
+      content: "def foo():\n    return 1\n",
+      sizeKb: 0.1,
+    };
+    const goFile: FileInfo = {
+      path: "src/example.go",
+      content: "package main\n\nfunc Foo() int {\n\treturn 1\n}\n",
+      sizeKb: 0.1,
+    };
+    const rustFile: FileInfo = {
+      path: "src/example.rs",
+      content: "fn foo() -> i32 {\n    1\n}\n",
+      sizeKb: 0.1,
+    };
+
+    expect(treeSitterStrategy(pyFile).some((chunk) => chunk.text.includes("FUNCTION: foo"))).toBe(true);
+    expect(treeSitterStrategy(goFile).some((chunk) => chunk.text.includes("FUNCTION: Foo"))).toBe(true);
+    expect(treeSitterStrategy(rustFile).some((chunk) => chunk.text.includes("FUNCTION: foo"))).toBe(true);
+  });
+
   it("falls back to raw chunking for extensionless files like Makefile/Dockerfile", () => {
     const file: FileInfo = {
       path: "Makefile",
