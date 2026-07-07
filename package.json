@@ -1,15 +1,25 @@
 {
-  "name": "agent-as-repo",
+  "name": "repo-expert",
   "version": "1.0.0",
-  "description": "",
+  "description": "Persistent local-first AI memory agents for your git repositories — sqlite-vec + any OpenAI-compatible LLM, exposed via CLI and MCP",
   "main": "index.js",
   "bin": {
-    "repo-expert": "./src/cli.ts",
-    "repo-expert-mcp": "./src/mcp-server.ts"
+    "repo-expert": "./dist/bin/cli.mjs",
+    "repo-expert-mcp": "./dist/bin/mcp-server.mjs"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "config.example.yaml",
+    "docs/mcp-setup.md",
+    "docs/architecture.md",
+    "vendor/wasm"
+  ],
   "scripts": {
     "build": "tsx scripts/build.ts",
     "build:sea": "pnpm build && bash scripts/build-sea.sh",
+    "prepublishOnly": "pnpm build",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "changeset publish",
@@ -29,9 +39,28 @@
     "mcp-server": "tsx src/mcp-server.ts",
     "test:mutation": "stryker run"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "mcp",
+    "llm",
+    "rag",
+    "codebase",
+    "memory",
+    "agent",
+    "ollama",
+    "local-first",
+    "sqlite-vec",
+    "tree-sitter"
+  ],
+  "author": "Pedro Guimarães",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0x7067/agent-as-repo.git"
+  },
+  "homepage": "https://github.com/0x7067/agent-as-repo#readme",
+  "bugs": {
+    "url": "https://github.com/0x7067/agent-as-repo/issues"
+  },
   "packageManager": "pnpm@10.20.0",
   "engines": {
     "node": ">=22 <23"
