@@ -247,4 +247,73 @@ describe("runInit (port-injected)", () => {
       runInit(rl, { repoPath: "/repo", assumeYes: true, allowPrompts: false, cwd: "/project", fs: fakeFs }),
     ).rejects.toThrow();
   });
+
+  it("backs up an existing config.yaml to config.yaml.bak before overwriting", async () => {
+    delete process.env.LLM_API_KEY;
+    const oldConfig = "repo: old-repo\nmodel: old-model\n";
+    const fakeFs = makeFakeFs({
+      "/repo": "__DIR__",
+      "/repo/.git": "__DIR__",
+      [PROJECT_CONFIG_PATH]: oldConfig,
+    });
+    const rl: MockRl = { question: vi.fn().mockResolvedValue("") };
+
+    await runInit(rl, {
+      apiKey: FLAG_API_KEY,
+      repoPath: "/repo",
+      assumeYes: true,
+      allowPrompts: false,
+      cwd: "/project",
+      fs: fakeFs,
+    });
+
+    expect(fakeFs.store.get(`${PROJECT_CONFIG_PATH}.bak`)).toBe(oldConfig);
+    expect(fakeFs.store.get(PROJECT_CONFIG_PATH)).toContain("repo:");
+    expect(fakeFs.store.get(PROJECT_CONFIG_PATH)).not.toBe(oldConfig);
+  });
+
+  it("overwrites a previous .bak when config.yaml already existed once before", async () => {
+    delete process.env.LLM_API_KEY;
+    const staleBak = "repo: stale-bak\n";
+    const oldConfig = "repo: current-config\n";
+    const fakeFs = makeFakeFs({
+      "/repo": "__DIR__",
+      "/repo/.git": "__DIR__",
+      [PROJECT_CONFIG_PATH]: oldConfig,
+      [`${PROJECT_CONFIG_PATH}.bak`]: staleBak,
+    });
+    const rl: MockRl = { question: vi.fn().mockResolvedValue("") };
+
+    await runInit(rl, {
+      apiKey: FLAG_API_KEY,
+      repoPath: "/repo",
+      assumeYes: true,
+      allowPrompts: false,
+      cwd: "/project",
+      fs: fakeFs,
+    });
+
+    expect(fakeFs.store.get(`${PROJECT_CONFIG_PATH}.bak`)).toBe(oldConfig);
+    expect(fakeFs.store.get(`${PROJECT_CONFIG_PATH}.bak`)).not.toBe(staleBak);
+  });
+
+  it("does not create a .bak file when no config.yaml previously existed", async () => {
+    delete process.env.LLM_API_KEY;
+    const fakeFs = makeFakeFs({
+      "/repo": "__DIR__",
+      "/repo/.git": "__DIR__",
+    });
+    const rl: MockRl = { question: vi.fn().mockResolvedValue("") };
+
+    await runInit(rl, {
+      apiKey: FLAG_API_KEY,
+      repoPath: "/repo",
+      assumeYes: true,
+      allowPrompts: false,
+      cwd: "/project",
+      fs: fakeFs,
+    });
+
+    expect(fakeFs.store.has(`${PROJECT_CONFIG_PATH}.bak`)).toBe(false);
+  });
 });

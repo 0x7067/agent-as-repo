@@ -2,6 +2,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import type { FileSystemPort } from "../ports/filesystem.js";
 import { nodeFileSystem } from "./adapters/node-filesystem.js";
+import { openVectorDatabase, type VectorDatabase } from "./sqlite-native.js";
 
 export type SelfCheckStatus = "pass" | "warn" | "fail";
 
@@ -128,11 +129,58 @@ async function checkDependencies(cwd: string, pkg: PackageJsonShape | null, fs: 
  */
 export const MIN_NODE_MAJOR = 22;
 
+interface QueryRow {
+  version?: string;
+}
+
+/**
+ * The #1 first-run failure: better-sqlite3's native addon (and the
+ * sqlite-vec extension it loads) is ABI-locked to a Node major version and
+ * requires pnpm's build-script approval to compile/install. When either is
+ * missing or mismatched, `require`/`dlopen` can throw well past the point a
+ * naive "is the package on disk" check would catch — so this probes the real
+ * behavior by opening an in-memory database and running a trivial query.
+ */
+function checkNativeModules(
+  openDatabase: (dbPath: string) => VectorDatabase = openVectorDatabase,
+): SelfCheckResult {
+  let db: VectorDatabase | undefined;
+  try {
+    db = openDatabase(":memory:");
+    const row = db.prepare("select vec_version() as version").get() as QueryRow | undefined;
+    if (!row?.version) {
+      return {
+        name: "native modules",
+        status: "fail",
+        message: "better-sqlite3/sqlite-vec loaded but vec_version() returned no result.",
+      };
+    }
+    return {
+      name: "native modules",
+      status: "pass",
+      message: `better-sqlite3 + sqlite-vec loaded (sqlite-vec ${row.version})`,
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      name: "native modules",
+      status: "fail",
+      message:
+        `better-sqlite3/sqlite-vec failed to load or query (${detail}). ` +
+        `This is usually a Node ABI mismatch or a skipped native build step: ` +
+        `confirm you're on Node ${String(MIN_NODE_MAJOR)}+ and run "pnpm approve-builds" then "pnpm install" again.`,
+    };
+  } finally {
+    db?.close();
+  }
+}
+
 export async function runSelfChecks(
   cwd = process.cwd(),
   minNodeMajor = MIN_NODE_MAJOR,
   fs: FileSystemPort = nodeFileSystem,
   runCommand: (cmd: string, args: string[], cwd: string) => string = defaultRunCommand,
+  openDatabase: (dbPath: string) => VectorDatabase = openVectorDatabase,
 ): Promise<SelfCheckResult[]> {
   const packageJson = await readPackageJson(cwd, fs);
   return [
@@ -140,6 +188,7 @@ export async function runSelfChecks(
     checkPnpm(cwd, runCommand),
     checkPackageManagerDeclaration(packageJson),
     await checkDependencies(cwd, packageJson, fs),
+    checkNativeModules(openDatabase),
   ];
 }
 

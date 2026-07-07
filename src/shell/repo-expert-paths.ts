@@ -9,8 +9,11 @@ export interface RepoExpertPathOptions {
 }
 
 function ensureWritableDirectory(directory: string): void {
+  // mode 0o700: this directory holds indexed source code and conversation
+  // history, so it must not be group/world readable. Only applies at
+  // creation time — mkdirSync does not chmod an already-existing directory.
   // eslint-disable-next-line security/detect-non-literal-fs-filename -- path is constrained to app-controlled candidate directories
-  mkdirSync(directory, { recursive: true });
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
   const probePath = path.join(directory, `.probe-${String(process.pid)}-${String(Date.now())}`);
   // eslint-disable-next-line security/detect-non-literal-fs-filename -- probe path is under the vetted directory above
   writeFileSync(probePath, "ok", "utf8");

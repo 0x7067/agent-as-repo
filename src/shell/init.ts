@@ -190,8 +190,20 @@ export async function runInit(rl: PromptReader, options: RunInitOptions = {}): P
     throw new Error("Aborted by user");
   }
 
-  // 7. Write config.yaml
+  // 7. Write config.yaml (back up any existing one first)
   const configPath = path.resolve(cwd, "config.yaml");
+  const backupPath = `${configPath}.bak`;
+  let hasExistingConfig = true;
+  try {
+    await fs.access(configPath);
+  } catch {
+    hasExistingConfig = false;
+  }
+  if (hasExistingConfig) {
+    await fs.copyFile(configPath, backupPath);
+    console.log(`\nExisting ${configPath} found — backed up to ${backupPath}`);
+  }
+
   const yamlContent = generateConfigYaml({
     repoName,
     repoPath: displayPath,
