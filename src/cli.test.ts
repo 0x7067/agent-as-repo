@@ -263,6 +263,17 @@ describe("cli contract", () => {
     `);
   });
 
+  it("reports the package.json version for --version", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-version-");
+    const pkgRaw = await readWorkspaceFile(path.resolve(path.dirname(cliEntryPath), "..", "package.json"), "utf8");
+    const pkg = JSON.parse(pkgRaw) as { version: string };
+
+    const result = runCli(["--version"], cwd);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(pkg.version);
+  });
+
   it("keeps setup help output stable", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-help-setup-");
     const result = runCli(["setup", "--help"], cwd);
@@ -405,11 +416,17 @@ describe("cli contract", () => {
     const localConfigPath = path.join(cwd, ".claude.json");
     const homeConfigPath = path.join(home, ".claude.json");
     const localRaw = await readWorkspaceFile(localConfigPath, "utf8");
-    const localConfig = JSON.parse(localRaw) as { mcpServers?: { "repo-expert"?: { env?: Record<string, string> } } };
+    const localConfig = JSON.parse(localRaw) as {
+      mcpServers?: { "repo-expert"?: { command?: string; args?: string[]; env?: Record<string, string> } };
+    };
 
     await expect(fs.access(homeConfigPath)).rejects.toThrow();
-    expect(localConfig.mcpServers?.["repo-expert"]).toBeDefined();
-    expect(localConfig.mcpServers?.["repo-expert"]?.env?.LLM_MODEL).toBe("qwen3-coder:30b");
+    const entry = localConfig.mcpServers?.["repo-expert"];
+    expect(entry).toBeDefined();
+    expect(entry?.env?.LLM_MODEL).toBe("qwen3-coder:30b");
+    // Dev checkout: server path is the sibling of the running cli.ts, not cwd-relative.
+    expect(entry?.command).toBe("npx");
+    expect(entry?.args).toEqual(["tsx", path.join(path.dirname(cliEntryPath), "mcp-server.ts")]);
   });
 
   it("writes LLM MCP env from environment variables when no config is present", async () => {

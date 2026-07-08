@@ -1,6 +1,6 @@
 # Exposing repo-expert Agents via MCP
 
-This repo includes a built-in MCP server (`src/mcp-server.ts`) that exposes 8 tightly-typed tools over stdio. No external packages needed beyond `tsx` (dev dependency).
+repo-expert ships a built-in MCP server that exposes 8 tightly-typed tools over stdio. Installed from npm it's the `repo-expert-mcp` executable (`dist/bin/mcp-server.mjs`); in a source checkout it runs as `npx tsx src/mcp-server.ts`.
 
 ## Why this wrapper exists
 
@@ -9,7 +9,9 @@ Hub-style MCP servers expose tools where a single `operation` string param multi
 ## Prerequisites
 
 - An OpenAI-compatible chat endpoint — local [Ollama](https://ollama.com) by default, or a remote endpoint (e.g. OpenRouter) with `LLM_API_KEY` set — serving the chat model, and (with the default `LLM_EMBEDDING_ENGINE=http`) the embedding model too (default `nomic-embed-text`). Set `LLM_EMBEDDING_ENGINE=transformersjs` to compute embeddings in-process instead — no embedding model needs to be served.
-- `tsx` installed (already a dev dependency of this repo)
+- repo-expert installed (`npm install -g repo-expert`), or a source checkout with dev dependencies (`tsx`) installed
+
+The easiest path is `repo-expert mcp-install` — it detects how repo-expert is installed and writes the right entry (see below). The manual examples show the npm-installed form; in a source checkout, replace the command with `"command": "npx", "args": ["tsx", "/path/to/agent-as-repo/src/mcp-server.ts"]`.
 
 ## Configure for Claude Code
 
@@ -19,8 +21,7 @@ Add to `~/.claude.json` under the top-level `mcpServers` key (global, all projec
 {
   "mcpServers": {
     "repo-expert": {
-      "command": "npx",
-      "args": ["tsx", "/path/to/agent-as-repo/src/mcp-server.ts"],
+      "command": "repo-expert-mcp",
       "timeout": 300,
       "env": {
         "LLM_MODEL": "qwen3-coder:30b",
@@ -34,7 +35,7 @@ Add to `~/.claude.json` under the top-level `mcpServers` key (global, all projec
 
 Or per-project in `.mcp.json` (same format inside `"mcpServers"`).
 
-`pnpm repo-expert mcp-install` generates this entry for you (reading `config.yaml` if present) — see below.
+`repo-expert mcp-install` generates this entry for you (reading `config.yaml` if present) — see below. It writes `"command": "node", "args": ["<install dir>/dist/bin/mcp-server.mjs"]` with an absolute path, which also works when the bin isn't on the MCP subprocess's `PATH`.
 
 ## Configure for Codex
 
@@ -42,8 +43,7 @@ Add to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.repo-expert]
-command = "npx"
-args = ["tsx", "/path/to/agent-as-repo/src/mcp-server.ts"]
+command = "repo-expert-mcp"
 tool_timeout_sec = 300
 
 [mcp_servers.repo-expert.env]
@@ -60,8 +60,7 @@ Add to `.cursor/mcp.json` in your project root:
 {
   "mcpServers": {
     "repo-expert": {
-      "command": "npx",
-      "args": ["tsx", "/path/to/agent-as-repo/src/mcp-server.ts"],
+      "command": "repo-expert-mcp",
       "env": {
         "LLM_MODEL": "qwen3-coder:30b",
         "LLM_BASE_URL": "http://localhost:11434/v1",
@@ -75,11 +74,13 @@ Add to `.cursor/mcp.json` in your project root:
 ## Generate the entry automatically
 
 ```bash
-pnpm repo-expert mcp-install  # writes/overwrites the "repo-expert" entry in ~/.claude.json
-pnpm repo-expert mcp-check    # validates the existing entry
+repo-expert mcp-install  # writes/overwrites the "repo-expert" entry in ~/.claude.json
+repo-expert mcp-check    # validates the existing entry
 ```
 
-Both commands read `config.yaml` (if present) for `model`, `base_url`, `embedding_engine`, and `embedding_model`, and pull `LLM_API_KEY` from the environment.
+(From a source checkout: `pnpm repo-expert mcp-install` / `pnpm repo-expert mcp-check`.)
+
+Both commands read `config.yaml` (if present) for `model`, `base_url`, `embedding_engine`, and `embedding_model`, and pull `LLM_API_KEY` from the environment. The launch command is picked automatically: a SEA binary at `dist/repo-expert-mcp` if one exists, the bundled `dist/bin/mcp-server.mjs` when repo-expert is installed from npm, or `npx tsx src/mcp-server.ts` in a source checkout.
 
 ## Environment variables
 
@@ -115,9 +116,9 @@ Call `agent_list` first to discover agent IDs, then pass an `agent_id` to the ot
 ## Verify
 
 ```bash
-# MCP handshake
+# MCP handshake (npm install: repo-expert-mcp; source checkout: npx tsx src/mcp-server.ts)
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0.1.0"}}}' \
-  | npx tsx src/mcp-server.ts
+  | repo-expert-mcp
 ```
 
 Should return `serverInfo: { name: "repo-expert-mcp" }` with 8 tools.
@@ -127,7 +128,7 @@ Should return `serverInfo: { name: "repo-expert-mcp" }` with 8 tools.
 ### Connection refused to the LLM endpoint
 
 - Confirm Ollama (or your configured endpoint) is running and reachable at `LLM_BASE_URL` (default `http://localhost:11434/v1`), and that `LLM_MODEL` has been pulled — plus `LLM_EMBEDDING_MODEL` too, if `LLM_EMBEDDING_ENGINE` is `http` (the default)
-- Run `pnpm repo-expert doctor` for a full connectivity + config check
+- Run `repo-expert doctor` for a full connectivity + config check
 
 ### "Authentication failed" or 401
 
@@ -136,13 +137,13 @@ Should return `serverInfo: { name: "repo-expert-mcp" }` with 8 tools.
 
 ### Server fails to start / "Failed to reconnect"
 
-- Use `npx tsx`, not bare `tsx`. Bare `tsx` may not be on `PATH` in the MCP subprocess environment
-- Verify the path to `src/mcp-server.ts` is absolute
-- Test manually: `npx tsx src/mcp-server.ts` — should hang waiting for stdin (that's correct)
+- npm install: if `"command": "repo-expert-mcp"` isn't found, the global npm bin dir isn't on the MCP subprocess's `PATH` — run `repo-expert mcp-install`, which writes `node` plus an absolute path instead
+- Source checkout: use `npx tsx`, not bare `tsx` (bare `tsx` may not be on `PATH`), and verify the path to `src/mcp-server.ts` is absolute
+- Test manually: `repo-expert-mcp` (or `npx tsx src/mcp-server.ts`) — should hang waiting for stdin (that's correct)
 
 ### Agents not found
 
-Run `pnpm repo-expert list` to confirm agents exist, or use the MCP handshake above.
+Run `repo-expert list` to confirm agents exist, or use the MCP handshake above.
 
 ### Timeouts
 

@@ -1,3 +1,5 @@
+import path from "node:path";
+
 export interface McpServerEntry {
   command: string;
   args?: string[];
@@ -18,6 +20,17 @@ export interface McpProviderConfig {
   llmApiKey?: string;
 }
 
+/**
+ * How the MCP server should be launched by the MCP client:
+ * - "sea-binary": self-contained single executable (dist/repo-expert-mcp)
+ * - "bundled": esbuild output shipped in the npm package (node dist/bin/mcp-server.mjs)
+ * - "dev": source checkout, run via npx tsx (tsx is a devDependency)
+ */
+export type McpLaunchSpec =
+  | { kind: "sea-binary"; binaryPath: string }
+  | { kind: "bundled"; serverScriptPath: string }
+  | { kind: "dev"; serverPath: string };
+
 const DEFAULT_LLM_MODEL = "qwen3-coder:30b";
 const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
 const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
@@ -29,11 +42,24 @@ function isNonEmpty(value: string | undefined): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-export function generateMcpEntry(
-  mcpServerPath: string,
-  provider: McpProviderConfig,
-  binaryPath?: string,
-): McpServerEntry {
+/**
+ * Decide how the MCP server should be launched, given the path of the
+ * running CLI entry script. A compiled entry (dist/bin/cli.mjs from the
+ * npm package) has a bundled mcp-server.mjs sibling; a .ts entry means a
+ * source checkout where the tsx devDependency is available.
+ */
+export function resolveMcpLaunchSpec(cliScriptPath: string, seaBinaryPath?: string): McpLaunchSpec {
+  if (seaBinaryPath !== undefined) {
+    return { kind: "sea-binary", binaryPath: seaBinaryPath };
+  }
+  const dir = path.dirname(cliScriptPath);
+  if (/\.(?:mjs|cjs|js)$/.test(cliScriptPath)) {
+    return { kind: "bundled", serverScriptPath: path.join(dir, "mcp-server.mjs") };
+  }
+  return { kind: "dev", serverPath: path.join(dir, "mcp-server.ts") };
+}
+
+export function generateMcpEntry(launch: McpLaunchSpec, provider: McpProviderConfig): McpServerEntry {
   const env: Record<string, string> = {
     LLM_MODEL: provider.model ?? DEFAULT_LLM_MODEL,
     LLM_BASE_URL: provider.baseUrl ?? DEFAULT_LLM_BASE_URL,
@@ -42,20 +68,17 @@ export function generateMcpEntry(
   };
   if (isNonEmpty(provider.llmApiKey)) env["LLM_API_KEY"] = provider.llmApiKey;
 
-  if (binaryPath) {
-    return {
-      command: binaryPath,
-      args: [],
-      timeout: 300,
-      env,
-    };
+  switch (launch.kind) {
+    case "sea-binary": {
+      return { command: launch.binaryPath, args: [], timeout: 300, env };
+    }
+    case "bundled": {
+      return { command: "node", args: [launch.serverScriptPath], timeout: 300, env };
+    }
+    case "dev": {
+      return { command: "npx", args: ["tsx", launch.serverPath], timeout: 300, env };
+    }
   }
-  return {
-    command: "npx",
-    args: ["tsx", mcpServerPath],
-    timeout: 300,
-    env,
-  };
 }
 
 export interface McpCheckResult {
@@ -63,32 +86,40 @@ export interface McpCheckResult {
   issues: string[];
 }
 
-function checkCommandAndArgs(
-  entry: McpServerEntry,
-  mcpServerPath: string,
-  binaryPath: string | undefined,
-  issues: string[],
-): void {
-  if (binaryPath !== undefined) {
-    if (entry.command !== binaryPath) {
-      issues.push(`Command should be "${binaryPath}", got "${entry.command}".`);
-    }
-    return;
-  }
-
-  if (entry.command !== "npx") {
-    issues.push(`Command should be "npx", got "${entry.command}".`);
-  }
-
+function checkCommandAndArgs(entry: McpServerEntry, launch: McpLaunchSpec, issues: string[]): void {
   const args = entry.args ?? [];
-  if (args[0] !== "tsx") {
-    const got = args[0] ?? "(missing)";
-    issues.push(`First arg should be "tsx", got "${got}". Use "npx tsx" to avoid PATH issues.`);
-  }
 
-  const configuredPath = args[1] ?? "";
-  if (configuredPath !== mcpServerPath) {
-    issues.push(`Server path mismatch: config has "${configuredPath}", expected "${mcpServerPath}".`);
+  switch (launch.kind) {
+    case "sea-binary": {
+      if (entry.command !== launch.binaryPath) {
+        issues.push(`Command should be "${launch.binaryPath}", got "${entry.command}".`);
+      }
+      return;
+    }
+    case "bundled": {
+      if (entry.command !== "node") {
+        issues.push(`Command should be "node", got "${entry.command}".`);
+      }
+      const configuredPath = args[0] ?? "";
+      if (configuredPath !== launch.serverScriptPath) {
+        issues.push(`Server path mismatch: config has "${configuredPath}", expected "${launch.serverScriptPath}".`);
+      }
+      return;
+    }
+    case "dev": {
+      if (entry.command !== "npx") {
+        issues.push(`Command should be "npx", got "${entry.command}".`);
+      }
+      if (args[0] !== "tsx") {
+        const got = args[0] ?? "(missing)";
+        issues.push(`First arg should be "tsx", got "${got}". Use "npx tsx" to avoid PATH issues.`);
+      }
+      const configuredPath = args[1] ?? "";
+      if (configuredPath !== launch.serverPath) {
+        issues.push(`Server path mismatch: config has "${configuredPath}", expected "${launch.serverPath}".`);
+      }
+      return;
+    }
   }
 }
 
@@ -128,9 +159,8 @@ function checkEnv(
 
 export function checkMcpEntry(
   entry: McpServerEntry | undefined,
-  mcpServerPath: string,
+  launch: McpLaunchSpec,
   provider: McpProviderConfig,
-  binaryPath?: string,
 ): McpCheckResult {
   const issues: string[] = [];
 
@@ -139,7 +169,7 @@ export function checkMcpEntry(
     return { ok: false, issues };
   }
 
-  checkCommandAndArgs(entry, mcpServerPath, binaryPath, issues);
+  checkCommandAndArgs(entry, launch, issues);
   checkEnv(entry.env, provider, issues);
 
   const timeout = entry.timeout ?? 0;

@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import { z } from "zod/v4";
 import type { AgentProvider, SendMessageOptions } from "./ports/agent-provider.js";
 import type { AdminPort } from "./ports/admin.js";
@@ -13,14 +11,14 @@ import { SqliteBlockStorage } from "./shell/sqlite-block-storage.js";
 import { resolveStoreDbPath } from "./shell/repo-expert-paths.js";
 import { createEmbedder, parseEmbeddingEngine } from "./shell/embedder-factory.js";
 import { withTimeoutSignal } from "./shell/with-timeout.js";
+import { readPackageVersion } from "./shell/package-version.js";
+import { isMainModule } from "./shell/is-main-module.js";
 import { MEMORY_BLOCK_LIMIT } from "./core/types.js";
 
 const ASK_DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_LLM_MODEL = "qwen3-coder:30b";
 const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
 const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
-const FALLBACK_VERSION = "0.0.0";
-const PACKAGE_JSON_REQUIRE_PATHS = ["../package.json", "../../package.json"] as const;
 
 export interface Runtime {
   provider: AgentProvider;
@@ -97,31 +95,6 @@ export function buildRuntime(): Runtime {
     ...getRuntimeOptionsFromEnv(),
   });
   return { provider, admin: new AdminAdapter(provider, store) };
-}
-
-/**
- * Read the running package's version for the MCP server handshake. Reads
- * from `package.json` relative to this module rather than hardcoding a
- * string that inevitably drifts. Runs from both `src/` (tsx) and the
- * esbuild-bundled `dist/bin/mcp-server.mjs`; from the SEA build,
- * `import.meta.url` is a synthetic path and this read is expected to fail
- * — hence the fallback.
- */
-export function readPackageVersion(): string {
-  const requireFromHere = createRequire(import.meta.url);
-  return readPackageVersionFromRequire(requireFromHere);
-}
-
-export function readPackageVersionFromRequire(requireFromHere: (id: string) => unknown): string {
-  for (const packageJsonPath of PACKAGE_JSON_REQUIRE_PATHS) {
-    try {
-      const pkg = requireFromHere(packageJsonPath) as { version?: unknown };
-      if (typeof pkg.version === "string" && pkg.version.length > 0) return pkg.version;
-    } catch {
-      // Try the next layout before falling back for SEA and other synthetic paths.
-    }
-  }
-  return FALLBACK_VERSION;
 }
 
 /** Look up an agent by ID against the admin registry (agent_list's source of truth). */
@@ -301,7 +274,7 @@ export async function main(): Promise<void> {
 }
 
 // Stryker disable BlockStatement,ConditionalExpression,EqualityOperator,StringLiteral -- entry-point guard is untestable in unit tests
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   main().catch((error: unknown) => {
     process.stderr.write(`repo-expert MCP server error: ${errorMessage(error)}\n`);
     process.exitCode = 1;
