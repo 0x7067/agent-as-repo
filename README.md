@@ -7,38 +7,46 @@ Single path: an embedded sqlite-vec store for passages and semantic search + any
 ## Prerequisites
 
 - [Ollama](https://ollama.com) running locally with a chat model pulled (default config expects `qwen3-coder:30b`). An embedding model pull (default `nomic-embed-text`, e.g. `ollama pull nomic-embed-text`) is only needed with the default `provider.embedding_engine: http` — set it to `transformersjs` to skip this and compute embeddings in-process instead.
-- Node.js 22 (see `.nvmrc`; better-sqlite3's native addon is ABI-locked to this major) and pnpm
+- Node.js 22 (see `.nvmrc`; better-sqlite3's native addon is ABI-locked to this major). Prebuilt native binaries cover the common macOS/Linux/Windows platforms; on anything else `npm install` compiles them, which needs a C/C++ toolchain.
 
 ## Quickstart
 
-1. **Install dependencies**
-   ```bash
-   pnpm install
-   ```
+Install globally from npm:
 
-2. **Generate `config.yaml`**
-   ```bash
-   pnpm repo-expert init
-   ```
-   Prompts for a chat model and LLM base URL (both default to local Ollama), then scans a repo and writes `config.yaml`.
+```bash
+npm install -g repo-expert
+```
 
-3. **Create agents and index your repo**
-   ```bash
-   pnpm repo-expert setup
-   ```
+Then, from any directory:
 
-4. **Ask questions**
-   ```bash
-   pnpm repo-expert ask my-app "Where is authentication handled?"
-   ```
+```bash
+repo-expert init    # pick model + LLM endpoint, scan a repo, generate config.yaml
+repo-expert setup   # create agents and index the repo
+repo-expert ask my-app "Where is authentication handled?"
+```
+
+`init` prompts for a chat model and LLM base URL (both default to local Ollama), then scans a repo and writes `config.yaml` to the current directory — run all commands from that same directory (it's the project workspace).
+
+### From a source checkout
+
+Working on repo-expert itself, or prefer running from source? Clone the repo, then use `pnpm` (never npm or yarn):
+
+```bash
+pnpm install
+pnpm repo-expert init
+pnpm repo-expert setup
+pnpm repo-expert ask my-app "Where is authentication handled?"
+```
 
 ## MCP Server
 
 Expose agents to Claude Code, Cursor, or Codex via MCP (8 typed tools: `agent_list`, `agent_get`, `agent_call`, `agent_get_core_memory`, `agent_search_archival`, `agent_insert_passage`, `agent_delete_passage`, `agent_update_block`). See [docs/mcp-setup.md](docs/mcp-setup.md) for configuration.
 
 ```bash
-pnpm repo-expert mcp-install  # writes the "repo-expert" entry to ~/.claude.json
+repo-expert mcp-install  # writes the "repo-expert" entry to ~/.claude.json
 ```
+
+The generated entry launches the `repo-expert-mcp` server shipped with the package (or `npx tsx src/mcp-server.ts` when run from a source checkout).
 
 ## Command Reference
 

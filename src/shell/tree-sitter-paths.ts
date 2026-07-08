@@ -166,15 +166,62 @@ function wasmManifestsMatch(cached: WasmManifest | undefined, current: WasmManif
   return currentKeys.every((key) => cached[key] === current[key]);
 }
 
-/** Node_modules/vendor-based resolution: plain `pnpm build` dist output and dev (`tsx`) execution. */
-function resolveFromNodeModules(packageRoot: string): TreeSitterWasmPaths {
+/** Resolver signature compatible with `require.resolve` (injectable for tests). */
+export type RequireResolveFn = (spec: string) => string;
+
+function defaultRequireResolve(): RequireResolveFn {
+  const requireFromHere = createRequire(import.meta.url);
+  return (spec) => requireFromHere.resolve(spec);
+}
+
+/**
+ * Locate `<pkg>/<file>` through Node module resolution. Tries the subpath
+ * directly first (works for packages whose exports map lists the wasm, like
+ * web-tree-sitter), then falls back to resolving the package's package.json
+ * and joining the file next to it (grammar packages without exports maps).
+ */
+function resolveViaRequire(requireResolve: RequireResolveFn, pkg: string, file: string): string | undefined {
+  try {
+    return requireResolve(`${pkg}/${file}`);
+  } catch {
+    // Subpath not exported (or package not found) — try the package root next.
+  }
+  try {
+    return path.join(path.dirname(requireResolve(`${pkg}/package.json`)), file);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Node_modules/vendor-based resolution: dev (`tsx`) execution, plain `pnpm build`
+ * dist output, and the npm-installed package. Dependency packages resolve via
+ * Node module resolution because npm hoists them *above* the installed package
+ * (node_modules/tree-sitter-python next to node_modules/repo-expert, not inside
+ * it), where a fixed `<packageRoot>/node_modules` join can't find them. The
+ * join remains as a fallback. Vendored wasm always ships inside this package,
+ * so it resolves from the package root directly.
+ */
+function resolveFromNodeModules(packageRoot: string, requireResolve: RequireResolveFn): TreeSitterWasmPaths {
+  const resolveSource = (source: GrammarSource): string => {
+    if (source.kind === "vendored") {
+      return path.join(packageRoot, grammarSourceRelativePath(source));
+    }
+    return (
+      resolveViaRequire(requireResolve, source.pkg, source.file) ??
+      path.join(packageRoot, grammarSourceRelativePath(source))
+    );
+  };
+
   const entries = Object.entries(GRAMMAR_PACKAGE_INFO) as [GrammarLabel, GrammarSource][];
   const grammarWasmByLabel = Object.fromEntries(
-    entries.map(([label, source]) => [label, path.join(packageRoot, grammarSourceRelativePath(source))]),
+    entries.map(([label, source]) => [label, resolveSource(source)]),
   ) as Record<GrammarLabel, string>;
 
   return {
-    webTreeSitterWasm: path.join(packageRoot, WEB_TREE_SITTER_RELATIVE_PATH),
+    webTreeSitterWasm:
+      resolveViaRequire(requireResolve, "web-tree-sitter", "web-tree-sitter.wasm") ??
+      path.join(packageRoot, WEB_TREE_SITTER_RELATIVE_PATH),
     grammarWasmByLabel,
   };
 }
@@ -285,12 +332,14 @@ function resolveFromSea(sea: SeaApi, cacheDir: string): TreeSitterWasmPaths {
 }
 
 export interface ResolveTreeSitterWasmPathsOptions {
-  /** node_modules resolution root; only consulted outside SEA. */
+  /** Fallback node_modules root and vendored-wasm root; only consulted outside SEA. */
   packageRoot?: string;
   /** Injectable for tests; defaults to real `node:sea` detection. */
   sea?: SeaApi;
   /** Where SEA blob assets are materialized to disk; defaults to `~/.repo-expert/wasm`. */
   cacheDir?: string;
+  /** Injectable for tests; defaults to `require.resolve` from this module. */
+  requireResolve?: RequireResolveFn;
 }
 
 export function resolveTreeSitterWasmPaths(options: ResolveTreeSitterWasmPathsOptions = {}): TreeSitterWasmPaths {
@@ -298,5 +347,5 @@ export function resolveTreeSitterWasmPaths(options: ResolveTreeSitterWasmPathsOp
   if (sea) {
     return resolveFromSea(sea, options.cacheDir ?? defaultSeaWasmCacheDir());
   }
-  return resolveFromNodeModules(options.packageRoot ?? resolvePackageRoot());
+  return resolveFromNodeModules(options.packageRoot ?? resolvePackageRoot(), options.requireResolve ?? defaultRequireResolve());
 }

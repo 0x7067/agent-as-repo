@@ -43,9 +43,11 @@ import { installInstructions } from "./shell/agent-instructions.js";
 import { BROADCAST_ASK_DEFAULT_TIMEOUT_MS, broadcastAsk } from "./shell/group-provider.js";
 import { watchRepos } from "./shell/watch.js";
 import { withTimeoutSignal } from "./shell/with-timeout.js";
+import { readPackageVersion } from "./shell/package-version.js";
+import { isMainModule } from "./shell/is-main-module.js";
 import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
-import { generateMcpEntry, checkMcpEntry, type McpProviderConfig } from "./core/mcp-config.js";
+import { generateMcpEntry, checkMcpEntry, resolveMcpLaunchSpec, type McpLaunchSpec, type McpProviderConfig } from "./core/mcp-config.js";
 import { buildPostSetupNextSteps, getSetupMode } from "./core/setup.js";
 import { MAX_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Config, type RepoConfig } from "./core/types.js";
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
@@ -863,7 +865,7 @@ function startSpinner(label: string): () => void {
 // --- Program ---
 
 const program = new Command();
-program.name("repo-expert").description("Persistent AI agents for git repositories").version("0.1.0");
+program.name("repo-expert").description("Persistent AI agents for git repositories").version(readPackageVersion());
 program.option("--no-input", "Disable interactive prompts").option("--debug", "Show stack traces for unexpected errors");
 program.addHelpText(
   "after",
@@ -1885,6 +1887,17 @@ interface CompletionOpts {
 
 const MCP_ENTRY_NAME = "repo-expert";
 
+/**
+ * Decide how the MCP server should be launched: a SEA binary next to the
+ * CLI if one exists, the bundled dist/bin/mcp-server.mjs when running the
+ * npm-installed package, or npx tsx against the source checkout in dev.
+ */
+async function resolveMcpLaunch(): Promise<McpLaunchSpec> {
+  const seaBinary = path.resolve(process.cwd(), "dist", "repo-expert-mcp");
+  const binaryPath = (await pathExists(seaBinary)) ? seaBinary : undefined;
+  return resolveMcpLaunchSpec(fileURLToPath(import.meta.url), binaryPath);
+}
+
 function printInstallInstructionsOutcome(prefix: string, repoName: string, outcome: { path: string; action: string; warning?: string }): void {
   if (outcome.action === "unchanged") {
     console.log(`${prefix}${repoName}: ${outcome.path} already up to date`);
@@ -1960,7 +1973,6 @@ program
     const fs = await import("node:fs/promises");
     const os = await import("node:os");
     const home = os.default.homedir();
-    const mcpServerPath = path.resolve("src/mcp-server.ts");
     const configFile = opts.local ? path.resolve(".claude.json") : path.join(home, ".claude.json");
 
     let config: Record<string, unknown> = {};
@@ -1981,12 +1993,11 @@ program
       console.log(`Existing '${MCP_ENTRY_NAME}' entry found — overwriting.`);
     }
 
-    const seaBinary = path.resolve(process.cwd(), "dist", "repo-expert-mcp");
-    const binaryPath = (await pathExists(seaBinary)) ? seaBinary : undefined;
-    if (binaryPath) console.log(`Using SEA binary: ${binaryPath}`);
+    const launch = await resolveMcpLaunch();
+    if (launch.kind === "sea-binary") console.log(`Using SEA binary: ${launch.binaryPath}`);
     const repoConfig = await loadOptionalConfig(path.resolve(opts.config));
     const { providerConfig, warnings } = resolveMcpProviderConfig(repoConfig);
-    const entry = generateMcpEntry(mcpServerPath, providerConfig, binaryPath);
+    const entry = generateMcpEntry(launch, providerConfig);
     mcpServers[MCP_ENTRY_NAME] = entry;
     config["mcpServers"] = mcpServers;
 
@@ -2011,7 +2022,6 @@ program
     const fs = await import("node:fs/promises");
     const os = await import("node:os");
     const home = os.default.homedir();
-    const mcpServerPath = path.resolve("src/mcp-server.ts");
     const configFile = path.join(home, ".claude.json");
 
     const rawConfig = await fs.readFile(configFile, "utf8").catch((error: unknown) => {
@@ -2034,11 +2044,10 @@ program
 
     const mcpServers = (config["mcpServers"] ?? {}) as Record<string, unknown>;
     const entry = mcpServers[MCP_ENTRY_NAME] as Parameters<typeof checkMcpEntry>[0];
-    const seaBinary = path.resolve(process.cwd(), "dist", "repo-expert-mcp");
-    const binaryPath = (await pathExists(seaBinary)) ? seaBinary : undefined;
+    const launch = await resolveMcpLaunch();
     const repoConfig = await loadOptionalConfig(path.resolve(opts.config));
     const { providerConfig, warnings } = resolveMcpProviderConfig(repoConfig);
-    const result = checkMcpEntry(entry, mcpServerPath, providerConfig, binaryPath);
+    const result = checkMcpEntry(entry, launch, providerConfig);
 
     if (opts.json) {
       const payload = warnings.length > 0 ? { ...result, warnings } : result;
@@ -2099,7 +2108,7 @@ export async function main(argv = process.argv): Promise<void> {
   await program.parseAsync(argv);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   // eslint-disable-next-line unicorn/prefer-top-level-await
   void main().catch((error: unknown) => {
     if (error instanceof CliUserError || error instanceof StateFileError) {
