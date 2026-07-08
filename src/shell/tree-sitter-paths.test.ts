@@ -82,11 +82,15 @@ describe("listWasmAssets", () => {
   });
 });
 
+function failingRequireResolve(spec: string): string {
+  throw new Error(`cannot resolve ${spec}`);
+}
+
 describe("resolveTreeSitterWasmPaths (non-SEA)", () => {
-  it("resolves every grammar and the runtime wasm under node_modules of the given package root", () => {
+  it("falls back to node_modules under the given package root when require resolution fails", () => {
     const packageRoot = "/repo-root";
 
-    const result = resolveTreeSitterWasmPaths({ packageRoot, sea: undefined });
+    const result = resolveTreeSitterWasmPaths({ packageRoot, sea: undefined, requireResolve: failingRequireResolve });
 
     expect(result.webTreeSitterWasm).toBe(path.join(packageRoot, "node_modules/web-tree-sitter/web-tree-sitter.wasm"));
     expect(result.grammarWasmByLabel.python).toBe(path.join(packageRoot, "node_modules/tree-sitter-python/tree-sitter-python.wasm"));
@@ -100,12 +104,38 @@ describe("resolveTreeSitterWasmPaths (non-SEA)", () => {
     expect(Object.keys(result.grammarWasmByLabel)).toHaveLength(14);
   });
 
-  it("defaults the package root to the real resolvePackageRoot() when omitted", () => {
+  it("prefers Node module resolution over the packageRoot layout (npm hoists deps above the installed package)", () => {
+    // For an npm install, dependencies land in the *parent* node_modules
+    // (node_modules/tree-sitter-python, not
+    // node_modules/repo-expert/node_modules/tree-sitter-python), so a fixed
+    // <packageRoot>/node_modules join can't find them.
+    const hoistedRoot = "/hoisted/node_modules";
+    const requireResolve = (spec: string): string => {
+      if (spec === "web-tree-sitter/web-tree-sitter.wasm") return path.join(hoistedRoot, "web-tree-sitter", "web-tree-sitter.wasm");
+      const match = /^(?<pkg>.+)\/package\.json$/.exec(spec);
+      if (match?.groups) return path.join(hoistedRoot, match.groups["pkg"], "package.json");
+      throw new Error(`unexpected spec ${spec}`);
+    };
+
+    const result = resolveTreeSitterWasmPaths({ packageRoot: "/repo-root", sea: undefined, requireResolve });
+
+    expect(result.webTreeSitterWasm).toBe(path.join(hoistedRoot, "web-tree-sitter/web-tree-sitter.wasm"));
+    expect(result.grammarWasmByLabel.python).toBe(path.join(hoistedRoot, "tree-sitter-python/tree-sitter-python.wasm"));
+    expect(result.grammarWasmByLabel.csharp).toBe(path.join(hoistedRoot, "tree-sitter-c-sharp/tree-sitter-c_sharp.wasm"));
+    // Vendored grammars ship inside the repo-expert package itself, so they
+    // always resolve from the package root regardless of hoisting.
+    expect(result.grammarWasmByLabel.kotlin).toBe(path.join("/repo-root", "vendor/wasm/tree-sitter-kotlin.wasm"));
+  });
+
+  it("resolves real wasm files from the dev checkout with the default require resolution", () => {
     const result = resolveTreeSitterWasmPaths({ sea: undefined });
 
-    expect(result.webTreeSitterWasm).toBe(
-      path.join(resolvePackageRoot(), "node_modules/web-tree-sitter/web-tree-sitter.wasm"),
-    );
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- path comes from module resolution against the real dev checkout
+    expect(existsSync(result.webTreeSitterWasm)).toBe(true);
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- path comes from module resolution against the real dev checkout
+    expect(existsSync(result.grammarWasmByLabel.python)).toBe(true);
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- path comes from module resolution against the real dev checkout
+    expect(existsSync(result.grammarWasmByLabel.kotlin)).toBe(true);
   });
 });
 

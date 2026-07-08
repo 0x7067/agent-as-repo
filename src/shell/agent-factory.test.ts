@@ -60,6 +60,32 @@ describe("createRepoAgent", () => {
 });
 
 describe("loadPassages", () => {
+  it("keeps the provider's `this` binding when calling storePassages (regression: LocalProvider crashed on this.store)", async () => {
+    // LocalProvider.storePassages is a class method that reads this.store —
+    // extracting it as a bare function loses `this` and crashes at runtime.
+    // A mock arrow function can't catch that, so use a prototype method.
+    class ThisReliantProvider {
+      stored: string[] = [];
+      storePassages(_agentId: string, texts: string[]): Promise<string[]> {
+        return Promise.resolve(
+          texts.map((text) => {
+            this.stored.push(text);
+            return `id-${String(this.stored.length)}`;
+          }),
+        );
+      }
+    }
+    const inner = new ThisReliantProvider();
+    const provider = Object.assign(inner, makeBase()) as unknown as AgentProvider & ThisReliantProvider;
+
+    const chunks = [{ text: CHUNK_A, sourcePath: FILE_A }];
+    const result = await loadPassages(provider, "agent-abc", chunks);
+
+    expect(result.failedChunks).toBe(0);
+    expect(result.passages[FILE_A]).toEqual(["id-1"]);
+    expect(provider.stored).toEqual([CHUNK_A]);
+  });
+
   it("inserts chunks as passages and returns passage map", async () => {
     const provider = makeMockProvider();
     const chunks = [
@@ -136,6 +162,7 @@ describe("loadPassages", () => {
 
       const result = await loadPassages(provider, "agent-abc", chunks);
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- vi.fn() mock passed to expect, never invoked
       expect(provider.storePassages).toHaveBeenCalledTimes(1);
       expect(provider.storePassage).not.toHaveBeenCalled();
       expect(result.passages[FILE_A]).toHaveLength(2);
@@ -158,6 +185,7 @@ describe("loadPassages", () => {
 
       const result = await loadPassages(provider, "agent-abc", chunks);
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- vi.fn() mock inspected via its mock property, never invoked unbound
       const storePassagesMock = provider.storePassages as ReturnType<typeof vi.fn>;
       expect(storePassagesMock).toHaveBeenCalledTimes(3);
       expect((storePassagesMock.mock.calls[0] as [string, string[]])[1]).toHaveLength(32);

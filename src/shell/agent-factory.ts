@@ -56,7 +56,7 @@ export async function loadPassages(
   concurrency = 20,
   onProgress?: (loaded: number, total: number) => void,
 ): Promise<LoadPassagesResult> {
-  const storePassages = provider.storePassages;
+  const storePassages = provider.storePassages?.bind(provider);
   if (storePassages) {
     return loadPassagesInBatches(storePassages, agentId, chunks, concurrency, onProgress);
   }

@@ -43,8 +43,12 @@ export interface AgentProvider {
    * round trips than one `storePassage` per text) and returns passage IDs in
    * input order. Optional — callers must fall back to per-text
    * `storePassage` when an implementation doesn't provide this.
+   *
+   * Deliberately NOT `this: void`: class implementations (LocalProvider)
+   * read instance state, so callers that extract this method must
+   * `.bind(provider)` first — the type makes an unbound extraction an error.
    */
-  storePassages?(this: void, agentId: string, texts: string[]): Promise<string[]>;
+  storePassages?(agentId: string, texts: string[]): Promise<string[]>;
   deletePassage(this: void, agentId: string, passageId: string): Promise<void>;
   listPassages(this: void, agentId: string): Promise<Passage[]>;
   getBlock(this: void, agentId: string, label: string): Promise<MemoryBlock>;

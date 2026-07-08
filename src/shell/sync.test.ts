@@ -376,6 +376,7 @@ describe("syncRepo", () => {
         headCommit: "def456",
       });
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- vi.fn() mock passed to expect, never invoked
       expect(provider.storePassages).toHaveBeenCalledTimes(1);
       expect(provider.storePassage).not.toHaveBeenCalled();
       expect(result.passages["src/a.ts"]).toBeDefined();
