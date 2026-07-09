@@ -157,3 +157,20 @@
 - Verified: `check-state.sh` OK and `git diff --check` clean.
 - Learned: nothing new.
 - Left: re-fetch PR #17 review/CI state before further changes.
+
+## 2026-07-09 — Addressed repo-map branch adversarial review findings
+- Did: fixed git-versioned markdown memory provenance by resolving
+  `source_commit` per agent at write time; made tsconfig/jsconfig path alias
+  loading basePath-aware by preferring package-local configs and rebasing
+  root aliases to agent-relative paths; removed three extra EOF blank lines
+  reported by `git diff --check`.
+- Verified: `pnpm run typecheck` clean; focused vitest command for markdown
+  storage, tsconfig loader, and whitespace-touched symbol tests passed 42
+  tests; `pnpm run lint` clean; `pnpm test -- --runInBand` passed 1157 tests
+  across 108 files; `git diff --check` clean.
+- Learned: `loadPathAliasesFromRepo` must see `RepoConfig.basePath` because
+  symbol files are stored relative to the agent root, not necessarily the git
+  repo root. Git-versioned memory cannot safely stamp a provider-global commit
+  when one provider spans multiple repos or a long-running watch process.
+- Left: source tree intentionally dirty with the review-fix edits for Pedro
+  to inspect and commit.

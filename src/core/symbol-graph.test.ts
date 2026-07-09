@@ -249,4 +249,3 @@ describe("resolveRelativeModule Go", () => {
     expect(resolveRelativeModule("pkg/bar.go", "./foo", known)).toBe("pkg/foo.go");
   });
 });
-

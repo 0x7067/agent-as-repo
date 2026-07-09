@@ -19,6 +19,8 @@ export interface GitMarkdownBlockStorageOptions {
   memoryDir: string;
   /** Optional commit SHA stamped into frontmatter on write. */
   sourceCommit?: string;
+  /** Optional per-agent commit resolver, evaluated at write time. */
+  sourceCommitForAgent?: (agentId: string) => string | undefined;
 }
 
 /**
@@ -27,11 +29,13 @@ export interface GitMarkdownBlockStorageOptions {
  */
 export class GitMarkdownBlockStorage implements BlockStorage {
   private readonly memoryDir: string;
+  private readonly sourceCommitForAgent: ((agentId: string) => string | undefined) | undefined;
   private sourceCommit: string | undefined;
 
   constructor(options: GitMarkdownBlockStorageOptions) {
     this.memoryDir = path.resolve(options.memoryDir);
     this.sourceCommit = options.sourceCommit;
+    this.sourceCommitForAgent = options.sourceCommitForAgent;
   }
 
   /** Update provenance stamped on subsequent writes (e.g. after sync). */
@@ -62,11 +66,12 @@ export class GitMarkdownBlockStorage implements BlockStorage {
   set(agentId: string, label: string, value: string): void {
     const dir = this.agentDir(agentId);
     mkdirSync(dir, { recursive: true });
+    const sourceCommit = this.sourceCommitForAgent?.(agentId) ?? this.sourceCommit;
     const doc = {
       label,
       value,
       updatedAt: new Date().toISOString(),
-      ...(this.sourceCommit === undefined ? {} : { sourceCommit: this.sourceCommit }),
+      ...(sourceCommit === undefined ? {} : { sourceCommit }),
     };
     writeFileSync(this.blockPath(agentId, label), formatMemoryBlockMarkdown(doc), "utf8");
   }

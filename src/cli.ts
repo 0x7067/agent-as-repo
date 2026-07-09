@@ -194,21 +194,24 @@ class CliUserError extends Error {
   }
 }
 
-function resolveMemorySourceCommit(config: Config): string | undefined {
-  for (const repo of Object.values(config.repos)) {
-    return nodeGit.headCommit(repo.path) ?? undefined;
-  }
-  return undefined;
+function resolveMemorySourceCommitForAgent(config: Config, agentId: string): string | undefined {
+  const repo = getOwnRecordValue(config.repos, agentId);
+  if (repo !== undefined) return nodeGit.headCommit(repo.path) ?? undefined;
+
+  const repos = Object.values(config.repos);
+  if (repos.length !== 1) return undefined;
+  const onlyRepo = repos.at(0);
+  if (onlyRepo === undefined) return undefined;
+  return nodeGit.headCommit(onlyRepo.path) ?? undefined;
 }
 
 function createBlockStorage(config: Config, dbPath: string): BlockStorage {
   if (config.memory?.gitVersioned === true) {
     // loadConfig already resolves memory.dir against the config file directory.
     const memoryDir = config.memory.dir;
-    const sourceCommit = resolveMemorySourceCommit(config);
     return new GitMarkdownBlockStorage({
       memoryDir,
-      ...(sourceCommit === undefined ? {} : { sourceCommit }),
+      sourceCommitForAgent: (agentId) => resolveMemorySourceCommitForAgent(config, agentId),
     });
   }
   return new SqliteBlockStorage(dbPath);
@@ -1159,7 +1162,9 @@ program
             files.map((file) => [file.path, hashFileContent(file.content)]),
           );
           const symbolFiles = buildSymbolFilesFromCollected(files);
-          const pathAliases = loadPathAliasesFromRepo(repoConfig.path);
+          const pathAliases = loadPathAliasesFromRepo(repoConfig.path, {
+            ...(repoConfig.basePath === undefined ? {} : { basePath: repoConfig.basePath }),
+          });
           const symbolRanks = computeSymbolRanks(symbolFiles, pathAliases);
           state = updatePassageMap(state, repoName, loadResult.passages);
           state = updateAgentField(state, repoName, { fileHashes, symbolFiles, symbolRanks });
@@ -1410,7 +1415,9 @@ program
         throw new Error(`"${repoName}": provider unavailable for non-dry-run sync`);
       }
       const isTTY = !opts.json && process.stderr.isTTY;
-      const pathAliases = loadPathAliasesFromRepo(repoConfig.path);
+      const pathAliases = loadPathAliasesFromRepo(repoConfig.path, {
+        ...(repoConfig.basePath === undefined ? {} : { basePath: repoConfig.basePath }),
+      });
       const syncParams = {
         provider,
         agent: agentInfo,

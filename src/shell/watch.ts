@@ -333,7 +333,9 @@ export async function watchRepos(params: WatchParams): Promise<void> {
           ),
         headCommit: currentHead,
         ...(() => {
-          const pathAliases = loadPathAliasesFromRepo(repoConfig.path);
+          const pathAliases = loadPathAliasesFromRepo(repoConfig.path, {
+            ...(repoConfig.basePath === undefined ? {} : { basePath: repoConfig.basePath }),
+          });
           return pathAliases === undefined ? {} : { pathAliases };
         })(),
       });

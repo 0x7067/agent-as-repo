@@ -72,6 +72,31 @@ describe("GitMarkdownBlockStorage", () => {
     expect(file).toContain("source_commit: newsha");
     expect(file).not.toContain("source_commit: old");
   });
+
+  it("resolves sourceCommit per agent at write time", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "git-mem-"));
+    tempDirs.push(dir);
+    const commits: Record<string, string> = {
+      api: "api-1",
+      web: "web-1",
+    };
+    const store = new GitMarkdownBlockStorage({
+      memoryDir: dir,
+      sourceCommitForAgent: (agentId) => commits[agentId],
+    });
+
+    store.set("api", "architecture", "API arch.");
+    store.set("web", "architecture", "Web arch.");
+    commits.api = "api-2";
+    store.set("api", "architecture", "API arch updated.");
+
+    expect(fs.readFileSync(path.join(dir, "api", "architecture.md"), "utf8")).toContain(
+      "source_commit: api-2",
+    );
+    expect(fs.readFileSync(path.join(dir, "web", "architecture.md"), "utf8")).toContain(
+      "source_commit: web-1",
+    );
+  });
 });
 
 /* eslint-enable security/detect-non-literal-fs-filename */

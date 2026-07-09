@@ -57,4 +57,3 @@ describe("extractSymbolRefsPython", () => {
     expect(filterRefsByKind(refs, "call").map((c) => c.calleeName)).toContain("getcwd");
   });
 });
-

@@ -311,4 +311,3 @@ describe("extractSymbolRefsFromFile", () => {
     expect(filterRefsByKind(refs, "call")[0]?.calleeName).toBe("foo");
   });
 });
-

@@ -54,6 +54,60 @@ describe("loadPathAliasesFromRepo", () => {
     expect(loadPathAliasesFromRepo(dir, { onWarn })).toBeUndefined();
     expect(onWarn).not.toHaveBeenCalled();
   });
+
+  it("prefers package-local tsconfig for basePath repos", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tsconfig-base-local-"));
+    tempDirs.push(dir);
+    fs.mkdirSync(path.join(dir, "packages", "web"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: ".",
+          paths: { "@root/*": ["src/*"] },
+        },
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(dir, "packages", "web", "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: ".",
+          paths: { "@app/*": ["src/app/*"] },
+        },
+      }),
+      "utf8",
+    );
+
+    expect(loadPathAliasesFromRepo(dir, { basePath: "packages/web" })).toEqual({
+      baseUrl: ".",
+      paths: [{ pattern: "@app/*", targets: ["src/app/*"] }],
+    });
+  });
+
+  it("rebases root tsconfig aliases to basePath-relative files", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tsconfig-base-root-"));
+    tempDirs.push(dir);
+    fs.writeFileSync(
+      path.join(dir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: ".",
+          paths: {
+            "@web/*": ["packages/web/src/*"],
+            "@api/*": ["packages/api/src/*"],
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    expect(loadPathAliasesFromRepo(dir, { basePath: "packages/web" })).toEqual({
+      baseUrl: ".",
+      paths: [{ pattern: "@web/*", targets: ["src/*"] }],
+    });
+  });
 });
 
 /* eslint-enable security/detect-non-literal-fs-filename */
