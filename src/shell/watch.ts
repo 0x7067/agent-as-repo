@@ -5,9 +5,11 @@ import { collectFiles } from "./file-collector.js";
 import { syncRepo } from "./sync.js";
 import { consolidateAgentMemory } from "./consolidate.js";
 import { shouldConsolidate } from "../core/consolidate.js";
+import { formatTopSymbolsEvidence } from "../core/symbol-summary.js";
 import { shouldSync, formatSyncLog, computeBackoffDelay } from "../core/watch.js";
 import { OrphanedCheckpointError, formatOrphanedCheckpointMessage } from "../core/git-evidence.js";
 import { gatherGitEvidence } from "./git-evidence.js";
+import { loadPathAliasesFromRepo } from "./tsconfig-loader.js";
 import { updateAgentField } from "../core/state.js";
 import { repoFilterOptions, shouldIncludeFile } from "../core/filter.js";
 import { partitionDiffPaths } from "../core/submodule.js";
@@ -183,12 +185,16 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     passages: AgentState["passages"],
     lastSyncCommit: string,
     fileHashes?: AgentState["fileHashes"],
+    symbolFiles?: AgentState["symbolFiles"],
+    symbolRanks?: AgentState["symbolRanks"],
   ): Promise<void> {
     stateWriteChain = stateWriteChain.then(() =>
       updateAndSaveState(statePath, repoName, {
         passages,
         lastSyncCommit,
         ...(fileHashes === undefined ? {} : { fileHashes }),
+        ...(symbolFiles === undefined ? {} : { symbolFiles }),
+        ...(symbolRanks === undefined ? {} : { symbolRanks }),
       }),
     ).catch(() => {});
     await stateWriteChain;
@@ -326,9 +332,22 @@ export async function watchRepos(params: WatchParams): Promise<void> {
             fs,
           ),
         headCommit: currentHead,
+        ...(() => {
+          const pathAliases = loadPathAliasesFromRepo(repoConfig.path, {
+            ...(repoConfig.basePath === undefined ? {} : { basePath: repoConfig.basePath }),
+          });
+          return pathAliases === undefined ? {} : { pathAliases };
+        })(),
       });
 
-      await persistSyncResult(repoName, result.passages, result.lastSyncCommit, result.fileHashes);
+      await persistSyncResult(
+        repoName,
+        result.passages,
+        result.lastSyncCommit,
+        result.fileHashes,
+        result.symbolFiles,
+        result.symbolRanks,
+      );
 
       if (shouldConsolidate(result, config.consolidateOnSync)) {
         // Same evidence-gathering path manual `consolidate` uses: derived
@@ -353,6 +372,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
           syncResult: result,
           blockCharLimit: MEMORY_BLOCK_LIMIT,
           gitEvidence,
+          symbolRankEvidence: formatTopSymbolsEvidence(result.symbolFiles, result.symbolRanks),
           log,
         });
         if (consolidation.consolidated && consolidation.changed) {

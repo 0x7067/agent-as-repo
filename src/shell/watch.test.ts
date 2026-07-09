@@ -1446,6 +1446,8 @@ function makeConsolidationSyncResult(overrides: Partial<Awaited<ReturnType<typeo
   return {
     passages: { [WATCH_PASSAGE_FILE]: ["p-2"] },
     fileHashes: { [WATCH_PASSAGE_FILE]: "hash-2" },
+    symbolFiles: {},
+    symbolRanks: {},
     lastSyncCommit: "def456",
     filesRemoved: 0,
     filesReIndexed: 5,

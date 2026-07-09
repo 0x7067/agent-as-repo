@@ -1,5 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { filterRefsByKind } from "./symbol-refs.js";
 import {
+  extractSymbolRefsFromFile,
   initTreeSitterChunker,
   resetTreeSitterChunkerForTests,
   treeSitterStrategy,
@@ -254,5 +256,58 @@ describe("treeSitterStrategy", () => {
       expect(chunk.text).not.toContain("METHOD:");
       expect(chunk.text).not.toContain("FUNCTION:");
     }
+  });
+});
+
+describe("extractSymbolRefsFromFile", () => {
+  it("extracts imports and calls for TypeScript", () => {
+    const file: FileInfo = {
+      path: "src/use.ts",
+      content: `import { helper } from "./lib";\nhelper();\n`,
+      sizeKb: 0.1,
+    };
+    const refs = extractSymbolRefsFromFile(file);
+    expect(filterRefsByKind(refs, "import")).toHaveLength(1);
+    expect(filterRefsByKind(refs, "call")[0]?.calleeName).toBe("helper");
+  });
+
+  it("extracts imports and calls for TSX", () => {
+    const file: FileInfo = {
+      path: "src/Widget.tsx",
+      content: `import { helper } from "./lib";\nexport function Widget() { helper(); return <div />; }\n`,
+      sizeKb: 0.1,
+    };
+    const refs = extractSymbolRefsFromFile(file);
+    expect(filterRefsByKind(refs, "import")).toHaveLength(1);
+    expect(filterRefsByKind(refs, "call")[0]?.calleeName).toBe("helper");
+  });
+
+  it("returns [] for languages without ref extractors", () => {
+    const file: FileInfo = {
+      path: "src/Main.java",
+      content: "class Main { void run() { foo(); } }\n",
+      sizeKb: 0.1,
+    };
+    expect(extractSymbolRefsFromFile(file)).toEqual([]);
+  });
+
+  it("extracts calls for Python", () => {
+    const file: FileInfo = {
+      path: "src/main.py",
+      content: "def foo():\n  bar()\n",
+      sizeKb: 0.1,
+    };
+    const refs = extractSymbolRefsFromFile(file);
+    expect(filterRefsByKind(refs, "call")[0]?.calleeName).toBe("bar");
+  });
+
+  it("extracts calls for Go", () => {
+    const file: FileInfo = {
+      path: "main.go",
+      content: "package main\nfunc main() {\n  foo()\n}\n",
+      sizeKb: 0.1,
+    };
+    const refs = extractSymbolRefsFromFile(file);
+    expect(filterRefsByKind(refs, "call")[0]?.calleeName).toBe("foo");
   });
 });

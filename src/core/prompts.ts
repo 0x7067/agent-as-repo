@@ -5,6 +5,7 @@ const NO_TAGS_WARNING =
 export function agenticSearchGuidance(): string {
   return [
     "## Live repo tools (standalone CLI)",
+    "For known symbol names, prefer find_symbol (definition locations, ranked by repo-map importance).",
     "For exact identifiers, strings, or file navigation, prefer grep_repo / glob_files / read_file.",
     "For conceptual recall, use archival_memory_search (optionally with path_prefix to stage-narrow results).",
   ].join("\n");

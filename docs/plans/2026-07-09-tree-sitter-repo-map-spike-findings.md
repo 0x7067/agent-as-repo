@@ -1,7 +1,7 @@
 # Tree-sitter Repo Map Spike — Findings
 
 Date: 2026-07-09
-Status: spike (core prototype landed; graph/PageRank deferred)
+Status: landed (definition + TS/JS refs + graph/PageRank + sync `symbolFiles` + CLI `find_symbol`; MCP symbol tools out of scope)
 Depends on: tree-sitter chunking (`src/core/tree-sitter-chunker.ts`)
 
 ## Goal

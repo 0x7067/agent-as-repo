@@ -25,6 +25,8 @@ describe("state operations", () => {
     expect(next.agents["my-app"].repoName).toBe("my-app");
     expect(next.agents["my-app"].passages).toEqual({});
     expect(next.agents["my-app"].fileHashes).toEqual({});
+    expect(next.agents["my-app"].symbolFiles).toEqual({});
+    expect(next.agents["my-app"].symbolRanks).toEqual({});
     expect(next.agents["my-app"].lastBootstrap).toBeNull();
   });
 

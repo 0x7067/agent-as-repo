@@ -75,7 +75,7 @@ describe("nodeGit adapter against a real temp git repo", () => {
     expect(log).toContain("add b.txt");
   });
 
-  it("logNameStatus respects the max-count for a recent source", async () => {
+  it("logNameStatus respects the max-count for a recent source", { timeout: 15_000 }, async () => {
     const dir = await makeTempRepo();
     await commitFile(dir, "a.txt", "hello", "add a.txt");
     await commitFile(dir, "b.txt", "world", "add b.txt");

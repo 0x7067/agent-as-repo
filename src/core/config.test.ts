@@ -273,6 +273,28 @@ describe("parseConfig", () => {
     });
     expect(configErr.issues.some((i) => i.includes("src/dist"))).toBe(true);
   });
+
+  it("parses memory.git_versioned with default dir", () => {
+    const config = parseConfig({
+      ...validRaw,
+      memory: { git_versioned: true },
+    });
+    expect(config.memory).toEqual({
+      gitVersioned: true,
+      dir: ".repo-expert/memory",
+    });
+  });
+
+  it("keeps gitVersioned false when memory.dir is set without git_versioned", () => {
+    const config = parseConfig({
+      ...validRaw,
+      memory: { dir: "/home/user/mem" },
+    });
+    expect(config.memory).toEqual({
+      gitVersioned: false,
+      dir: "/home/user/mem",
+    });
+  });
 });
 
 describe("ConfigError formatting", () => {

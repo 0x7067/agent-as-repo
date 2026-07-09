@@ -39,9 +39,15 @@ const repoRawSchema = z.strictObject({
   include_submodules: z.boolean().optional(),
 });
 
+const memorySchema = z.strictObject({
+  git_versioned: z.boolean().optional(),
+  dir: z.string().optional(),
+});
+
 const rawConfigSchema = z.strictObject({
   provider: providerSchema.optional(),
   consolidate_on_sync: z.boolean().optional(),
+  memory: memorySchema.optional(),
   repos: z.record(z.string(), repoRawSchema),
 });
 
@@ -140,6 +146,14 @@ export function parseConfig(raw: unknown): Config {
   return {
     provider: providerConfig,
     consolidateOnSync: parsed.consolidate_on_sync ?? false,
+    ...(parsed.memory === undefined
+      ? {}
+      : {
+          memory: {
+            gitVersioned: parsed.memory.git_versioned === true,
+            dir: parsed.memory.dir ?? ".repo-expert/memory",
+          },
+        }),
     repos,
   };
 }

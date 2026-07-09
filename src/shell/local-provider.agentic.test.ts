@@ -79,15 +79,17 @@ describe("LocalProvider agentic tools", () => {
 
     await provider.sendMessage("myrepo", "hello");
     const callArgs = vi.mocked(toolCallingLoop).mock.calls[0][0];
-    expect(callArgs.tools).toHaveLength(5);
+    expect(callArgs.tools).toHaveLength(6);
     expect(callArgs.tools.map((t) => t.function.name)).toEqual([
       "grep_repo",
       "glob_files",
       "read_file",
+      "find_symbol",
       "archival_memory_search",
       "memory_replace",
     ]);
     expect(callArgs.systemPrompt).toContain("grep_repo");
+    expect(callArgs.systemPrompt).toContain("find_symbol");
   });
 
   it("agentic tools return a clear error when repoAccess is not configured", async () => {
@@ -106,6 +108,44 @@ describe("LocalProvider agentic tools", () => {
       };
       expect(result.error).toMatch(/not configured|config\.yaml/i);
     }
+    const symbolResult = JSON.parse(await requireHandler(handlers, "find_symbol")({ name: "foo" })) as {
+      error: string;
+    };
+    expect(symbolResult.error).toMatch(/symbol index|setup\/sync|grep_repo/i);
+  });
+
+  it("find_symbol returns ranked hits when symbolLookup is configured", async () => {
+    const symbolLookup = {
+      find: vi.fn().mockReturnValue([
+        {
+          filePath: "src/lib.ts",
+          kind: "FUNCTION",
+          name: "helper",
+          qualifiedName: "helper",
+          startIndex: 0,
+          endIndex: 10,
+          startLine: 1,
+          endLine: 1,
+          rank: 0.4,
+        },
+      ]),
+    };
+    const provider = new LocalProvider(
+      mockStore as unknown as PassageStore,
+      DEFAULT_MODEL,
+      mockBlockStorage,
+      { apiKey: API_KEY, agenticTools: true, symbolLookup },
+    );
+    stubMemoryBlocks(mockBlockStorage);
+    await provider.sendMessage("myrepo", "hello");
+    const handlers = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers;
+    const result = JSON.parse(
+      await requireHandler(handlers, "find_symbol")({ name: "helper", path_prefix: "src/" }),
+    ) as Array<{ filePath: string; rank: number }>;
+    expect(symbolLookup.find).toHaveBeenCalledWith("myrepo", "helper", { pathPrefix: "src/" });
+    expect(result).toEqual([
+      expect.objectContaining({ filePath: "src/lib.ts", rank: 0.4 }),
+    ]);
   });
 
   it("grep_repo / glob_files / read_file call repoAccess when configured", async () => {

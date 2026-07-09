@@ -14,6 +14,8 @@ export interface ConsolidationPromptInput {
   blockCharLimit: number;
   /** Formatted git log evidence (see `formatGitEvidence`); omitted when unavailable. */
   gitEvidence?: string;
+  /** Formatted PageRank symbol evidence (see `formatTopSymbolsEvidence`). */
+  symbolRankEvidence?: string;
 }
 
 /** Cap the number of changed-file paths listed in the prompt to keep it bounded. */
@@ -28,7 +30,16 @@ const MAX_LISTED_FILES = 50;
  * touching the persona block.
  */
 export function buildConsolidationPrompt(input: ConsolidationPromptInput): string {
-  const { architecture, conventions, changedFiles, filesReIndexed, filesRemoved, blockCharLimit, gitEvidence } = input;
+  const {
+    architecture,
+    conventions,
+    changedFiles,
+    filesReIndexed,
+    filesRemoved,
+    blockCharLimit,
+    gitEvidence,
+    symbolRankEvidence,
+  } = input;
 
   const listed = changedFiles.slice(0, MAX_LISTED_FILES);
   const overflow = changedFiles.length - listed.length;
@@ -52,12 +63,18 @@ export function buildConsolidationPrompt(input: ConsolidationPromptInput): strin
           gitEvidence,
         ];
 
+  const symbolSection: string[] =
+    symbolRankEvidence === undefined || symbolRankEvidence.length === 0
+      ? []
+      : ["", symbolRankEvidence];
+
   return [
     "You are refreshing the long-lived memory blocks for a codebase expert after a repository sync.",
     "Update the 'architecture' and 'conventions' blocks so they reflect the current state of the code.",
     "",
     ...changedSection,
     ...gitEvidenceSection,
+    ...symbolSection,
     "",
     "## Current architecture block",
     architecture.trim().length > 0 ? architecture : "(empty)",

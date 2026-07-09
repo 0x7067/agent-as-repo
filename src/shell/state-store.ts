@@ -9,11 +9,79 @@ import { nodeFileSystem } from "./adapters/node-filesystem.js";
 const passageMapSchema = z.record(z.string(), z.array(z.string()));
 const fileHashMapSchema = z.record(z.string(), z.string());
 
+const symbolKindSchema = z.enum([
+  "FUNCTION",
+  "CLASS",
+  "INTERFACE",
+  "TYPE",
+  "CONST",
+  "METHOD",
+  "ENUM",
+  "MODULE",
+  "STRUCT",
+  "TRAIT",
+]);
+
+const importedNameSchema = z.object({
+  local: z.string(),
+  imported: z.string(),
+});
+
+const exportedNameSchema = z.object({
+  exported: z.string(),
+  local: z.string().optional(),
+});
+
+const symbolRefSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("import"),
+    moduleSpecifier: z.string(),
+    importedNames: z.array(importedNameSchema),
+    startIndex: z.number(),
+    endIndex: z.number(),
+  }),
+  z.object({
+    kind: z.literal("export"),
+    exportedNames: z.array(exportedNameSchema),
+    moduleSpecifier: z.string().optional(),
+    startIndex: z.number(),
+    endIndex: z.number(),
+  }),
+  z.object({
+    kind: z.literal("call"),
+    calleeName: z.string(),
+    objectName: z.string().optional(),
+    startIndex: z.number(),
+    endIndex: z.number(),
+  }),
+]);
+
+const storedSymbolDefSchema = z.object({
+  kind: symbolKindSchema,
+  name: z.string(),
+  qualifiedName: z.string(),
+  className: z.string().optional(),
+  startIndex: z.number(),
+  endIndex: z.number(),
+  startLine: z.number(),
+  endLine: z.number(),
+});
+
+const storedSymbolFileSchema = z.object({
+  symbols: z.array(storedSymbolDefSchema),
+  refs: z.array(symbolRefSchema),
+});
+
+const symbolFileMapSchema = z.record(z.string(), storedSymbolFileSchema);
+const symbolRankMapSchema = z.record(z.string(), z.number());
+
 const agentStateSchema = z.object({
   agentId: z.string(),
   repoName: z.string(),
   passages: passageMapSchema.optional().default({}),
   fileHashes: fileHashMapSchema.optional().default({}),
+  symbolFiles: symbolFileMapSchema.optional().default({}),
+  symbolRanks: symbolRankMapSchema.optional().default({}),
   lastBootstrap: z.string().nullable().optional().default(null),
   lastSyncCommit: z.string().nullable().optional().default(null),
   lastSyncAt: z.string().nullable().optional().default(null),
@@ -125,7 +193,8 @@ export async function loadState(filePath: string, fs: FileSystemPort = nodeFileS
     if (parsed.stateVersion !== STATE_SCHEMA_VERSION) {
       await throwStateFileError(filePath, `unsupported state version "${String(parsed.stateVersion)}"`, fs);
     }
-    return parsed;
+    // Zod optional fields are `T | undefined`; AgentState uses exactOptionalPropertyTypes (`T?`).
+    return parsed as AppState;
   } catch (error: unknown) {
     if (isErrno(error, "ENOENT")) {
       return createEmptyState();

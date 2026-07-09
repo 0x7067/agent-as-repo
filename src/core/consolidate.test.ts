@@ -79,6 +79,15 @@ describe("buildConsolidationPrompt", () => {
     expect(changedIdx).toBeLessThan(evidenceIdx);
     expect(evidenceIdx).toBeLessThan(blockIdx);
   });
+
+  it("includes symbolRankEvidence when provided", () => {
+    const prompt = buildConsolidationPrompt({
+      ...base,
+      symbolRankEvidence: "High-centrality symbols\n- FUNCTION helper @ src/lib.ts",
+    });
+    expect(prompt).toContain("High-centrality symbols");
+    expect(prompt).toContain("FUNCTION helper");
+  });
 });
 
 describe("shouldConsolidate", () => {

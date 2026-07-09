@@ -151,4 +151,25 @@ repos:
       expect(path.isAbsolute(config.repos["my-app"].path)).toBe(true);
     });
   });
+
+  it("resolves relative memory.dir against the config file directory", async () => {
+    const yamlWithMemory = `
+provider:
+  model: qwen3-coder:30b
+
+memory:
+  git_versioned: true
+  dir: .repo-expert/memory
+
+repos:
+  my-app:
+    path: /home/user/repos/my-app
+    description: My application
+`;
+    await withTempConfig(yamlWithMemory, async (filePath) => {
+      const config = await loadConfig(filePath);
+      expect(config.memory?.gitVersioned).toBe(true);
+      expect(config.memory?.dir).toBe(path.join(path.dirname(filePath), ".repo-expert/memory"));
+    });
+  });
 });

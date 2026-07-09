@@ -21,6 +21,8 @@ export function addAgentToState(
         repoName,
         passages: {},
         fileHashes: {},
+        symbolFiles: {},
+        symbolRanks: {},
         lastBootstrap: null,
         lastSyncCommit: null,
         lastSyncAt: null,

@@ -13,6 +13,8 @@ export interface ConsolidateAgentMemoryParams {
   blockCharLimit: number;
   /** Formatted git log evidence (see `formatGitEvidence`); omitted when unavailable. */
   gitEvidence?: string;
+  /** Formatted PageRank symbol evidence; omitted when unavailable. */
+  symbolRankEvidence?: string;
   signal?: AbortSignal;
   log?: (msg: string) => void;
 }
@@ -35,7 +37,7 @@ export interface ConsolidateAgentMemoryResult {
 export async function consolidateAgentMemory(
   params: ConsolidateAgentMemoryParams,
 ): Promise<ConsolidateAgentMemoryResult> {
-  const { provider, agentId, changedFiles, syncResult, blockCharLimit, gitEvidence, signal, log } = params;
+  const { provider, agentId, changedFiles, syncResult, blockCharLimit, gitEvidence, symbolRankEvidence, signal, log } = params;
 
   try {
     const [architecture, conventions] = await Promise.all([
@@ -51,6 +53,9 @@ export async function consolidateAgentMemory(
       filesRemoved: syncResult.filesRemoved,
       blockCharLimit,
       ...(gitEvidence === undefined ? {} : { gitEvidence }),
+      ...(symbolRankEvidence === undefined || symbolRankEvidence.length === 0
+        ? {}
+        : { symbolRankEvidence }),
     });
 
     await provider.consolidateMemory(agentId, prompt, {

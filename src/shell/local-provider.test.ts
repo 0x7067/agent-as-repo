@@ -334,7 +334,17 @@ describe("LocalProvider", () => {
       expect(handlers["grep_repo"]).toBeUndefined();
       expect(handlers["glob_files"]).toBeUndefined();
       expect(handlers["read_file"]).toBeUndefined();
+      expect(handlers["find_symbol"]).toBeUndefined();
       expect(handlers["archival_memory_search"]).toBeDefined();
+    });
+
+    it("memory_replace rejects unknown labels", async () => {
+      await provider.sendMessage("myrepo", "hello");
+      const replaceHandler = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers["memory_replace"];
+      vi.clearAllMocks();
+      const result = await replaceHandler({ label: "../../evil", value: "x" });
+      expect(mockBlockStorage.set).not.toHaveBeenCalled();
+      expect(result).toContain("not allowed");
     });
 
     it("memory_replace handler calls blockStorage.set via updateBlock and returns confirmation", async () => {

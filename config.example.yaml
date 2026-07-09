@@ -12,6 +12,10 @@ provider:
 
 # consolidate_on_sync: true               # Refresh the agent's memory blocks after syncs that touch 5+ files
 
+# memory:
+#   git_versioned: true                   # Store persona/architecture/conventions as markdown (git-friendly)
+#   dir: .repo-expert/memory              # Relative to the config file directory (not process CWD)
+
 repos:
   my-app:
     path: ~/repos/my-app

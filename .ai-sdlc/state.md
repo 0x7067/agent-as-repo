@@ -1,5 +1,5 @@
 # Project State
-updated: 2026-07-07
+updated: 2026-07-09
 
 ## Goal
 repo-expert is a local-first CLI + MCP server that keeps semantic memory for
@@ -7,24 +7,21 @@ git repos and answers questions about them. The codebase follows functional
 core / imperative shell, TDD, pnpm, Vitest, and Zod v4 (`zod/v4` import path).
 
 ## Now
-Current checkout is branch `claude/product-refinement-polish-so4rj9`, backing
-GitHub PR #17: https://github.com/0x7067/agent-as-repo/pull/17. On
-2026-07-07, two unresolved Devin review threads were addressed and pushed:
-`readPackageVersion` now supports both source (`src/`) and bundled
-(`dist/bin/`) package layouts, and every agent-scoped MCP tool checks agent
-existence before provider/store side effects.
-
-Pedro then asked to commit the tracked `.codex/config.toml` deletion too.
+Current checkout is branch `cursor/repo-map-core-9ce6`. On 2026-07-09 an
+adversarial branch review found three issues in the repo-map work, and local
+uncommitted edits now address them: git-versioned memory stamps source commits
+per agent at write time, tsconfig path aliases are basePath-aware, and three
+extra EOF blank lines are removed. Tree is intentionally left dirty for Pedro
+to inspect/commit.
 
 ## Verification path
-- `pnpm test src/mcp-server.test.ts` — 49 passed (49), run 2026-07-07.
-- `pnpm run typecheck` — clean, run 2026-07-07.
-- `pnpm build` — clean, run 2026-07-07; follow-up `node -e` import of
-  `dist/bin/mcp-server.mjs` returned package version `1.0.0` matching
-  `package.json`.
-- `pnpm run lint` — clean, run 2026-07-07.
-- `pnpm test` — 1015 passed (1015), 85 files, run 2026-07-07. Invalid-ref
-  `fatal:` stderr lines are expected from tests that exercise bad git refs.
+- `pnpm run typecheck` — clean, run 2026-07-09.
+- `pnpm run lint` — clean, run 2026-07-09.
+- `pnpm test src/shell/git-markdown-block-storage.test.ts src/shell/tsconfig-loader.test.ts src/core/symbol-graph.test.ts src/core/tree-sitter-chunker.test.ts src/core/tree-sitter-refs-python.test.ts -- --runInBand` — 42 passed (42), run 2026-07-09.
+- `pnpm test -- --runInBand` — 1157 passed (1157), 108 files, run
+  2026-07-09. Invalid-ref `fatal:` stderr lines are expected from tests that
+  exercise bad git refs.
+- `git diff --check` — clean, run 2026-07-09.
 - Full combined gate remains `pnpm run sanity`.
 
 ## Decisions
@@ -51,7 +48,7 @@ Pedro then asked to commit the tracked `.codex/config.toml` deletion too.
   PR #17 is still clean or still needs the same comments addressed.
 
 ## Next
-1. If resuming PR #17, re-fetch GitHub review threads and CI before acting.
+1. Review and commit the uncommitted fixes on `cursor/repo-map-core-9ce6`.
 2. Follow-up: `lastSyncAt` is only written by watch.ts, so sync-only users can
    never reach the `since` fallback; decide whether manual `sync` should stamp
    it too.

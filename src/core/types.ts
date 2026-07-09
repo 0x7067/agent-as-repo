@@ -1,3 +1,6 @@
+export type { SymbolFileMap, SymbolRankMap } from "./symbol-store.js";
+import type { SymbolFileMap, SymbolRankMap } from "./symbol-store.js";
+
 /** A git submodule entry parsed from `git submodule status`. */
 export interface SubmoduleInfo {
   /** Relative path from repo root (e.g. "libs/my-lib"). */
@@ -47,11 +50,21 @@ export interface ProviderConfig {
   fastModel?: string;
 }
 
+/** Optional git-versioned memory settings (product plan §5 item 3, Phase A). */
+export interface MemoryConfig {
+  /** When true, architecture/conventions/persona are stored as markdown files. */
+  gitVersioned: boolean;
+  /** Directory for per-agent `*.md` blocks (default `.repo-expert/memory`). */
+  dir: string;
+}
+
 /** Top-level validated config. */
 export interface Config {
   provider: ProviderConfig;
   /** When true, a successful sync triggers synchronous memory consolidation. */
   consolidateOnSync: boolean;
+  /** Optional file-backed memory blocks (git-friendly markdown). */
+  memory?: MemoryConfig;
   repos: Record<string, RepoConfig>;
 }
 
@@ -93,6 +106,13 @@ export interface AgentState {
    * backward compatibility with older state files (missing → always reindex).
    */
   fileHashes?: FileHashMap;
+  /**
+   * Per-file symbol definitions + refs for the repo map. Invalidated with
+   * `fileHashes` during sync. Optional for backward compatibility.
+   */
+  symbolFiles?: SymbolFileMap;
+  /** PageRank scores keyed by graph node id (`def:…` / `file:…`), computed at sync. */
+  symbolRanks?: SymbolRankMap;
   lastBootstrap: string | null;
   lastSyncCommit: string | null;
   lastSyncAt: string | null;

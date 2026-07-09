@@ -7,9 +7,14 @@ import type {
   FileHashMap,
   FileInfo,
   PassageMap,
+  SymbolFileMap,
+  SymbolRankMap,
 } from "../core/types.js";
 import { computeSyncPlan } from "../core/sync.js";
 import { selectChunkingStrategy } from "../core/chunker.js";
+import { extractSymbolsAndRefsFromFile } from "../core/tree-sitter-chunker.js";
+import { computeSymbolRanks, toStoredSymbolFile } from "../core/symbol-store.js";
+import type { PathAliasConfig } from "../core/tsconfig-paths.js";
 import type { AgentProvider } from "../ports/agent-provider.js";
 
 export interface SyncRepoParams {
@@ -23,6 +28,8 @@ export interface SyncRepoParams {
   chunkingStrategy?: ChunkingStrategy;
   concurrency?: number;
   fullReIndexThreshold?: number;
+  /** Optional tsconfig path aliases for symbol-graph import resolution. */
+  pathAliases?: PathAliasConfig;
   onFileError?: (filePath: string, error: Error) => void;
   onProgress?: (completed: number, total: number, filePath: string) => void;
 }
@@ -30,6 +37,8 @@ export interface SyncRepoParams {
 export interface SyncResult {
   passages: PassageMap;
   fileHashes: FileHashMap;
+  symbolFiles: SymbolFileMap;
+  symbolRanks: SymbolRankMap;
   lastSyncCommit: string;
   filesRemoved: number;
   filesReIndexed: number;
@@ -43,7 +52,6 @@ function getOldPassageIds(passages: PassageMap, filePath: string): string[] {
 }
 
 function removeFilePassages(passages: PassageMap, filePath: string): PassageMap {
-  // Avoid dynamic delete while keeping an immutable map update.
   return Object.fromEntries(
     Object.entries(passages).filter(([entryPath]) => entryPath !== filePath),
   );
@@ -52,6 +60,12 @@ function removeFilePassages(passages: PassageMap, filePath: string): PassageMap 
 function removeFileHash(hashes: FileHashMap, filePath: string): FileHashMap {
   return Object.fromEntries(
     Object.entries(hashes).filter(([entryPath]) => entryPath !== filePath),
+  );
+}
+
+function removeSymbolFile(files: SymbolFileMap, filePath: string): SymbolFileMap {
+  return Object.fromEntries(
+    Object.entries(files).filter(([entryPath]) => entryPath !== filePath),
   );
 }
 
@@ -88,13 +102,65 @@ function getIndexableFileInfo(
   fileInfo: FileInfo | null,
   maxFileSizeKb: number | undefined,
 ): FileInfo | undefined {
-  if (fileInfo === null) {
-    return undefined;
-  }
-  if (maxFileSizeKb !== undefined && fileInfo.sizeKb > maxFileSizeKb) {
-    return undefined;
-  }
+  if (fileInfo === null) return undefined;
+  if (maxFileSizeKb !== undefined && fileInfo.sizeKb > maxFileSizeKb) return undefined;
   return fileInfo;
+}
+
+function extractAndStoreSymbols(
+  fileInfo: FileInfo,
+  updatedSymbols: SymbolFileMap,
+): SymbolFileMap {
+  const { spans, refs } = extractSymbolsAndRefsFromFile(fileInfo);
+  return {
+    ...updatedSymbols,
+    [fileInfo.path]: toStoredSymbolFile(fileInfo.path, fileInfo.content, spans, refs),
+  };
+}
+
+interface MutableSyncMaps {
+  passages: PassageMap;
+  hashes: FileHashMap;
+  symbols: SymbolFileMap;
+  symbolsDirty: boolean;
+}
+
+async function reindexChangedFile(params: {
+  provider: AgentProvider;
+  agentId: string;
+  filePath: string;
+  fileInfo: FileInfo;
+  nextHash: string;
+  agentPassages: PassageMap;
+  maps: MutableSyncMaps;
+  stalePassageIds: string[];
+  limit: ReturnType<typeof pLimit>;
+  chunkingStrategy: ChunkingStrategy;
+}): Promise<void> {
+  // Extract symbols once (same tree-sitter parse the chunker would redo).
+  params.maps.symbols = extractAndStoreSymbols(params.fileInfo, params.maps.symbols);
+  params.maps.symbolsDirty = true;
+
+  const chunks = params.chunkingStrategy(params.fileInfo);
+  const passageIds = await storeFileChunks(params.provider, params.agentId, chunks, params.limit);
+  params.stalePassageIds.push(...getOldPassageIds(params.agentPassages, params.filePath));
+  params.maps.passages[params.filePath] = passageIds;
+  params.maps.hashes[params.filePath] = params.nextHash;
+}
+
+function dropChangedFile(
+  filePath: string,
+  agentPassages: PassageMap,
+  maps: MutableSyncMaps,
+  stalePassageIds: string[],
+): void {
+  stalePassageIds.push(...getOldPassageIds(agentPassages, filePath));
+  maps.passages = removeFilePassages(maps.passages, filePath);
+  maps.hashes = removeFileHash(maps.hashes, filePath);
+  if (Object.hasOwn(maps.symbols, filePath)) {
+    maps.symbols = removeSymbolFile(maps.symbols, filePath);
+    maps.symbolsDirty = true;
+  }
 }
 
 export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
@@ -109,16 +175,20 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
     chunkingStrategy,
     concurrency = 20,
     fullReIndexThreshold = 500,
+    pathAliases,
     onFileError,
     onProgress,
   } = params;
 
   const effectiveChunkingStrategy = chunkingStrategy ?? selectChunkingStrategy(chunking ?? "tree-sitter");
-
   const plan = computeSyncPlan(agent.passages, changedFiles, fullReIndexThreshold);
   const limit = pLimit(concurrency);
-  let updatedPassages: PassageMap = { ...agent.passages };
-  let updatedHashes: FileHashMap = { ...agent.fileHashes };
+  const maps: MutableSyncMaps = {
+    passages: { ...agent.passages },
+    hashes: { ...agent.fileHashes },
+    symbols: { ...agent.symbolFiles },
+    symbolsDirty: false,
+  };
   const stalePassageIds: string[] = [];
   const failedFiles: string[] = [];
   let filesReIndexed = 0;
@@ -127,34 +197,34 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
   let filesCompleted = 0;
   const totalFiles = plan.filesToReIndex.length;
 
-  // Phase 1: Upload new passages (copy-on-write — old passages stay intact until phase 2)
   for (const filePath of plan.filesToReIndex) {
     try {
       const fileInfo = await collectFile(filePath);
       const indexableFileInfo = getIndexableFileInfo(fileInfo, maxFileSizeKb);
       if (indexableFileInfo === undefined) {
-        stalePassageIds.push(...getOldPassageIds(agent.passages, filePath));
-        updatedPassages = removeFilePassages(updatedPassages, filePath);
-        updatedHashes = removeFileHash(updatedHashes, filePath);
+        dropChangedFile(filePath, agent.passages, maps, stalePassageIds);
         filesRemoved++;
       } else {
         const nextHash = hashFileContent(indexableFileInfo.content);
-        const previousHash = updatedHashes[filePath];
-        if (shouldReindexFile(previousHash, nextHash)) {
-          const chunks = effectiveChunkingStrategy(indexableFileInfo);
-          const passageIds = await storeFileChunks(provider, agent.agentId, chunks, limit);
-
-          // Upload succeeded — queue old passages for deletion, update map
-          stalePassageIds.push(...getOldPassageIds(agent.passages, filePath));
-          updatedPassages[filePath] = passageIds;
-          updatedHashes[filePath] = nextHash;
+        if (shouldReindexFile(maps.hashes[filePath], nextHash)) {
+          await reindexChangedFile({
+            provider,
+            agentId: agent.agentId,
+            filePath,
+            fileInfo: indexableFileInfo,
+            nextHash,
+            agentPassages: agent.passages,
+            maps,
+            stalePassageIds,
+            limit,
+            chunkingStrategy: effectiveChunkingStrategy,
+          });
           filesReIndexed++;
         } else {
           filesSkippedUnchanged++;
         }
       }
     } catch (error_) {
-      // Per-file failure: keep old passages intact, report the failure
       const error = error_ instanceof Error ? error_ : new Error(String(error_));
       onFileError?.(filePath, error);
       failedFiles.push(filePath);
@@ -163,7 +233,6 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
     }
   }
 
-  // Phase 2: Delete old (now stale) passages — failures here are non-critical
   await Promise.all(
     stalePassageIds.map((passageId) =>
       limit(async () => {
@@ -176,9 +245,15 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
     ),
   );
 
+  const symbolRanks = maps.symbolsDirty
+    ? computeSymbolRanks(maps.symbols, pathAliases)
+    : { ...agent.symbolRanks };
+
   return {
-    passages: updatedPassages,
-    fileHashes: updatedHashes,
+    passages: maps.passages,
+    fileHashes: maps.hashes,
+    symbolFiles: maps.symbols,
+    symbolRanks,
     lastSyncCommit: headCommit,
     filesRemoved,
     filesReIndexed,
