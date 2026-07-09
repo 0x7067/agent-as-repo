@@ -3,10 +3,11 @@ import {
   buildPersona,
   architectureBootstrapPrompt,
   conventionsBootstrapPrompt,
+  agenticSearchGuidance,
 } from "./prompts.js";
 
 const REPO_NAME = "my-app";
-const ARCHIVAL_MEMORY = "archival memory";
+const ARCHIVAL_MEMORY = "archival_memory_search";
 
 describe("buildPersona", () => {
   it("generates persona from repo name and description", () => {
@@ -17,13 +18,15 @@ describe("buildPersona", () => {
     expect(persona).toContain("architecture and conventions memory blocks");
     expect(persona).toContain("Be specific");
     expect(persona).toContain("do NOT pass tags");
+    expect(persona).toContain("path_prefix");
+    // Persisted persona stays harness-friendly (no nested grep/glob/read).
+    expect(persona).not.toContain("grep_repo");
   });
 
   it("uses custom persona instead of default when provided", () => {
     const custom = "I am the ultimate expert.";
     const persona = buildPersona(REPO_NAME, "desc", custom);
     expect(persona).toContain(custom);
-    // Should NOT contain the default template
     expect(persona).not.toContain(`codebase expert for the "${REPO_NAME}"`);
     expect(persona).toContain("do NOT pass tags");
   });
@@ -42,9 +45,19 @@ describe("buildPersona", () => {
 
   it("contains all required instruction lines", () => {
     const persona = buildPersona(REPO_NAME, "desc");
-    expect(persona).toContain("All project source files are stored in my archival memory");
     expect(persona).toContain("first consult my architecture and conventions memory blocks");
-    expect(persona).toContain("then search archival memory");
+    expect(persona).toContain("archival_memory_search");
+    expect(persona).toContain("path_prefix");
+  });
+});
+
+describe("agenticSearchGuidance", () => {
+  it("mentions live repo tools for standalone CLI", () => {
+    const guidance = agenticSearchGuidance();
+    expect(guidance).toContain("grep_repo");
+    expect(guidance).toContain("glob_files");
+    expect(guidance).toContain("read_file");
+    expect(guidance).toContain(ARCHIVAL_MEMORY);
   });
 });
 

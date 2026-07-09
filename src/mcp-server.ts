@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod/v4";
 import type { AgentProvider, SendMessageOptions } from "./ports/agent-provider.js";
 import type { AdminPort } from "./ports/admin.js";
+import { MEMORY_BLOCK_LIMIT } from "./core/types.js";
 import { LocalProvider, type LocalRuntimeOptions } from "./shell/local-provider.js";
 import { AdminAdapter } from "./shell/adapters/admin-adapter.js";
 import { SqlitePassageStore } from "./shell/sqlite-store.js";
@@ -13,7 +14,6 @@ import { createEmbedder, parseEmbeddingEngine } from "./shell/embedder-factory.j
 import { withTimeoutSignal } from "./shell/with-timeout.js";
 import { readPackageVersion } from "./shell/package-version.js";
 import { isMainModule } from "./shell/is-main-module.js";
-import { MEMORY_BLOCK_LIMIT } from "./core/types.js";
 
 const ASK_DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_LLM_MODEL = "qwen3-coder:30b";
@@ -72,6 +72,10 @@ export function getRuntimeOptionsFromEnv(): LocalRuntimeOptions {
   };
 }
 
+/**
+ * MCP runtime is a memory layer under coding harnesses (Claude Code / Cursor /
+ * Codex). It does not enable agenticTools — the host already has grep/glob/read.
+ */
 export function buildRuntime(): Runtime {
   const model = process.env["LLM_MODEL"] ?? DEFAULT_LLM_MODEL;
   const baseUrl = process.env["LLM_BASE_URL"] ?? DEFAULT_LLM_BASE_URL;
@@ -177,17 +181,27 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
   server.registerTool(
     "agent_search_archival",
     {
-      description: "Search archival memory (passages) for an agent",
+      description:
+        "Hybrid semantic + lexical (BM25) search over indexed passages. Prefer host grep/read for exact identifiers; use this for conceptual recall. Optional path_prefix stage-narrows by directory.",
       inputSchema: {
         agent_id: z.string().describe("The agent ID"),
         query: z.string().describe("Search query"),
         top_k: z.number().int().positive().optional().describe("Max results to return"),
+        path_prefix: z
+          .string()
+          .optional()
+          .describe("Optional file_path prefix to stage-narrow results (e.g. src/auth)"),
       },
     },
-    ({ agent_id, query, top_k }) =>
+    ({ agent_id, query, top_k, path_prefix }) =>
       handleTool(async () => {
         await assertAgentExists(admin, agent_id);
-        const results = await admin.searchPassages(agent_id, query, top_k);
+        const results = await admin.searchPassages(
+          agent_id,
+          query,
+          top_k,
+          path_prefix === undefined || path_prefix === "" ? undefined : { pathPrefix: path_prefix },
+        );
         return JSON.stringify(results, null, 2);
       }),
   );

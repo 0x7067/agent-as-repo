@@ -91,7 +91,7 @@ describe("AdminAdapter", () => {
 
       const results = await adapter.searchPassages("repo", "auth flow");
 
-      expect(store.semanticSearch).toHaveBeenCalledWith("repo", "auth flow", 10);
+      expect(store.semanticSearch).toHaveBeenCalledWith("repo", "auth flow", 10, undefined);
       expect(results).toEqual([
         { id: "p-1", text: "alpha" },
         { id: "p-2", text: "beta" },
@@ -104,7 +104,27 @@ describe("AdminAdapter", () => {
 
       await adapter.searchPassages("repo", "auth flow", 5);
 
-      expect(store.semanticSearch).toHaveBeenCalledWith("repo", "auth flow", 5);
+      expect(store.semanticSearch).toHaveBeenCalledWith("repo", "auth flow", 5, undefined);
+    });
+
+    it("forwards pathPrefix to semanticSearch", async () => {
+      const { adapter, store } = makeAdapter();
+      store.semanticSearch.mockResolvedValue([]);
+
+      await adapter.searchPassages("repo", "auth flow", 5, { pathPrefix: "src/auth" });
+
+      expect(store.semanticSearch).toHaveBeenCalledWith("repo", "auth flow", 5, {
+        pathPrefix: "src/auth",
+      });
+    });
+
+    it("treats empty pathPrefix as undefined", async () => {
+      const { adapter, store } = makeAdapter();
+      store.semanticSearch.mockResolvedValue([]);
+
+      await adapter.searchPassages("repo", "auth", 10, { pathPrefix: "" });
+
+      expect(store.semanticSearch).toHaveBeenCalledWith("repo", "auth", 10, undefined);
     });
   });
 });

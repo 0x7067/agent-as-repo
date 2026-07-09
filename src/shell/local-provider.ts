@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { buildPersona } from "../core/prompts.js";
+import { agenticSearchGuidance, buildPersona } from "../core/prompts.js";
 import type {
   AgentProvider,
   CreateAgentParams,
@@ -10,8 +10,10 @@ import type {
   ConsolidateMemoryOptions,
 } from "../ports/agent-provider.js";
 import type { PassageStore } from "../ports/passage-store.js";
+import type { RepoAccessPort } from "../ports/repo-access.js";
 import { toolCallingLoop, DEFAULT_LLM_BASE_URL, type ToolDefinition, type ToolHandler } from "./llm-client.js";
 import type { BlockStorage } from "./block-storage.js";
+import { buildAskTools, CONSOLIDATION_MEMORY_REPLACE_TOOL } from "./agent-tools.js";
 
 export interface LocalRuntimeOptions {
   baseUrl?: string;
@@ -20,6 +22,13 @@ export interface LocalRuntimeOptions {
   requestTimeoutMs?: number;
   maxRetriesPerModel?: number;
   retryBaseDelayMs?: number;
+  /**
+   * When true (standalone CLI ask), expose grep_repo / glob_files / read_file.
+   * MCP / coding-harness surfaces leave this false — the host already has those tools.
+   */
+  agenticTools?: boolean;
+  /** Live-repo access required when agenticTools is enabled. */
+  repoAccess?: RepoAccessPort;
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
@@ -79,6 +88,8 @@ export class LocalProvider implements AgentProvider {
   private readonly requestTimeoutMs: number;
   private readonly maxRetriesPerModel: number;
   private readonly retryBaseDelayMs: number;
+  private readonly agenticTools: boolean;
+  private readonly repoAccess: RepoAccessPort | undefined;
 
   constructor(
     private store: PassageStore,
@@ -92,6 +103,8 @@ export class LocalProvider implements AgentProvider {
     this.requestTimeoutMs = runtimeOptions.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.maxRetriesPerModel = runtimeOptions.maxRetriesPerModel ?? DEFAULT_MAX_RETRIES_PER_MODEL;
     this.retryBaseDelayMs = runtimeOptions.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+    this.agenticTools = runtimeOptions.agenticTools === true;
+    this.repoAccess = runtimeOptions.repoAccess;
   }
 
   async createAgent(params: CreateAgentParams): Promise<CreateAgentResult> {
@@ -168,58 +181,25 @@ export class LocalProvider implements AgentProvider {
       this.getBlock(agentId, "conventions"),
     ]);
 
-    const systemPrompt = [
+    const systemPromptParts = [
       personaBlock.value,
       `\n## Architecture\n${archBlock.value}`,
       `\n## Conventions\n${convBlock.value}`,
-    ].join("\n");
-
-    const tools: ToolDefinition[] = [
-      {
-        type: "function",
-        function: {
-          name: "archival_memory_search",
-          description: "Search for relevant code and documentation in archival memory",
-          parameters: {
-            type: "object",
-            properties: { query: { type: "string", description: "Search query" } },
-            required: ["query"],
-          },
-        },
-      },
-      {
-        type: "function",
-        function: {
-          name: "memory_replace",
-          description: "Update a memory block with new content",
-          parameters: {
-            type: "object",
-            properties: {
-              label: { type: "string", description: "Block label (persona, architecture, conventions)" },
-              value: { type: "string", description: "New block content" },
-            },
-            required: ["label", "value"],
-          },
-        },
-      },
     ];
+    if (this.agenticTools) {
+      systemPromptParts.push(`\n${agenticSearchGuidance()}`);
+    }
 
-    const toolHandlers = {
-      archival_memory_search: async (args: Record<string, unknown>): Promise<string> => {
-        const query = args["query"] as string;
-        const results = await this.store.semanticSearch(agentId, query, 10);
-        return JSON.stringify(results);
-      },
-      memory_replace: async (args: Record<string, unknown>): Promise<string> => {
-        const label = args["label"] as string;
-        const value = args["value"] as string;
-        await this.updateBlock(agentId, label, value);
-        return `Updated block '${label}'`;
-      },
-    };
+    const { tools, toolHandlers } = buildAskTools({
+      agentId,
+      agenticTools: this.agenticTools,
+      repoAccess: this.repoAccess,
+      store: this.store,
+      updateBlock: (id, label, value) => this.updateBlock(id, label, value),
+    });
 
     return this.runToolCallingLoop({
-      systemPrompt,
+      systemPrompt: systemPromptParts.join("\n"),
       userMessage: content,
       tools,
       toolHandlers,
@@ -242,24 +222,7 @@ export class LocalProvider implements AgentProvider {
       "Refine only those two blocks. Never modify the persona block.",
     ].join("\n");
 
-    const tools: ToolDefinition[] = [
-      {
-        type: "function",
-        function: {
-          name: "memory_replace",
-          description: "Update the architecture or conventions memory block with new content",
-          parameters: {
-            type: "object",
-            properties: {
-              label: { type: "string", description: "Block label (architecture or conventions)" },
-              value: { type: "string", description: "New block content" },
-            },
-            required: ["label", "value"],
-          },
-        },
-      },
-    ];
-
+    const tools: ToolDefinition[] = [CONSOLIDATION_MEMORY_REPLACE_TOOL];
     const toolHandlers = {
       memory_replace: async (args: Record<string, unknown>): Promise<string> => {
         const label = args["label"];

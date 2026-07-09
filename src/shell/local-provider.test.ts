@@ -226,7 +226,13 @@ describe("LocalProvider", () => {
       expect(callArgs.systemPrompt).toContain("I am the persona");
       expect(callArgs.systemPrompt).toContain("Arch content");
       expect(callArgs.systemPrompt).toContain("Conv content");
+      // Default (MCP / harness): memory tools only — no nested grep/glob/read.
       expect(callArgs.tools).toHaveLength(2);
+      expect(callArgs.tools.map((t) => t.function.name)).toEqual([
+        "archival_memory_search",
+        "memory_replace",
+      ]);
+      expect(callArgs.systemPrompt).not.toContain("grep_repo");
     });
 
     it("passes options.overrideModel as model to toolCallingLoop", async () => {
@@ -308,8 +314,27 @@ describe("LocalProvider", () => {
       ]);
       const result = await searchHandler({ query: "test query" });
 
-      expect(mockStore.semanticSearch).toHaveBeenCalledWith("myrepo", "test query", 10);
+      expect(mockStore.semanticSearch).toHaveBeenCalledWith("myrepo", "test query", 10, undefined);
       expect(result).toBe(JSON.stringify([{ id: "p-1", text: "t", score: 0.9 }]));
+    });
+
+    it("archival_memory_search passes path_prefix to semanticSearch", async () => {
+      await provider.sendMessage("myrepo", "hello");
+      const searchHandler = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers["archival_memory_search"];
+      mockStore.semanticSearch.mockResolvedValue([]);
+      await searchHandler({ query: "auth", path_prefix: "src/auth" });
+      expect(mockStore.semanticSearch).toHaveBeenCalledWith("myrepo", "auth", 10, {
+        pathPrefix: "src/auth",
+      });
+    });
+
+    it("does not register agentic tool handlers when agenticTools is off", async () => {
+      await provider.sendMessage("myrepo", "hello");
+      const handlers = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers;
+      expect(handlers["grep_repo"]).toBeUndefined();
+      expect(handlers["glob_files"]).toBeUndefined();
+      expect(handlers["read_file"]).toBeUndefined();
+      expect(handlers["archival_memory_search"]).toBeDefined();
     });
 
     it("memory_replace handler calls blockStorage.set via updateBlock and returns confirmation", async () => {

@@ -25,6 +25,7 @@ export async function createRepoAgent(
     agentId,
     repoName,
     passages: {},
+    fileHashes: {},
     lastBootstrap: null,
     lastSyncCommit: null,
     lastSyncAt: null,

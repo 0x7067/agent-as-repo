@@ -7,11 +7,13 @@ import type { FileSystemPort } from "../ports/filesystem.js";
 import { nodeFileSystem } from "./adapters/node-filesystem.js";
 
 const passageMapSchema = z.record(z.string(), z.array(z.string()));
+const fileHashMapSchema = z.record(z.string(), z.string());
 
 const agentStateSchema = z.object({
   agentId: z.string(),
   repoName: z.string(),
   passages: passageMapSchema.optional().default({}),
+  fileHashes: fileHashMapSchema.optional().default({}),
   lastBootstrap: z.string().nullable().optional().default(null),
   lastSyncCommit: z.string().nullable().optional().default(null),
   lastSyncAt: z.string().nullable().optional().default(null),

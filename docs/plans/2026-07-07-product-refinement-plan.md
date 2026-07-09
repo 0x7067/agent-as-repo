@@ -62,10 +62,10 @@ Goal: `init` → `setup` → `ask` succeeds or fails *fast and clearly*.
 
 In priority order, per the landscape research:
 
-1. **Agentic search surface** (highest credibility + quality win): give agents ripgrep/glob/file-read/symbol-lookup tools they call iteratively; demote vector search to recall booster. This matches where Claude Code/Cursor/Devin landed.
-2. **Tree-sitter symbol/dependency graph with PageRank ranking.** The tree-sitter parsers for ~13 languages are already a paid dependency but only used for chunking. A repo map answers "what calls X / what breaks if I change Y" that embeddings can't, at ~10× lower token cost (Aider repo-map; Codebase-Memory, arxiv 2603.27277).
+1. **Agentic search surface** (landed 2026-07-09 — see `docs/plans/2026-07-09-agentic-search-spec.md`): CLI `ask` gets ripgrep/glob/file-read; MCP stays memory + hybrid recall (host harness already has filesystem tools). Symbol-lookup / repo-map remains roadmap item 2.
+2. **Tree-sitter symbol/dependency graph with PageRank ranking.** Definition-layer spike landed 2026-07-09 (`docs/plans/2026-07-09-tree-sitter-repo-map-spike-findings.md`: `symbol-index` + `findDefinitions`). Import/call edges + PageRank remain. The tree-sitter parsers for ~13 languages are already a paid dependency; a full repo map answers "what calls X / what breaks if I change Y" that embeddings can't, at ~10× lower token cost (Aider repo-map; Codebase-Memory, arxiv 2603.27277).
 3. **Git-versioned memory + worktree-isolated consolidation.** Store persona/architecture/conventions as committed markdown with provenance; run `consolidate` as a sleep-time job in a git worktree. Auditable, diffable, mergeable memory — and a direct answer to Letta's Context Repositories.
-4. **Retrieval quality trio** (all local, cheap): contextual chunk prefixes ("this chunk is from FILE, function X, does Y"), BM25 + vector hybrid (FTS5 already exists in the store), local cross-encoder reranker via transformers.js. Anthropic's contextual-retrieval numbers: 49–67% fewer retrieval failures.
+4. **Retrieval quality trio** (all local, cheap): contextual chunk prefixes ("this chunk is from FILE, function X, does Y"), BM25 + vector hybrid (**landed**; path-scoped filter landed with agentic search), local cross-encoder reranker via transformers.js. Anthropic's contextual-retrieval numbers: 49–67% fewer retrieval failures. Content-hash skip on sync also landed (Merkle-inspired, not a full Merkle tree).
 5. **Public benchmark.** Fix the eval harness, then publish repo-QA numbers (local repo-expert vs cloud tools at $0 API cost). Concrete numbers drive OSS adoption.
 
 ## 6. Launch checklist (dependency order)

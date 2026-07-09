@@ -1,5 +1,13 @@
 import pLimit from "p-limit";
-import type { AgentState, ChunkingStrategy, Chunk, FileInfo, PassageMap } from "../core/types.js";
+import { hashFileContent, shouldReindexFile } from "../core/content-hash.js";
+import type {
+  AgentState,
+  ChunkingStrategy,
+  Chunk,
+  FileHashMap,
+  FileInfo,
+  PassageMap,
+} from "../core/types.js";
 import { computeSyncPlan } from "../core/sync.js";
 import { selectChunkingStrategy } from "../core/chunker.js";
 import type { AgentProvider } from "../ports/agent-provider.js";
@@ -21,9 +29,11 @@ export interface SyncRepoParams {
 
 export interface SyncResult {
   passages: PassageMap;
+  fileHashes: FileHashMap;
   lastSyncCommit: string;
   filesRemoved: number;
   filesReIndexed: number;
+  filesSkippedUnchanged: number;
   isFullReIndex: boolean;
   failedFiles: string[];
 }
@@ -36,6 +46,12 @@ function removeFilePassages(passages: PassageMap, filePath: string): PassageMap 
   // Avoid dynamic delete while keeping an immutable map update.
   return Object.fromEntries(
     Object.entries(passages).filter(([entryPath]) => entryPath !== filePath),
+  );
+}
+
+function removeFileHash(hashes: FileHashMap, filePath: string): FileHashMap {
+  return Object.fromEntries(
+    Object.entries(hashes).filter(([entryPath]) => entryPath !== filePath),
   );
 }
 
@@ -102,10 +118,12 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
   const plan = computeSyncPlan(agent.passages, changedFiles, fullReIndexThreshold);
   const limit = pLimit(concurrency);
   let updatedPassages: PassageMap = { ...agent.passages };
+  let updatedHashes: FileHashMap = { ...agent.fileHashes };
   const stalePassageIds: string[] = [];
   const failedFiles: string[] = [];
   let filesReIndexed = 0;
   let filesRemoved = 0;
+  let filesSkippedUnchanged = 0;
   let filesCompleted = 0;
   const totalFiles = plan.filesToReIndex.length;
 
@@ -117,15 +135,23 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
       if (indexableFileInfo === undefined) {
         stalePassageIds.push(...getOldPassageIds(agent.passages, filePath));
         updatedPassages = removeFilePassages(updatedPassages, filePath);
+        updatedHashes = removeFileHash(updatedHashes, filePath);
         filesRemoved++;
       } else {
-        const chunks = effectiveChunkingStrategy(indexableFileInfo);
-        const passageIds = await storeFileChunks(provider, agent.agentId, chunks, limit);
+        const nextHash = hashFileContent(indexableFileInfo.content);
+        const previousHash = updatedHashes[filePath];
+        if (shouldReindexFile(previousHash, nextHash)) {
+          const chunks = effectiveChunkingStrategy(indexableFileInfo);
+          const passageIds = await storeFileChunks(provider, agent.agentId, chunks, limit);
 
-        // Upload succeeded — queue old passages for deletion, update map
-        stalePassageIds.push(...getOldPassageIds(agent.passages, filePath));
-        updatedPassages[filePath] = passageIds;
-        filesReIndexed++;
+          // Upload succeeded — queue old passages for deletion, update map
+          stalePassageIds.push(...getOldPassageIds(agent.passages, filePath));
+          updatedPassages[filePath] = passageIds;
+          updatedHashes[filePath] = nextHash;
+          filesReIndexed++;
+        } else {
+          filesSkippedUnchanged++;
+        }
       }
     } catch (error_) {
       // Per-file failure: keep old passages intact, report the failure
@@ -152,9 +178,11 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
 
   return {
     passages: updatedPassages,
+    fileHashes: updatedHashes,
     lastSyncCommit: headCommit,
     filesRemoved,
     filesReIndexed,
+    filesSkippedUnchanged,
     isFullReIndex: plan.isFullReIndex,
     failedFiles,
   };

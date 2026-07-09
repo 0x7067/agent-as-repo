@@ -80,11 +80,19 @@ export type ChunkingStrategy = (file: FileInfo) => Chunk[];
 /** Map of file path → passage ID for a single agent. */
 export type PassageMap = Record<string, string[]>;
 
+/** Map of file path → SHA-256 content hash for skip-unchanged reindex. */
+export type FileHashMap = Record<string, string>;
+
 /** Persisted state for a single agent. */
 export interface AgentState {
   agentId: string;
   repoName: string;
   passages: PassageMap;
+  /**
+   * Per-file content hashes from the last successful index. Optional for
+   * backward compatibility with older state files (missing → always reindex).
+   */
+  fileHashes?: FileHashMap;
   lastBootstrap: string | null;
   lastSyncCommit: string | null;
   lastSyncAt: string | null;

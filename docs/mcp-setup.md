@@ -2,6 +2,16 @@
 
 repo-expert ships a built-in MCP server that exposes 8 tightly-typed tools over stdio. Installed from npm it's the `repo-expert-mcp` executable (`dist/bin/mcp-server.mjs`); in a source checkout it runs as `npx tsx src/mcp-server.ts`.
 
+## Memory layer under your coding agent
+
+Under Claude Code, Cursor, or Codex, repo-expert is **local durable memory** — not a nested coding agent. The host already has grep/read/glob; use those for exact identifiers and file navigation. Prefer MCP for:
+
+1. `agent_get_core_memory` — architecture/conventions blocks first
+2. `agent_search_archival` — hybrid semantic + lexical recall (`path_prefix` to narrow by directory)
+3. `agent_call` — synthesized questions against that memory
+
+Run `repo-expert install-instructions` to inject this guidance into `CLAUDE.md` / `AGENTS.md`.
+
 ## Why this wrapper exists
 
 Hub-style MCP servers expose tools where a single `operation` string param multiplexes many actions, with everything else optional. LLMs routinely get the required params wrong. This wrapper exposes **individual tools with strict schemas** — `agent_id` is required where needed, not optional.
@@ -106,7 +116,7 @@ Both commands read `config.yaml` (if present) for `model`, `base_url`, `embeddin
 | `agent_get` | `agent_id` | Full agent details including memory blocks |
 | `agent_call` | `agent_id`, `content`, `override_model?`, `timeout_ms?`, `max_steps?` | Send a message to an agent and get the response |
 | `agent_get_core_memory` | `agent_id` | Get all memory blocks (`{label, value, limit}`) for an agent |
-| `agent_search_archival` | `agent_id`, `query`, `top_k?` | Semantic search over archival passages |
+| `agent_search_archival` | `agent_id`, `query`, `top_k?`, `path_prefix?` | Hybrid semantic + lexical search over indexed passages |
 | `agent_insert_passage` | `agent_id`, `text` | Insert a passage into archival memory |
 | `agent_delete_passage` | `agent_id`, `passage_id` | Delete a passage. To update, delete then insert |
 | `agent_update_block` | `agent_id`, `label`, `value` | Overwrite a memory block's value |

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- passage store + hybrid search intentionally stay in one module. */
 import { extractSourcePath } from "../core/chunker.js";
 import { rrfFuse, toFtsMatchQuery } from "../core/hybrid-rank.js";
 import type {
@@ -5,6 +6,7 @@ import type {
   PassageSearchResult,
   PassageStore,
   PassageWriteEntry,
+  SemanticSearchOptions,
   StoredPassage,
 } from "../ports/passage-store.js";
 import { openVectorDatabase, type VectorDatabase } from "./sqlite-native.js";
@@ -232,11 +234,21 @@ export class SqlitePassageStore implements PassageStore {
     return Promise.resolve(rows.map((row) => ({ id: row.id, text: row.text })));
   }
 
-  async semanticSearch(agentId: string, query: string, limit: number): Promise<PassageSearchResult[]> {
+  async semanticSearch(
+    agentId: string,
+    query: string,
+    limit: number,
+    options?: SemanticSearchOptions,
+  ): Promise<PassageSearchResult[]> {
     if (limit <= 0 || !this.vectorTableReady) return [];
-    const countRow = this.db
-      .prepare("SELECT COUNT(*) AS count FROM passages WHERE agent_id = ?")
-      .get(agentId) as { count: number };
+    const pathPrefix = options?.pathPrefix;
+    const countSql =
+      pathPrefix === undefined
+        ? "SELECT COUNT(*) AS count FROM passages WHERE agent_id = ?"
+        : "SELECT COUNT(*) AS count FROM passages WHERE agent_id = ? AND file_path LIKE ?";
+    const countArgs =
+      pathPrefix === undefined ? [agentId] : [agentId, `${pathPrefix}%`];
+    const countRow = this.db.prepare(countSql).get(...countArgs) as { count: number };
     if (countRow.count === 0) return [];
 
     const vectors = await this.embedTexts([query]);
@@ -249,12 +261,18 @@ export class SqlitePassageStore implements PassageStore {
 
     // Over-fetch both legs so RRF has depth to fuse over.
     const candidates = Math.max(limit * 3, 15);
+    const agentScopeSql =
+      pathPrefix === undefined
+        ? "SELECT seq FROM passages WHERE agent_id = ?"
+        : "SELECT seq FROM passages WHERE agent_id = ? AND file_path LIKE ?";
+    const agentScopeArgs =
+      pathPrefix === undefined ? [agentId] : [agentId, `${pathPrefix}%`];
     const vectorHits = this.db
       .prepare(
-        "SELECT rowid FROM passage_vectors WHERE embedding MATCH ? AND k = ? AND rowid IN (SELECT seq FROM passages WHERE agent_id = ?)",
+        `SELECT rowid FROM passage_vectors WHERE embedding MATCH ? AND k = ? AND rowid IN (${agentScopeSql})`,
       )
-      .all(encoded, candidates, agentId) as Array<{ rowid: number | bigint }>;
-    const lexicalRowids = this.lexicalSearch(agentId, query, candidates);
+      .all(encoded, candidates, ...agentScopeArgs) as Array<{ rowid: number | bigint }>;
+    const lexicalRowids = this.lexicalSearch(agentId, query, candidates, pathPrefix);
 
     const readPassageRow = this.db.prepare("SELECT id, text FROM passages WHERE seq = ?");
     const textById = new Map<string, string>();
@@ -281,16 +299,27 @@ export class SqlitePassageStore implements PassageStore {
    * BM25 leg over the FTS5 index; any failure degrades to an empty list so
    * retrieval is never worse than vector-only.
    */
-  private lexicalSearch(agentId: string, query: string, limit: number): Array<number | bigint> {
+  private lexicalSearch(
+    agentId: string,
+    query: string,
+    limit: number,
+    pathPrefix?: string,
+  ): Array<number | bigint> {
     if (!this.ftsReady) return [];
     const match = toFtsMatchQuery(query);
     if (match === undefined) return [];
     try {
+      const scopeSql =
+        pathPrefix === undefined
+          ? "SELECT seq FROM passages WHERE agent_id = ?"
+          : "SELECT seq FROM passages WHERE agent_id = ? AND file_path LIKE ?";
+      const scopeArgs =
+        pathPrefix === undefined ? [agentId] : [agentId, `${pathPrefix}%`];
       const rows = this.db
         .prepare(
-          "SELECT rowid FROM passage_fts WHERE passage_fts MATCH ? AND rowid IN (SELECT seq FROM passages WHERE agent_id = ?) ORDER BY rank LIMIT ?",
+          `SELECT rowid FROM passage_fts WHERE passage_fts MATCH ? AND rowid IN (${scopeSql}) ORDER BY rank LIMIT ?`,
         )
-        .all(match, agentId, limit) as Array<{ rowid: number | bigint }>;
+        .all(match, ...scopeArgs, limit) as Array<{ rowid: number | bigint }>;
       return rows.map((row) => row.rowid);
     } catch (error) {
       console.warn(`repo-expert: FTS query failed, falling back to vector-only search: ${String(error)}`);
@@ -364,3 +393,4 @@ export class SqlitePassageStore implements PassageStore {
     if (!this.vectorTableReady) this.ensureVectorTable(stored);
   }
 }
+/* eslint-enable max-lines */
