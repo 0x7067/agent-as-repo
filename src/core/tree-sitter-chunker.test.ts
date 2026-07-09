@@ -1,5 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { filterRefsByKind } from "./symbol-refs.js";
 import {
+  extractSymbolRefsFromFile,
   initTreeSitterChunker,
   resetTreeSitterChunkerForTests,
   treeSitterStrategy,
@@ -254,5 +256,27 @@ describe("treeSitterStrategy", () => {
       expect(chunk.text).not.toContain("METHOD:");
       expect(chunk.text).not.toContain("FUNCTION:");
     }
+  });
+});
+
+describe("extractSymbolRefsFromFile", () => {
+  it("extracts imports and calls for TypeScript", () => {
+    const file: FileInfo = {
+      path: "src/use.ts",
+      content: `import { helper } from "./lib";\nhelper();\n`,
+      sizeKb: 0.1,
+    };
+    const refs = extractSymbolRefsFromFile(file);
+    expect(filterRefsByKind(refs, "import")).toHaveLength(1);
+    expect(filterRefsByKind(refs, "call")[0]?.calleeName).toBe("helper");
+  });
+
+  it("returns [] for non-JS/TS languages", () => {
+    const file: FileInfo = {
+      path: "src/main.py",
+      content: "def foo():\n  bar()\n",
+      sizeKb: 0.1,
+    };
+    expect(extractSymbolRefsFromFile(file)).toEqual([]);
   });
 });

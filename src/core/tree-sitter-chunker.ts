@@ -12,6 +12,8 @@ import { extractSymbolSpansPython } from "./tree-sitter-lang-python.js";
 import { extractSymbolSpansRuby } from "./tree-sitter-lang-ruby.js";
 import { extractSymbolSpansRust } from "./tree-sitter-lang-rust.js";
 import { extractSymbolSpansSwift } from "./tree-sitter-lang-swift.js";
+import type { SymbolRef } from "./symbol-refs.js";
+import { extractSymbolRefsJsTs } from "./tree-sitter-refs-js.js";
 import { spanFromNode, type SymbolSpan } from "./tree-sitter-symbols.js";
 import type { Chunk, ChunkingStrategy, FileInfo } from "./types.js";
 
@@ -300,6 +302,31 @@ export function extractSymbolSpansFromFile(file: FileInfo): SymbolSpan[] {
     const parsed = parseFile(file);
     if (!parsed) return [];
     return extractSymbolSpans(parsed.tree, parsed.label);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Extract import/export/call references for JS/TS/TSX files. Returns [] for
+ * other languages, uninitialized chunker, or parse failures. Kept separate
+ * from definition extraction (`extractSymbolSpansFromFile`).
+ */
+export function extractSymbolRefsFromFile(file: FileInfo): SymbolRef[] {
+  if (!file.content.trim() || !initialized || !parser) return [];
+  try {
+    const parsed = parseFile(file);
+    if (!parsed) return [];
+    switch (parsed.label) {
+      case "typescript":
+      case "tsx":
+      case "javascript": {
+        return extractSymbolRefsJsTs(parsed.tree);
+      }
+      default: {
+        return [];
+      }
+    }
   } catch {
     return [];
   }

@@ -1,7 +1,7 @@
 # Tree-sitter Repo Map Spike — Findings
 
 Date: 2026-07-09
-Status: spike (core prototype landed; graph/PageRank deferred)
+Status: spike (definition layer landed; TS/JS refs landed — see `2026-07-09-symbol-refs-findings.md`; graph/PageRank deferred)
 Depends on: tree-sitter chunking (`src/core/tree-sitter-chunker.ts`)
 
 ## Goal
