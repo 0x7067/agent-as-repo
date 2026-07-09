@@ -50,4 +50,11 @@ describe("extractSymbolRefsPython", () => {
       { callee: "method", object: "obj" },
     ]);
   });
+
+  it("ignores nested imports inside functions (v1 top-level only)", () => {
+    const refs = extractSymbolRefsPython(parse("def f():\n  import os\n  os.getcwd()\n"));
+    expect(filterRefsByKind(refs, "import")).toHaveLength(0);
+    expect(filterRefsByKind(refs, "call").map((c) => c.calleeName)).toContain("getcwd");
+  });
 });
+

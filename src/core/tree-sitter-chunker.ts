@@ -303,9 +303,10 @@ export function extractSymbolSpansFromFile(file: FileInfo): SymbolSpan[] {
 }
 
 /**
- * Extract import/export/call references for JS/TS/TSX files. Returns [] for
- * other languages, uninitialized chunker, or parse failures. Kept separate
- * from definition extraction (`extractSymbolSpansFromFile`).
+ * Extract import/export/call references for JS/TS/TSX, Python, and Go.
+ * Returns [] for other languages, uninitialized chunker, or parse failures.
+ * Kept separate from definition extraction (`extractSymbolSpansFromFile`).
+ * Note: Python/Go imports are collected at module top-level only (v1).
  */
 export function extractSymbolRefsFromFile(file: FileInfo): SymbolRef[] {
   return extractSymbolsAndRefsFromFile(file).refs;

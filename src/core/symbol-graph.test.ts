@@ -91,7 +91,9 @@ describe("buildSymbolGraph", () => {
       ],
     });
 
-    const helper = index.symbols.find((s) => s.name === "helper")!;
+    const helper = index.symbols.find((s) => s.name === "helper");
+    expect(helper).toBeDefined();
+    if (helper === undefined) return;
     expect(graph.edges).toContainEqual({
       from: fileNodeId("src/use.ts"),
       to: definitionNodeId(helper),
@@ -130,8 +132,11 @@ describe("buildSymbolGraph", () => {
       ],
     });
 
-    const helper = index.symbols.find((s) => s.name === "helper")!;
-    const local = index.symbols.find((s) => s.name === "local")!;
+    const helper = index.symbols.find((s) => s.name === "helper");
+    const local = index.symbols.find((s) => s.name === "local");
+    expect(helper).toBeDefined();
+    expect(local).toBeDefined();
+    if (helper === undefined || local === undefined) return;
     const callEdges = graph.edges.filter((e) => e.kind === "call");
     expect(callEdges).toContainEqual({
       from: fileNodeId("src/use.ts"),
@@ -189,4 +194,59 @@ describe("buildSymbolGraph", () => {
     });
     expect(graph.edges.filter((e) => e.kind === "import")).toHaveLength(0);
   });
+
+  it("creates import edges for tsconfig path aliases", () => {
+    const index = indexFrom([
+      { filePath: "src/app/auth.ts", spans: [span({ kind: "FUNCTION", name: "login" })] },
+      { filePath: "src/use.ts", spans: [span({ kind: "FUNCTION", name: "run" })] },
+    ]);
+    const graph = buildSymbolGraph({
+      index,
+      pathAliases: {
+        baseUrl: ".",
+        paths: [{ pattern: "@app/*", targets: ["src/app/*"] }],
+      },
+      files: [
+        {
+          filePath: "src/app/auth.ts",
+          refs: [
+            {
+              kind: "export",
+              exportedNames: [{ exported: "login", local: "login" }],
+              startIndex: 0,
+              endIndex: 10,
+            },
+          ],
+        },
+        {
+          filePath: "src/use.ts",
+          refs: [
+            {
+              kind: "import",
+              moduleSpecifier: "@app/auth",
+              importedNames: [{ local: "login", imported: "login" }],
+              startIndex: 0,
+              endIndex: 10,
+            },
+          ],
+        },
+      ],
+    });
+    const login = index.symbols.find((s) => s.name === "login");
+    expect(login).toBeDefined();
+    if (login === undefined) return;
+    expect(graph.edges).toContainEqual({
+      from: fileNodeId("src/use.ts"),
+      to: definitionNodeId(login),
+      kind: "import",
+    });
+  });
 });
+
+describe("resolveRelativeModule Go", () => {
+  it("resolves relative Go imports to .go files", () => {
+    const known = new Set(["pkg/foo.go", "pkg/bar.go"]);
+    expect(resolveRelativeModule("pkg/bar.go", "./foo", known)).toBe("pkg/foo.go");
+  });
+});
+

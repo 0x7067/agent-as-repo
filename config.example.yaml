@@ -14,7 +14,7 @@ provider:
 
 # memory:
 #   git_versioned: true                   # Store persona/architecture/conventions as markdown (git-friendly)
-#   dir: .repo-expert/memory              # Per-agent *.md files under this directory
+#   dir: .repo-expert/memory              # Relative to the config file directory (not process CWD)
 
 repos:
   my-app:

@@ -280,4 +280,15 @@ describe("extractSymbolRefsFromFile", () => {
     const refs = extractSymbolRefsFromFile(file);
     expect(filterRefsByKind(refs, "call")[0]?.calleeName).toBe("bar");
   });
+
+  it("extracts calls for Go", () => {
+    const file: FileInfo = {
+      path: "main.go",
+      content: "package main\nfunc main() {\n  foo()\n}\n",
+      sizeKb: 0.1,
+    };
+    const refs = extractSymbolRefsFromFile(file);
+    expect(filterRefsByKind(refs, "call")[0]?.calleeName).toBe("foo");
+  });
 });
+

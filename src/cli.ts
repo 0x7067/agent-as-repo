@@ -194,12 +194,22 @@ class CliUserError extends Error {
   }
 }
 
+function resolveMemorySourceCommit(config: Config): string | undefined {
+  for (const repo of Object.values(config.repos)) {
+    return nodeGit.headCommit(repo.path) ?? undefined;
+  }
+  return undefined;
+}
+
 function createBlockStorage(config: Config, dbPath: string): BlockStorage {
   if (config.memory?.gitVersioned === true) {
-    const memoryDir = path.isAbsolute(config.memory.dir)
-      ? config.memory.dir
-      : path.resolve(config.memory.dir);
-    return new GitMarkdownBlockStorage({ memoryDir });
+    // loadConfig already resolves memory.dir against the config file directory.
+    const memoryDir = config.memory.dir;
+    const sourceCommit = resolveMemorySourceCommit(config);
+    return new GitMarkdownBlockStorage({
+      memoryDir,
+      ...(sourceCommit === undefined ? {} : { sourceCommit }),
+    });
   }
   return new SqliteBlockStorage(dbPath);
 }

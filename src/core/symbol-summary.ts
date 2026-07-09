@@ -34,8 +34,8 @@ export function formatTopSymbolsEvidence(
         qualifiedName: def.qualifiedName,
         startLine: def.startLine,
       });
-      const score = ranks[nodeId] ?? 0;
-      if (score < minScore) continue;
+      const score = ranks[nodeId];
+      if (typeof score !== "number" || score < minScore) continue;
       ranked.push({ kind: def.kind, name: def.name, filePath, score });
     }
   }
@@ -45,9 +45,11 @@ export function formatTopSymbolsEvidence(
   ranked.sort((a, b) => b.score - a.score || a.filePath.localeCompare(b.filePath) || a.name.localeCompare(b.name));
   const top = ranked.slice(0, maxEntries);
 
-  const lines: string[] = ["High-centrality symbols (PageRank):"];
+  const lines: string[] = [
+    "High-centrality symbols (PageRank — prefer these when naming architecture and conventions):",
+  ];
   for (const item of top) {
-    lines.push(`- ${item.kind} ${item.name} @ ${item.filePath}`);
+    lines.push(`- ${item.kind} ${item.name} @ ${item.filePath} (${item.score.toFixed(4)})`);
   }
   return lines.join("\n");
 }

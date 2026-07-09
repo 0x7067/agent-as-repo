@@ -3,8 +3,11 @@ import type { RepoAccessPort } from "../ports/repo-access.js";
 import type { FindDefinitionsOptions } from "../core/symbol-index.js";
 import type { RankedSymbolHit } from "../core/symbol-store.js";
 import type { SymbolKind } from "../core/tree-sitter-symbols.js";
+import { BLOCK_LABELS } from "../core/types.js";
 import type { ToolDefinition, ToolHandler } from "./llm-client.js";
 import { handleGlobFiles, handleGrepRepo, handleReadFile } from "./repo-tools.js";
+
+const ALLOWED_MEMORY_LABELS = new Set<string>(BLOCK_LABELS);
 
 const GREP_TOOL: ToolDefinition = {
   type: "function",
@@ -252,6 +255,9 @@ export function buildAskTools(params: BuildAskToolsParams): {
   toolHandlers["memory_replace"] = async (args) => {
     const label = args["label"] as string;
     const value = args["value"] as string;
+    if (!ALLOWED_MEMORY_LABELS.has(label)) {
+      return `Error: block '${label}' is not allowed. Use one of: ${BLOCK_LABELS.join(", ")}.`;
+    }
     await updateBlock(agentId, label, value);
     return `Updated block '${label}'`;
   };

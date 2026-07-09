@@ -337,6 +337,15 @@ describe("LocalProvider", () => {
       expect(handlers["archival_memory_search"]).toBeDefined();
     });
 
+    it("memory_replace rejects unknown labels", async () => {
+      await provider.sendMessage("myrepo", "hello");
+      const replaceHandler = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers["memory_replace"];
+      vi.clearAllMocks();
+      const result = await replaceHandler({ label: "../../evil", value: "x" });
+      expect(mockBlockStorage.set).not.toHaveBeenCalled();
+      expect(result).toContain("not allowed");
+    });
+
     it("memory_replace handler calls blockStorage.set via updateBlock and returns confirmation", async () => {
       await provider.sendMessage("myrepo", "hello");
 

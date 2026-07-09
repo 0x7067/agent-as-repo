@@ -32,3 +32,13 @@ Depends on: repo-map core (PR #20)
 - Worktree-isolated consolidate + commit provenance (Phase B)
 - Go module path → directory resolution
 - Multi-tsconfig / project references
+
+## Review hardening (2026-07-09)
+
+- `GitMarkdownBlockStorage` sanitizes `agentId`/`label` via `memory-path.ts` (rejects traversal)
+- Ask-mode `memory_replace` allowlists `BLOCK_LABELS`
+- `memory.dir` resolves relative to the config file directory
+- CLI stamps `sourceCommit` from first repo HEAD when available
+- `.go` added to module extension candidates
+- JSONC loader strips trailing commas; warns on parse failures
+- `formatTopSymbolsEvidence` omits unranked defs and includes scores

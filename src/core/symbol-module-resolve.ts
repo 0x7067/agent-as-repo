@@ -13,6 +13,7 @@ const MODULE_EXTENSIONS = [
   ".mjs",
   ".cjs",
   ".py",
+  ".go",
 ] as const;
 
 function candidatesForJoined(joined: string): string[] {

@@ -1,5 +1,5 @@
 import { buildSymbolIndex, findDefinitions, toSymbolLocation, type FindDefinitionsOptions, type SymbolIndex, type SymbolLocation } from "./symbol-index.js";
-import { buildSymbolGraph } from "./symbol-graph.js";
+import { buildSymbolGraph, definitionNodeId } from "./symbol-graph.js";
 import { pageRank } from "./symbol-pagerank.js";
 import type { SymbolRef } from "./symbol-refs.js";
 import type { PathAliasConfig } from "./tsconfig-paths.js";
@@ -108,8 +108,7 @@ export function findRankedSymbols(
 ): RankedSymbolHit[] {
   const hits = findDefinitions(index, name, options);
   const withRank: RankedSymbolHit[] = hits.map((hit) => {
-    const nodeId = `def:${hit.filePath}#${hit.qualifiedName}@${String(hit.startLine)}`;
-    const rank = ranks?.[nodeId] ?? 0;
+    const rank = ranks?.[definitionNodeId(hit)] ?? 0;
     return { ...hit, rank };
   });
   // eslint-disable-next-line unicorn/no-array-sort -- Array#toSorted requires ES2023

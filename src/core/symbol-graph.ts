@@ -276,7 +276,8 @@ function resolveCallTargets(
  * - call edges: caller file → resolved definition(s)
  *
  * Ambiguous bare names get edges to all matches (Aider-style over-connect).
- * Non-relative module specifiers are skipped (no package resolution in v1).
+ * Relative ESM/Python imports and tsconfig `paths` aliases resolve when known;
+ * bare package imports (e.g. `lodash`) are skipped (no node_modules resolution).
  */
 export function buildSymbolGraph(input: BuildSymbolGraphInput): SymbolGraph {
   const { index, files, pathAliases } = input;

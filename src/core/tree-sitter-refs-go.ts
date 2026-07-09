@@ -105,6 +105,7 @@ function walkCalls(node: Node, out: CallRef[]): void {
 
 /**
  * Extract import and call-site references from a Go tree-sitter AST.
+ * Imports are collected at package/file top-level only (v1).
  * No ExportRef — Go exports by capitalization, not statements.
  */
 export function extractSymbolRefsGo(tree: Tree): SymbolRef[] {

@@ -18,9 +18,17 @@ export async function loadConfig(
   const content = await fs.readFile(filePath, "utf8");
   const raw = yaml.load(content);
   const config = parseConfig(raw);
+  const configDir = path.dirname(path.resolve(filePath));
 
   for (const repo of Object.values(config.repos)) {
     repo.path = resolvePath(repo.path);
+  }
+
+  if (config.memory !== undefined && !path.isAbsolute(config.memory.dir)) {
+    // Relative memory.dir is anchored to the config file, not process CWD.
+    config.memory.dir = path.resolve(configDir, config.memory.dir);
+  } else if (config.memory !== undefined) {
+    config.memory.dir = path.resolve(config.memory.dir);
   }
 
   return config;

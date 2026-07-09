@@ -1,4 +1,4 @@
-/* eslint-disable security/detect-non-literal-fs-filename -- memoryDir comes from config; paths are under that root */
+/* eslint-disable security/detect-non-literal-fs-filename -- memoryDir comes from config; paths are sanitized under that root */
 import {
   existsSync,
   mkdirSync,
@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { resolveSafeMemoryPath } from "../core/memory-path.js";
 import {
   formatMemoryBlockMarkdown,
   parseMemoryBlockMarkdown,
@@ -16,6 +17,7 @@ import type { BlockStorage } from "./block-storage.js";
 
 export interface GitMarkdownBlockStorageOptions {
   memoryDir: string;
+  /** Optional commit SHA stamped into frontmatter on write. */
   sourceCommit?: string;
 }
 
@@ -25,26 +27,34 @@ export interface GitMarkdownBlockStorageOptions {
  */
 export class GitMarkdownBlockStorage implements BlockStorage {
   private readonly memoryDir: string;
-  private readonly sourceCommit: string | undefined;
+  private sourceCommit: string | undefined;
 
   constructor(options: GitMarkdownBlockStorageOptions) {
-    this.memoryDir = options.memoryDir;
+    this.memoryDir = path.resolve(options.memoryDir);
     this.sourceCommit = options.sourceCommit;
   }
 
+  /** Update provenance stamped on subsequent writes (e.g. after sync). */
+  setSourceCommit(commit: string | undefined): void {
+    this.sourceCommit = commit;
+  }
+
   private agentDir(agentId: string): string {
-    return path.join(this.memoryDir, agentId);
+    return resolveSafeMemoryPath(this.memoryDir, agentId);
   }
 
   private blockPath(agentId: string, label: string): string {
-    return path.join(this.agentDir(agentId), `${label}.md`);
+    return resolveSafeMemoryPath(this.memoryDir, agentId, `${label}.md`);
   }
 
   get(agentId: string, label: string): string {
     try {
       const raw = readFileSync(this.blockPath(agentId, label), "utf8");
       return parseMemoryBlockMarkdown(raw, label).value;
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && /escapes|separators|rejects|invalid|required/i.test(error.message)) {
+        throw error;
+      }
       return "";
     }
   }

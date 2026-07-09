@@ -121,6 +121,7 @@ function walkCalls(node: Node, out: CallRef[]): void {
 /**
  * Extract import and call-site references from a Python tree-sitter AST.
  * No ExportRef — Python has no export statements (defs are the export surface).
+ * Imports are collected at module top-level only (nested/lazy imports are skipped in v1).
  */
 export function extractSymbolRefsPython(tree: Tree): SymbolRef[] {
   const refs: SymbolRef[] = [];
