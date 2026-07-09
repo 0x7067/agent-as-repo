@@ -19,7 +19,7 @@ a dependency graph + PageRank can hang off the definition index.
 | Chunker bridge | `extractSymbolRefsFromFile` on `src/core/tree-sitter-chunker.ts` |
 | Tests | `symbol-refs.test.ts`, `tree-sitter-refs-js.test.ts`, chunker bridge cases |
 
-**Not landed:** graph edges, PageRank, sync persistence, `find_symbol` tool.
+**Not landed (at refs PR):** graph edges, PageRank, sync persistence, `find_symbol` tool — graph/PageRank now in `2026-07-09-symbol-graph-pagerank-findings.md`.
 
 ## AST coverage (TS/JS)
 
