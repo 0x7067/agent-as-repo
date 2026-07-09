@@ -9,6 +9,19 @@ import { nodeFileSystem } from "./adapters/node-filesystem.js";
 const passageMapSchema = z.record(z.string(), z.array(z.string()));
 const fileHashMapSchema = z.record(z.string(), z.string());
 
+const symbolKindSchema = z.enum([
+  "FUNCTION",
+  "CLASS",
+  "INTERFACE",
+  "TYPE",
+  "CONST",
+  "METHOD",
+  "ENUM",
+  "MODULE",
+  "STRUCT",
+  "TRAIT",
+]);
+
 const importedNameSchema = z.object({
   local: z.string(),
   imported: z.string(),
@@ -44,7 +57,7 @@ const symbolRefSchema = z.discriminatedUnion("kind", [
 ]);
 
 const storedSymbolDefSchema = z.object({
-  kind: z.string(),
+  kind: symbolKindSchema,
   name: z.string(),
   qualifiedName: z.string(),
   className: z.string().optional(),
@@ -180,7 +193,8 @@ export async function loadState(filePath: string, fs: FileSystemPort = nodeFileS
     if (parsed.stateVersion !== STATE_SCHEMA_VERSION) {
       await throwStateFileError(filePath, `unsupported state version "${String(parsed.stateVersion)}"`, fs);
     }
-    return parsed;
+    // Zod optional fields are `T | undefined`; AgentState uses exactOptionalPropertyTypes (`T?`).
+    return parsed as AppState;
   } catch (error: unknown) {
     if (isErrno(error, "ENOENT")) {
       return createEmptyState();
