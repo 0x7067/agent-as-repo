@@ -1,7 +1,14 @@
-import path from "node:path";
 import { findDefinitions, type SymbolIndex, type SymbolLocation } from "./symbol-index.js";
 import type { CallRef, ExportRef, ImportRef, SymbolRef } from "./symbol-refs.js";
 import { isCallRef, isExportRef, isImportRef } from "./symbol-refs.js";
+import { resolveModuleSpecifier } from "./symbol-module-resolve.js";
+import type { PathAliasConfig } from "./tsconfig-paths.js";
+
+export {
+  resolveModuleSpecifier,
+  resolvePythonRelativeModule,
+  resolveRelativeModule,
+} from "./symbol-module-resolve.js";
 
 /** Stable id for a definition node in the graph. */
 export function definitionNodeId(loc: Pick<SymbolLocation, "filePath" | "qualifiedName" | "startLine">): string {
@@ -35,34 +42,8 @@ export interface FileSymbolBundle {
 export interface BuildSymbolGraphInput {
   index: SymbolIndex;
   files: readonly FileSymbolBundle[];
-}
-
-const RELATIVE_SPEC_RE = /^\.{1,2}\//;
-
-const MODULE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"] as const;
-
-/**
- * Resolve a relative ESM module specifier against the importing file's directory.
- * Tries common extensions and `/index` variants. Returns undefined for non-relative
- * or bare package specifiers (no package/`tsconfig` paths resolution in v1).
- */
-export function resolveRelativeModule(
-  fromFilePath: string,
-  moduleSpecifier: string,
-  knownFiles: ReadonlySet<string>,
-): string | undefined {
-  if (!RELATIVE_SPEC_RE.test(moduleSpecifier)) return undefined;
-
-  const dir = path.posix.dirname(fromFilePath.replaceAll("\\", "/"));
-  const joined = path.posix.normalize(path.posix.join(dir, moduleSpecifier));
-
-  const candidates = [
-    joined,
-    ...MODULE_EXTENSIONS.map((ext) => `${joined}${ext}`),
-    ...(["index.ts", "index.tsx", "index.js"] as const).map((name) => path.posix.join(joined, name)),
-  ];
-
-  return candidates.find((candidate) => knownFiles.has(candidate));
+  /** Optional tsconfig path aliases for bare/aliased import resolution. */
+  pathAliases?: PathAliasConfig;
 }
 
 interface ImportBinding {
@@ -178,10 +159,11 @@ function buildImportBindings(
   filePath: string,
   imports: readonly ImportRef[],
   knownFiles: ReadonlySet<string>,
+  pathAliases?: PathAliasConfig,
 ): ImportBinding[] {
   const bindings: ImportBinding[] = [];
   for (const imp of imports) {
-    const targetFile = resolveRelativeModule(filePath, imp.moduleSpecifier, knownFiles);
+    const targetFile = resolveModuleSpecifier(filePath, imp.moduleSpecifier, knownFiles, pathAliases);
     for (const name of imp.importedNames) {
       const binding: ImportBinding = { local: name.local, imported: name.imported };
       if (targetFile !== undefined) binding.targetFile = targetFile;
@@ -297,7 +279,7 @@ function resolveCallTargets(
  * Non-relative module specifiers are skipped (no package resolution in v1).
  */
 export function buildSymbolGraph(input: BuildSymbolGraphInput): SymbolGraph {
-  const { index, files } = input;
+  const { index, files, pathAliases } = input;
   const knownFiles = new Set(files.map((f) => f.filePath));
   for (const sym of index.symbols) knownFiles.add(sym.filePath);
 
@@ -313,7 +295,12 @@ export function buildSymbolGraph(input: BuildSymbolGraphInput): SymbolGraph {
   for (const file of files) {
     const fileId = fileNodeId(file.filePath);
     nodeSet.add(fileId);
-    const bindings = buildImportBindings(file.filePath, file.refs.filter(isImportRef), knownFiles);
+    const bindings = buildImportBindings(
+      file.filePath,
+      file.refs.filter(isImportRef),
+      knownFiles,
+      pathAliases,
+    );
 
     for (const binding of bindings) {
       if (binding.targetFile === undefined) continue;

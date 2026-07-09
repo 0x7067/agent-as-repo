@@ -14,6 +14,7 @@ import { computeSyncPlan } from "../core/sync.js";
 import { selectChunkingStrategy } from "../core/chunker.js";
 import { extractSymbolsAndRefsFromFile } from "../core/tree-sitter-chunker.js";
 import { computeSymbolRanks, toStoredSymbolFile } from "../core/symbol-store.js";
+import type { PathAliasConfig } from "../core/tsconfig-paths.js";
 import type { AgentProvider } from "../ports/agent-provider.js";
 
 export interface SyncRepoParams {
@@ -27,6 +28,8 @@ export interface SyncRepoParams {
   chunkingStrategy?: ChunkingStrategy;
   concurrency?: number;
   fullReIndexThreshold?: number;
+  /** Optional tsconfig path aliases for symbol-graph import resolution. */
+  pathAliases?: PathAliasConfig;
   onFileError?: (filePath: string, error: Error) => void;
   onProgress?: (completed: number, total: number, filePath: string) => void;
 }
@@ -172,6 +175,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
     chunkingStrategy,
     concurrency = 20,
     fullReIndexThreshold = 500,
+    pathAliases,
     onFileError,
     onProgress,
   } = params;
@@ -242,7 +246,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
   );
 
   const symbolRanks = maps.symbolsDirty
-    ? computeSymbolRanks(maps.symbols)
+    ? computeSymbolRanks(maps.symbols, pathAliases)
     : { ...agent.symbolRanks };
 
   return {

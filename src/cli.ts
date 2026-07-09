@@ -20,7 +20,10 @@ import { bootstrapAgent } from "./shell/bootstrap.js";
 import type { AgentProvider, CreateAgentParams, SendMessageOptions } from "./ports/agent-provider.js";
 import { LocalProvider } from "./shell/local-provider.js";
 import { createRepoAccess } from "./shell/repo-tools.js";
+import { formatTopSymbolsEvidence } from "./core/symbol-summary.js";
 import { createSymbolLookupFromState } from "./shell/symbol-lookup.js";
+import { loadPathAliasesFromRepo } from "./shell/tsconfig-loader.js";
+import { GitMarkdownBlockStorage } from "./shell/git-markdown-block-storage.js";
 import { SqlitePassageStore } from "./shell/sqlite-store.js";
 import { SqliteBlockStorage } from "./shell/sqlite-block-storage.js";
 import { resolveStoreDbPath } from "./shell/repo-expert-paths.js";
@@ -60,6 +63,7 @@ import { MAX_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, t
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
 import type { LocalRuntimeOptions } from "./shell/local-provider.js";
 import type { SymbolLookupPort } from "./shell/agent-tools.js";
+import type { BlockStorage } from "./shell/block-storage.js";
 
 interface SetupOpts {
   repo?: string;
@@ -190,6 +194,16 @@ class CliUserError extends Error {
   }
 }
 
+function createBlockStorage(config: Config, dbPath: string): BlockStorage {
+  if (config.memory?.gitVersioned === true) {
+    const memoryDir = path.isAbsolute(config.memory.dir)
+      ? config.memory.dir
+      : path.resolve(config.memory.dir);
+    return new GitMarkdownBlockStorage({ memoryDir });
+  }
+  return new SqliteBlockStorage(dbPath);
+}
+
 function createProvider(config: Config, symbolLookup?: SymbolLookupPort): AgentProvider {
   const llmApiKey = process.env["LLM_API_KEY"];
   const dbPath = resolveStoreDbPath();
@@ -202,7 +216,7 @@ function createProvider(config: Config, symbolLookup?: SymbolLookupPort): AgentP
       ...(llmApiKey === undefined ? {} : { apiKey: llmApiKey }),
     }),
   });
-  const blockStorage = new SqliteBlockStorage(dbPath);
+  const blockStorage = createBlockStorage(config, dbPath);
   return new LocalProvider(
     store,
     config.provider.model,
@@ -525,6 +539,7 @@ async function consolidateRepoAgent(params: {
     syncResult: { filesReIndexed: 0, filesRemoved: 0 },
     blockCharLimit: MEMORY_BLOCK_LIMIT,
     gitEvidence,
+    symbolRankEvidence: formatTopSymbolsEvidence(agentInfo.symbolFiles, agentInfo.symbolRanks),
     log: (line: string) => { console.log(line); },
   });
 
@@ -1134,7 +1149,8 @@ program
             files.map((file) => [file.path, hashFileContent(file.content)]),
           );
           const symbolFiles = buildSymbolFilesFromCollected(files);
-          const symbolRanks = computeSymbolRanks(symbolFiles);
+          const pathAliases = loadPathAliasesFromRepo(repoConfig.path);
+          const symbolRanks = computeSymbolRanks(symbolFiles, pathAliases);
           state = updatePassageMap(state, repoName, loadResult.passages);
           state = updateAgentField(state, repoName, { fileHashes, symbolFiles, symbolRanks });
           await saveState(STATE_FILE, state);
@@ -1384,6 +1400,7 @@ program
         throw new Error(`"${repoName}": provider unavailable for non-dry-run sync`);
       }
       const isTTY = !opts.json && process.stderr.isTTY;
+      const pathAliases = loadPathAliasesFromRepo(repoConfig.path);
       const syncParams = {
         provider,
         agent: agentInfo,
@@ -1401,6 +1418,7 @@ program
         },
         headCommit,
         maxFileSizeKb: MAX_FILE_SIZE_KB,
+        ...(pathAliases === undefined ? {} : { pathAliases }),
         ...(isTTY ? {
           onProgress: (completed: number, total: number, filePath: string) => {
             const label = filePath.length > 60 ? `...${filePath.slice(-57)}` : filePath;
@@ -1445,6 +1463,7 @@ program
           syncResult: result,
           blockCharLimit: MEMORY_BLOCK_LIMIT,
           gitEvidence,
+          symbolRankEvidence: formatTopSymbolsEvidence(result.symbolFiles, result.symbolRanks),
           log,
         });
         if (consolidation.consolidated && consolidation.changed) {

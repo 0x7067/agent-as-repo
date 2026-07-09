@@ -13,7 +13,9 @@ import { extractSymbolSpansRuby } from "./tree-sitter-lang-ruby.js";
 import { extractSymbolSpansRust } from "./tree-sitter-lang-rust.js";
 import { extractSymbolSpansSwift } from "./tree-sitter-lang-swift.js";
 import type { SymbolRef } from "./symbol-refs.js";
+import { extractSymbolRefsGo } from "./tree-sitter-refs-go.js";
 import { extractSymbolRefsJsTs } from "./tree-sitter-refs-js.js";
+import { extractSymbolRefsPython } from "./tree-sitter-refs-python.js";
 import { spanFromNode, type SymbolSpan } from "./tree-sitter-symbols.js";
 import type { Chunk, ChunkingStrategy, FileInfo } from "./types.js";
 
@@ -325,9 +327,17 @@ export function extractSymbolsAndRefsFromFile(file: FileInfo): {
     if (!parsed) return { spans: [], refs: [] };
     const isJsTs =
       parsed.label === "typescript" || parsed.label === "tsx" || parsed.label === "javascript";
+    let refs: SymbolRef[] = [];
+    if (isJsTs) {
+      refs = extractSymbolRefsJsTs(parsed.tree);
+    } else if (parsed.label === "python") {
+      refs = extractSymbolRefsPython(parsed.tree);
+    } else if (parsed.label === "go") {
+      refs = extractSymbolRefsGo(parsed.tree);
+    }
     return {
       spans: extractSymbolSpans(parsed.tree, parsed.label),
-      refs: isJsTs ? extractSymbolRefsJsTs(parsed.tree) : [],
+      refs,
     };
   } catch {
     return { spans: [], refs: [] };

@@ -4,6 +4,8 @@ import {
   buildSymbolGraph,
   definitionNodeId,
   fileNodeId,
+  resolveModuleSpecifier,
+  resolvePythonRelativeModule,
   resolveRelativeModule,
 } from "./symbol-graph.js";
 import type { SymbolRef } from "./symbol-refs.js";
@@ -35,6 +37,25 @@ describe("resolveRelativeModule", () => {
   it("returns undefined for bare package specifiers", () => {
     expect(resolveRelativeModule("src/use.ts", "lodash", known)).toBeUndefined();
     expect(resolveRelativeModule("src/use.ts", "node:fs", known)).toBeUndefined();
+  });
+});
+
+describe("resolveModuleSpecifier with path aliases", () => {
+  it("resolves @app/* aliases against known files", () => {
+    const known = new Set(["src/app/auth.ts"]);
+    expect(
+      resolveModuleSpecifier("src/use.ts", "@app/auth", known, {
+        baseUrl: ".",
+        paths: [{ pattern: "@app/*", targets: ["src/app/*"] }],
+      }),
+    ).toBe("src/app/auth.ts");
+  });
+});
+
+describe("resolvePythonRelativeModule", () => {
+  it("resolves .foo from a package file", () => {
+    const known = new Set(["pkg/foo.py", "pkg/__init__.py"]);
+    expect(resolvePythonRelativeModule("pkg/bar.py", ".foo", known)).toBe("pkg/foo.py");
   });
 });
 

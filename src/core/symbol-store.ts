@@ -2,6 +2,7 @@ import { buildSymbolIndex, findDefinitions, toSymbolLocation, type FindDefinitio
 import { buildSymbolGraph } from "./symbol-graph.js";
 import { pageRank } from "./symbol-pagerank.js";
 import type { SymbolRef } from "./symbol-refs.js";
+import type { PathAliasConfig } from "./tsconfig-paths.js";
 import type { SymbolKind, SymbolSpan } from "./tree-sitter-symbols.js";
 
 /** Compact definition stored per file (filePath is the map key). */
@@ -71,7 +72,10 @@ export function buildSymbolIndexFromStored(symbolFiles: SymbolFileMap): SymbolIn
 }
 
 /** Recompute PageRank scores from persisted symbol files. */
-export function computeSymbolRanks(symbolFiles: SymbolFileMap): SymbolRankMap {
+export function computeSymbolRanks(
+  symbolFiles: SymbolFileMap,
+  pathAliases?: PathAliasConfig,
+): SymbolRankMap {
   const index = buildSymbolIndexFromStored(symbolFiles);
   const files = Object.entries(symbolFiles).map(([filePath, data]) => ({
     filePath,
@@ -80,7 +84,11 @@ export function computeSymbolRanks(symbolFiles: SymbolFileMap): SymbolRankMap {
   if (index.symbols.length === 0 && files.every((f) => f.refs.length === 0)) {
     return {};
   }
-  const graph = buildSymbolGraph({ index, files });
+  const graph = buildSymbolGraph({
+    index,
+    files,
+    ...(pathAliases === undefined ? {} : { pathAliases }),
+  });
   return pageRank(graph);
 }
 
