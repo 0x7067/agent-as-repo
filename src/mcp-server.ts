@@ -181,17 +181,27 @@ export function registerTools(server: McpServer, provider: AgentProvider, admin:
   server.registerTool(
     "agent_search_archival",
     {
-      description: "Search archival memory (passages) for an agent",
+      description:
+        "Hybrid semantic + lexical (BM25) search over indexed passages. Prefer host grep/read for exact identifiers; use this for conceptual recall. Optional path_prefix stage-narrows by directory.",
       inputSchema: {
         agent_id: z.string().describe("The agent ID"),
         query: z.string().describe("Search query"),
         top_k: z.number().int().positive().optional().describe("Max results to return"),
+        path_prefix: z
+          .string()
+          .optional()
+          .describe("Optional file_path prefix to stage-narrow results (e.g. src/auth)"),
       },
     },
-    ({ agent_id, query, top_k }) =>
+    ({ agent_id, query, top_k, path_prefix }) =>
       handleTool(async () => {
         await assertAgentExists(admin, agent_id);
-        const results = await admin.searchPassages(agent_id, query, top_k);
+        const results = await admin.searchPassages(
+          agent_id,
+          query,
+          top_k,
+          path_prefix === undefined || path_prefix === "" ? undefined : { pathPrefix: path_prefix },
+        );
         return JSON.stringify(results, null, 2);
       }),
   );

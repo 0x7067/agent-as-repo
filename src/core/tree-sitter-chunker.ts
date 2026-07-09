@@ -72,7 +72,7 @@ const GRAMMAR_LABEL_BY_EXTENSION: Record<string, GrammarLabel> = {
   ".swift": "swift",
 };
 
-function grammarLabelForPath(filePath: string): GrammarLabel | null {
+export function grammarLabelForPath(filePath: string): GrammarLabel | null {
   const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
   return GRAMMAR_LABEL_BY_EXTENSION[ext] ?? null;
 }
@@ -288,6 +288,23 @@ export function resetTreeSitterChunkerForTests(): void {
   languageByLabel.clear();
 }
 
+/**
+ * Extract definition spans for a file using the initialized tree-sitter
+ * grammars. Returns [] when the chunker is uninitialized, the extension is
+ * unsupported, or parsing fails. Pure consumers (symbol index) can call this
+ * after `initTreeSitterChunker`.
+ */
+export function extractSymbolSpansFromFile(file: FileInfo): SymbolSpan[] {
+  if (!file.content.trim() || !initialized || !parser) return [];
+  try {
+    const parsed = parseFile(file);
+    if (!parsed) return [];
+    return extractSymbolSpans(parsed.tree, parsed.label);
+  } catch {
+    return [];
+  }
+}
+
 export const treeSitterStrategy: ChunkingStrategy = (file: FileInfo): Chunk[] => {
   if (!file.content.trim()) return [];
 
@@ -296,10 +313,7 @@ export const treeSitterStrategy: ChunkingStrategy = (file: FileInfo): Chunk[] =>
   }
 
   try {
-    const parsed = parseFile(file);
-    if (!parsed) return chunkFile(file.path, file.content, MAX_CHUNK_CHARS);
-
-    const spans = extractSymbolSpans(parsed.tree, parsed.label);
+    const spans = extractSymbolSpansFromFile(file);
     if (spans.length === 0) {
       return chunkFile(file.path, file.content, MAX_CHUNK_CHARS);
     }

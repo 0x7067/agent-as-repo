@@ -16,9 +16,20 @@ export interface CoreMemoryBlock {
   limit: number;
 }
 
+/** Optional filters for admin passage search (mirrors SemanticSearchOptions). */
+export interface SearchPassagesOptions {
+  pathPrefix?: string;
+}
+
 export interface AdminPort {
   listAgents(this: void): Promise<AgentSummary[]>;
   getAgent(this: void, agentId: string): Promise<Record<string, unknown>>;
   getCoreMemory(this: void, agentId: string): Promise<CoreMemoryBlock[]>;
-  searchPassages(this: void, agentId: string, query: string, limit?: number): Promise<PassageResult[]>;
+  searchPassages(
+    this: void,
+    agentId: string,
+    query: string,
+    limit?: number,
+    options?: SearchPassagesOptions,
+  ): Promise<PassageResult[]>;
 }

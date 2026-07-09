@@ -32,8 +32,19 @@ export class AdminAdapter implements AdminPort {
     return results;
   }
 
-  async searchPassages(agentId: string, query: string, limit?: number): Promise<PassageResult[]> {
-    const results = await this.store.semanticSearch(agentId, query, limit ?? 10);
+  async searchPassages(
+    agentId: string,
+    query: string,
+    limit?: number,
+    options?: { pathPrefix?: string },
+  ): Promise<PassageResult[]> {
+    const pathPrefix = options?.pathPrefix;
+    const results = await this.store.semanticSearch(
+      agentId,
+      query,
+      limit ?? 10,
+      pathPrefix === undefined || pathPrefix === "" ? undefined : { pathPrefix },
+    );
     return results.map((r) => ({ id: r.id, text: r.text }));
   }
 }

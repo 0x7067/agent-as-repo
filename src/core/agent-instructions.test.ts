@@ -19,11 +19,16 @@ describe("renderInstructionsBlock", () => {
     expect(block).toContain("Indexed repos: my-app, other-repo");
   });
 
-  it("mentions the repo-expert MCP server and its tool names", () => {
+  it("positions repo-expert as a memory layer under the host harness", () => {
     const block = renderInstructionsBlock({ repoNames: ["my-app"] });
+    expect(block).toContain("Repo Expert (memory layer)");
     expect(block).toContain("repo-expert");
-    expect(block).toContain("agent_call");
+    expect(block).toContain("host's");
+    expect(block).toContain("grep/read/glob");
+    expect(block).toContain("agent_get_core_memory");
     expect(block).toContain("agent_search_archival");
+    expect(block).toContain("path_prefix");
+    expect(block).toContain("agent_call");
   });
 });
 

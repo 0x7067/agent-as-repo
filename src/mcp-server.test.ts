@@ -425,13 +425,21 @@ describe("MCP Server tools", () => {
       const result = await handler({ agent_id: "agent-1", query: "auth" });
       const data = parseToolJson(result) as Array<{ id: string; text: string }>;
       expect(data).toEqual([{ id: "p-1", text: "found it" }]);
-      expect(mockAdmin.searchPassages).toHaveBeenCalledWith("agent-1", "auth", undefined);
+      expect(mockAdmin.searchPassages).toHaveBeenCalledWith("agent-1", "auth", undefined, undefined);
     });
 
     it("passes top_k when provided", async () => {
       const handler = extractToolHandler(server, "agent_search_archival");
       await handler({ agent_id: "agent-1", query: "auth", top_k: 5 });
-      expect(mockAdmin.searchPassages).toHaveBeenCalledWith("agent-1", "auth", 5);
+      expect(mockAdmin.searchPassages).toHaveBeenCalledWith("agent-1", "auth", 5, undefined);
+    });
+
+    it("forwards path_prefix to searchPassages", async () => {
+      const handler = extractToolHandler(server, "agent_search_archival");
+      await handler({ agent_id: "agent-1", query: "auth", path_prefix: "src/auth" });
+      expect(mockAdmin.searchPassages).toHaveBeenCalledWith("agent-1", "auth", undefined, {
+        pathPrefix: "src/auth",
+      });
     });
 
     it("returns a clear 'agent not found' error for a nonexistent agent instead of succeeding empty", async () => {
