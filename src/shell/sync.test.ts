@@ -137,8 +137,8 @@ describe("syncRepo", () => {
 
     const stored = result.symbolFiles["src/a.ts"];
     expect(stored).toBeDefined();
-    expect(stored!.symbols.some((s) => s.name === "helper")).toBe(true);
-    expect(stored!.refs.some((r) => r.kind === "call")).toBe(true);
+    expect(stored.symbols.some((s) => s.name === "helper")).toBe(true);
+    expect(stored.refs.some((r) => r.kind === "call")).toBe(true);
     expect(Object.keys(result.symbolRanks).length).toBeGreaterThan(0);
 
     const deleted = await syncRepo({

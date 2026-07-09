@@ -78,21 +78,20 @@ describe("computeSymbolRanks / findRankedSymbols", () => {
         [{ kind: "FUNCTION", name: "run", startIndex: 0, endIndex: 10 }],
         otherRefs,
       ),
+      // Ambiguous: another helper elsewhere with no inbound edges
+      "src/lonely.ts": toStoredSymbolFile(
+        "src/lonely.ts",
+        "function helper() {}",
+        [helperSpan],
+        [],
+      ),
     };
-
-    // Ambiguous: another helper elsewhere with no inbound edges
-    symbolFiles["src/lonely.ts"] = toStoredSymbolFile(
-      "src/lonely.ts",
-      "function helper() {}",
-      [helperSpan],
-      [],
-    );
 
     const ranks = computeSymbolRanks(symbolFiles);
     const index = buildSymbolIndexFromStored(symbolFiles);
     const hits = findRankedSymbols(index, "helper", ranks);
     expect(hits).toHaveLength(2);
     expect(hits[0]?.filePath).toBe("src/lib.ts");
-    expect(hits[0]!.rank).toBeGreaterThan(hits[1]!.rank);
+    expect(hits[0]?.rank ?? 0).toBeGreaterThan(hits[1]?.rank ?? 0);
   });
 });
