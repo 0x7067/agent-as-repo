@@ -76,7 +76,9 @@ describe("buildSymbolIndex / findDefinitions / listSymbolsInFile", () => {
 
   it("findDefinitions returns all matches by bare name", () => {
     const hits = findDefinitions(index, "foo");
-    expect(hits.map((h) => h.filePath).sort()).toEqual(["src/a.ts", "src/b.ts"]);
+    const paths = hits.map((h) => h.filePath);
+    // eslint-disable-next-line unicorn/no-array-sort -- Array#toSorted requires ES2023; project targets ES2022
+    expect([...paths].sort((a, b) => a.localeCompare(b))).toEqual(["src/a.ts", "src/b.ts"]);
   });
 
   it("findDefinitions matches qualified method names", () => {

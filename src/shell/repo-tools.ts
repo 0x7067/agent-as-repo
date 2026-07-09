@@ -30,19 +30,34 @@ function toolError(message: string): string {
   return JSON.stringify({ error: message });
 }
 
-function requireRepo(access: RepoAccessPort, agentId: string): RepoConfig | string {
+function resolveRepoOrError(
+  access: RepoAccessPort,
+  agentId: string,
+): { ok: true; repo: RepoConfig } | { ok: false; error: string } {
   const repo = access.resolve(agentId);
   if (repo === undefined) {
-    return toolError(
-      `No repo path configured for agent '${agentId}'. Agentic tools need config.yaml repos.${agentId}.path.`,
-    );
+    return {
+      ok: false,
+      error: toolError(
+        `No repo path configured for agent '${agentId}'. Agentic tools need config.yaml repos.${agentId}.path.`,
+      ),
+    };
   }
-  return repo;
+  return { ok: true, repo };
+}
+
+function stdoutFromExecError(error: {
+  stdout?: string | Buffer;
+}): string {
+  if (typeof error.stdout === "string") return error.stdout;
+  if (Buffer.isBuffer(error.stdout)) return error.stdout.toString("utf8");
+  return "";
 }
 
 /** Default ripgrep runner using execFileSync (arg arrays only). */
 export function defaultGrepRunner(args: string[], cwd: string): GrepRunnerResult {
   try {
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- rg is an intentional host dependency resolved from PATH
     const stdout = execFileSync("rg", args, {
       cwd,
       encoding: "utf8",
@@ -54,9 +69,7 @@ export function defaultGrepRunner(args: string[], cwd: string): GrepRunnerResult
       const err = error as {
         status?: number | null;
         stdout?: string | Buffer;
-        stderr?: string | Buffer;
         code?: string;
-        message?: string;
       };
       if (err.code === "ENOENT") {
         return {
@@ -65,14 +78,8 @@ export function defaultGrepRunner(args: string[], cwd: string): GrepRunnerResult
           error: "ripgrep (rg) is not installed or not on PATH. Install rg to enable grep_repo.",
         };
       }
-      const stdout =
-        typeof err.stdout === "string"
-          ? err.stdout
-          : Buffer.isBuffer(err.stdout)
-            ? err.stdout.toString("utf8")
-            : "";
       // rg exits 1 when there are no matches — treat as success with empty hits.
-      return { stdout, exitCode: err.status ?? 1 };
+      return { stdout: stdoutFromExecError(err), exitCode: err.status ?? 1 };
     }
     return { stdout: "", exitCode: 1, error: String(error) };
   }
@@ -99,14 +106,14 @@ function truncateOutput(text: string): string {
   return `${text.slice(0, GREP_OUTPUT_CAP_CHARS)}\n…[truncated]`;
 }
 
-export async function handleGrepRepo(
+export function handleGrepRepo(
   access: RepoAccessPort,
   agentId: string,
   args: Record<string, unknown>,
-): Promise<string> {
-  const repoOrError = requireRepo(access, agentId);
-  if (typeof repoOrError === "string") return repoOrError;
-  const repo = repoOrError;
+): string {
+  const resolved = resolveRepoOrError(access, agentId);
+  if (!resolved.ok) return resolved.error;
+  const { repo } = resolved;
 
   const pattern = asString(args["pattern"]);
   if (pattern === undefined || pattern === "") {
@@ -156,9 +163,9 @@ export async function handleGlobFiles(
   agentId: string,
   args: Record<string, unknown>,
 ): Promise<string> {
-  const repoOrError = requireRepo(access, agentId);
-  if (typeof repoOrError === "string") return repoOrError;
-  const repo = repoOrError;
+  const resolved = resolveRepoOrError(access, agentId);
+  if (!resolved.ok) return resolved.error;
+  const { repo } = resolved;
 
   const pattern = asString(args["pattern"]) ?? "**/*";
   const cwd = repo.basePath ? path.join(repo.path, repo.basePath) : repo.path;
@@ -198,9 +205,9 @@ export async function handleReadFile(
   agentId: string,
   args: Record<string, unknown>,
 ): Promise<string> {
-  const repoOrError = requireRepo(access, agentId);
-  if (typeof repoOrError === "string") return repoOrError;
-  const repo = repoOrError;
+  const resolved = resolveRepoOrError(access, agentId);
+  if (!resolved.ok) return resolved.error;
+  const { repo } = resolved;
 
   const relativePath = asString(args["path"]);
   if (relativePath === undefined || relativePath === "") {

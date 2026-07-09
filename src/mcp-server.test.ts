@@ -176,19 +176,19 @@ describe("buildRuntime", () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it("builds a provider and admin from env/defaults", async () => {
-    const runtime = await buildRuntime();
+  it("builds a provider and admin from env/defaults", () => {
+    const runtime = buildRuntime();
     expect(runtime.provider).toBeDefined();
     expect(runtime.admin).toBeDefined();
     expect(typeof runtime.provider.sendMessage).toBe("function");
     expect(typeof runtime.admin.listAgents).toBe("function");
   });
 
-  it("builds without throwing when a custom base URL and key are set", async () => {
+  it("builds without throwing when a custom base URL and key are set", () => {
     process.env["LLM_MODEL"] = "llama3.1:8b";
     process.env["LLM_BASE_URL"] = "https://openrouter.ai/api/v1";
     process.env["LLM_API_KEY"] = "sk-test";
-    await expect(buildRuntime()).resolves.toBeDefined();
+    expect(() => buildRuntime()).not.toThrow();
   });
 });
 

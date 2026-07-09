@@ -29,25 +29,25 @@ const REPO = {
 };
 
 describe("repo-tools handlers", () => {
-  it("grep_repo returns matches from the grep runner", async () => {
+  it("grep_repo returns matches from the grep runner", () => {
     const grep = vi.fn().mockReturnValue({ stdout: "src/a.ts:1:foo", exitCode: 0 });
     const access = createRepoAccess({ myrepo: REPO }, { fs: makeFakeFs(), grep });
-    const result = JSON.parse(await handleGrepRepo(access, "myrepo", { pattern: "foo" })) as {
+    const result = JSON.parse(handleGrepRepo(access, "myrepo", { pattern: "foo" })) as {
       matches: string;
     };
     expect(result.matches).toContain("foo");
     expect(grep).toHaveBeenCalledWith(expect.arrayContaining(["foo"]), "/repo");
   });
 
-  it("grep_repo rejects path traversal", async () => {
+  it("grep_repo rejects path traversal", () => {
     const access = createRepoAccess({ myrepo: REPO }, { fs: makeFakeFs(), grep: vi.fn() });
     const result = JSON.parse(
-      await handleGrepRepo(access, "myrepo", { pattern: "x", path: "../outside" }),
+      handleGrepRepo(access, "myrepo", { pattern: "x", path: "../outside" }),
     ) as { error: string };
     expect(result.error).toMatch(/escapes|traversal/i);
   });
 
-  it("grep_repo reports missing rg binary", async () => {
+  it("grep_repo reports missing rg binary", () => {
     const access = createRepoAccess(
       { myrepo: REPO },
       {
@@ -59,7 +59,7 @@ describe("repo-tools handlers", () => {
         }),
       },
     );
-    const result = JSON.parse(await handleGrepRepo(access, "myrepo", { pattern: "x" })) as {
+    const result = JSON.parse(handleGrepRepo(access, "myrepo", { pattern: "x" })) as {
       error: string;
     };
     expect(result.error).toMatch(/ripgrep/i);
@@ -102,9 +102,9 @@ describe("repo-tools handlers", () => {
     expect(result.error).toMatch(/size limit/i);
   });
 
-  it("returns a clear error when the agent has no repo config", async () => {
+  it("returns a clear error when the agent has no repo config", () => {
     const access = createRepoAccess({}, { fs: makeFakeFs(), grep: vi.fn() });
-    const result = JSON.parse(await handleGrepRepo(access, "missing", { pattern: "x" })) as {
+    const result = JSON.parse(handleGrepRepo(access, "missing", { pattern: "x" })) as {
       error: string;
     };
     expect(result.error).toMatch(/No repo path configured/i);

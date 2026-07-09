@@ -13,7 +13,7 @@ import type { PassageStore } from "../ports/passage-store.js";
 import type { RepoAccessPort } from "../ports/repo-access.js";
 import { toolCallingLoop, DEFAULT_LLM_BASE_URL, type ToolDefinition, type ToolHandler } from "./llm-client.js";
 import type { BlockStorage } from "./block-storage.js";
-import { handleGlobFiles, handleGrepRepo, handleReadFile } from "./repo-tools.js";
+import { buildAskTools, CONSOLIDATION_MEMORY_REPLACE_TOOL } from "./agent-tools.js";
 
 export interface LocalRuntimeOptions {
   baseUrl?: string;
@@ -189,139 +189,17 @@ export class LocalProvider implements AgentProvider {
     if (this.agenticTools) {
       systemPromptParts.push(`\n${agenticSearchGuidance()}`);
     }
-    const systemPrompt = systemPromptParts.join("\n");
 
-    const tools: ToolDefinition[] = [];
-    const toolHandlers: Partial<Record<string, ToolHandler>> = {};
-
-    if (this.agenticTools) {
-      tools.push(
-        {
-          type: "function",
-          function: {
-            name: "grep_repo",
-            description:
-              "Regex search the live repository with ripgrep. Prefer this for exact identifiers, strings, and patterns.",
-            parameters: {
-              type: "object",
-              properties: {
-                pattern: { type: "string", description: "Regex or fixed pattern to search for" },
-                path: { type: "string", description: "Optional relative directory or file to scope the search" },
-                glob: { type: "string", description: "Optional glob filter (e.g. *.ts)" },
-                case_insensitive: { type: "boolean", description: "Case-insensitive search" },
-                max_results: { type: "number", description: "Max matches per file (default 50)" },
-              },
-              required: ["pattern"],
-            },
-          },
-        },
-        {
-          type: "function",
-          function: {
-            name: "glob_files",
-            description: "List files in the live repository matching a glob pattern",
-            parameters: {
-              type: "object",
-              properties: {
-                pattern: { type: "string", description: "Glob pattern (default **/*)" },
-              },
-              required: [],
-            },
-          },
-        },
-        {
-          type: "function",
-          function: {
-            name: "read_file",
-            description: "Read a file from the live repository by relative path",
-            parameters: {
-              type: "object",
-              properties: {
-                path: { type: "string", description: "Relative path from the repo root" },
-              },
-              required: ["path"],
-            },
-          },
-        },
-      );
-
-      const missingRepoAccess = (): string =>
-        JSON.stringify({
-          error:
-            "Live repo access is not configured for this agent. Archival search still works; configure config.yaml repos to enable grep/glob/read.",
-        });
-
-      toolHandlers["grep_repo"] = async (args: Record<string, unknown>): Promise<string> => {
-        if (this.repoAccess === undefined) return missingRepoAccess();
-        return handleGrepRepo(this.repoAccess, agentId, args);
-      };
-      toolHandlers["glob_files"] = async (args: Record<string, unknown>): Promise<string> => {
-        if (this.repoAccess === undefined) return missingRepoAccess();
-        return handleGlobFiles(this.repoAccess, agentId, args);
-      };
-      toolHandlers["read_file"] = async (args: Record<string, unknown>): Promise<string> => {
-        if (this.repoAccess === undefined) return missingRepoAccess();
-        return handleReadFile(this.repoAccess, agentId, args);
-      };
-    }
-
-    tools.push(
-      {
-        type: "function",
-        function: {
-          name: "archival_memory_search",
-          description:
-            "Semantic + BM25 recall over indexed passages. Use for conceptual questions; optionally narrow with path_prefix.",
-          parameters: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Search query" },
-              path_prefix: {
-                type: "string",
-                description: "Optional file_path prefix to stage-narrow results (e.g. src/auth)",
-              },
-            },
-            required: ["query"],
-          },
-        },
-      },
-      {
-        type: "function",
-        function: {
-          name: "memory_replace",
-          description: "Update a memory block with new content",
-          parameters: {
-            type: "object",
-            properties: {
-              label: { type: "string", description: "Block label (persona, architecture, conventions)" },
-              value: { type: "string", description: "New block content" },
-            },
-            required: ["label", "value"],
-          },
-        },
-      },
-    );
-
-    toolHandlers["archival_memory_search"] = async (args: Record<string, unknown>): Promise<string> => {
-      const query = args["query"] as string;
-      const pathPrefix = typeof args["path_prefix"] === "string" ? args["path_prefix"] : undefined;
-      const results = await this.store.semanticSearch(
-        agentId,
-        query,
-        10,
-        pathPrefix === undefined || pathPrefix === "" ? undefined : { pathPrefix },
-      );
-      return JSON.stringify(results);
-    };
-    toolHandlers["memory_replace"] = async (args: Record<string, unknown>): Promise<string> => {
-      const label = args["label"] as string;
-      const value = args["value"] as string;
-      await this.updateBlock(agentId, label, value);
-      return `Updated block '${label}'`;
-    };
+    const { tools, toolHandlers } = buildAskTools({
+      agentId,
+      agenticTools: this.agenticTools,
+      repoAccess: this.repoAccess,
+      store: this.store,
+      updateBlock: (id, label, value) => this.updateBlock(id, label, value),
+    });
 
     return this.runToolCallingLoop({
-      systemPrompt,
+      systemPrompt: systemPromptParts.join("\n"),
       userMessage: content,
       tools,
       toolHandlers,
@@ -344,24 +222,7 @@ export class LocalProvider implements AgentProvider {
       "Refine only those two blocks. Never modify the persona block.",
     ].join("\n");
 
-    const tools: ToolDefinition[] = [
-      {
-        type: "function",
-        function: {
-          name: "memory_replace",
-          description: "Update the architecture or conventions memory block with new content",
-          parameters: {
-            type: "object",
-            properties: {
-              label: { type: "string", description: "Block label (architecture or conventions)" },
-              value: { type: "string", description: "New block content" },
-            },
-            required: ["label", "value"],
-          },
-        },
-      },
-    ];
-
+    const tools: ToolDefinition[] = [CONSOLIDATION_MEMORY_REPLACE_TOOL];
     const toolHandlers = {
       memory_replace: async (args: Record<string, unknown>): Promise<string> => {
         const label = args["label"];

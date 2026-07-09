@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- passage store + hybrid search intentionally stay in one module. */
 import { extractSourcePath } from "../core/chunker.js";
 import { rrfFuse, toFtsMatchQuery } from "../core/hybrid-rank.js";
 import type {
@@ -392,3 +393,4 @@ export class SqlitePassageStore implements PassageStore {
     if (!this.vectorTableReady) this.ensureVectorTable(stored);
   }
 }
+/* eslint-enable max-lines */

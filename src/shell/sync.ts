@@ -118,7 +118,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
   const plan = computeSyncPlan(agent.passages, changedFiles, fullReIndexThreshold);
   const limit = pLimit(concurrency);
   let updatedPassages: PassageMap = { ...agent.passages };
-  let updatedHashes: FileHashMap = { ...(agent.fileHashes ?? {}) };
+  let updatedHashes: FileHashMap = { ...agent.fileHashes };
   const stalePassageIds: string[] = [];
   const failedFiles: string[] = [];
   let filesReIndexed = 0;
@@ -140,9 +140,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
       } else {
         const nextHash = hashFileContent(indexableFileInfo.content);
         const previousHash = updatedHashes[filePath];
-        if (!shouldReindexFile(previousHash, nextHash)) {
-          filesSkippedUnchanged++;
-        } else {
+        if (shouldReindexFile(previousHash, nextHash)) {
           const chunks = effectiveChunkingStrategy(indexableFileInfo);
           const passageIds = await storeFileChunks(provider, agent.agentId, chunks, limit);
 
@@ -151,6 +149,8 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
           updatedPassages[filePath] = passageIds;
           updatedHashes[filePath] = nextHash;
           filesReIndexed++;
+        } else {
+          filesSkippedUnchanged++;
         }
       }
     } catch (error_) {

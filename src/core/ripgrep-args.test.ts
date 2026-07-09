@@ -47,7 +47,10 @@ describe("buildRipgrepArgs", () => {
     });
     const globs: string[] = [];
     for (let i = 0; i < args.length; i++) {
-      if (args[i] === "--glob") globs.push(args[i + 1]!);
+      if (args[i] === "--glob") {
+        const value = args.at(i + 1);
+        if (typeof value === "string") globs.push(value);
+      }
     }
     expect(globs).toContain("!node_modules/**");
     expect(globs).toContain("!.git/**");

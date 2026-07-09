@@ -76,7 +76,7 @@ export function getRuntimeOptionsFromEnv(): LocalRuntimeOptions {
  * MCP runtime is a memory layer under coding harnesses (Claude Code / Cursor /
  * Codex). It does not enable agenticTools — the host already has grep/glob/read.
  */
-export async function buildRuntime(): Promise<Runtime> {
+export function buildRuntime(): Runtime {
   const model = process.env["LLM_MODEL"] ?? DEFAULT_LLM_MODEL;
   const baseUrl = process.env["LLM_BASE_URL"] ?? DEFAULT_LLM_BASE_URL;
   const embeddingModel = process.env["LLM_EMBEDDING_MODEL"] ?? DEFAULT_EMBEDDING_MODEL;
@@ -281,7 +281,7 @@ function errorMessage(err: unknown): string {
 
 export async function main(): Promise<void> {
   const server = new McpServer({ name: "repo-expert-mcp", version: readPackageVersion() });
-  const runtime = await buildRuntime();
+  const runtime = buildRuntime();
   registerTools(server, runtime.provider, runtime.admin);
   const transport = new StdioServerTransport();
   await server.connect(transport);

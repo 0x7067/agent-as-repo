@@ -25,8 +25,14 @@ export function buildRipgrepArgs(options: RipgrepArgsOptions): string[] {
     args.push("-i");
   }
 
-  args.push("--line-number", "--no-heading", "--color", "never");
-  args.push("--max-count", String(maxResults));
+  args.push(
+    "--line-number",
+    "--no-heading",
+    "--color",
+    "never",
+    "--max-count",
+    String(maxResults),
+  );
 
   if (options.glob !== undefined) {
     args.push("--glob", options.glob);

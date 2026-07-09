@@ -80,10 +80,9 @@ function compareLocations(a: SymbolLocation, b: SymbolLocation): number {
 }
 
 export function listSymbolsInFile(index: SymbolIndex, filePath: string): SymbolLocation[] {
-  return index.symbols
-    .filter((symbol) => symbol.filePath === filePath)
-    .slice()
-    .sort(compareLocations);
+  const matches = index.symbols.filter((symbol) => symbol.filePath === filePath);
+  // eslint-disable-next-line unicorn/no-array-sort -- Array#toSorted requires ES2023; project targets ES2022
+  return [...matches].sort(compareLocations);
 }
 
 export function findDefinitions(
