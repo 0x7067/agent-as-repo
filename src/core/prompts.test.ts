@@ -6,7 +6,7 @@ import {
 } from "./prompts.js";
 
 const REPO_NAME = "my-app";
-const ARCHIVAL_MEMORY = "archival memory";
+const ARCHIVAL_MEMORY = "archival_memory_search";
 
 describe("buildPersona", () => {
   it("generates persona from repo name and description", () => {
@@ -17,6 +17,9 @@ describe("buildPersona", () => {
     expect(persona).toContain("architecture and conventions memory blocks");
     expect(persona).toContain("Be specific");
     expect(persona).toContain("do NOT pass tags");
+    expect(persona).toContain("grep_repo");
+    expect(persona).toContain("glob_files");
+    expect(persona).toContain("read_file");
   });
 
   it("uses custom persona instead of default when provided", () => {
@@ -42,16 +45,18 @@ describe("buildPersona", () => {
 
   it("contains all required instruction lines", () => {
     const persona = buildPersona(REPO_NAME, "desc");
-    expect(persona).toContain("All project source files are stored in my archival memory");
+    expect(persona).toContain("grep_repo / glob_files / read_file");
     expect(persona).toContain("first consult my architecture and conventions memory blocks");
-    expect(persona).toContain("then search archival memory");
+    expect(persona).toContain("archival_memory_search");
+    expect(persona).toContain("path_prefix");
   });
 });
 
 describe("bootstrap prompts", () => {
-  it("architecture prompt mentions archival memory search", () => {
+  it("architecture prompt mentions archival memory search and live tools", () => {
     const prompt = architectureBootstrapPrompt();
     expect(prompt).toContain(ARCHIVAL_MEMORY);
+    expect(prompt).toContain("grep_repo");
     expect(prompt).toContain("architecture");
     expect(prompt).toContain("memory_replace");
   });
@@ -76,9 +81,10 @@ describe("bootstrap prompts", () => {
     expect(prompt).toContain("\n");
   });
 
-  it("conventions prompt mentions archival memory search", () => {
+  it("conventions prompt mentions archival memory search and live tools", () => {
     const prompt = conventionsBootstrapPrompt();
     expect(prompt).toContain(ARCHIVAL_MEMORY);
+    expect(prompt).toContain("grep_repo");
     expect(prompt).toContain("conventions");
     expect(prompt).toContain("memory_replace");
   });

@@ -120,6 +120,18 @@ describe("SqlitePassageStore", () => {
     expect(results.map((r) => r.id)).toEqual(["p-a"]);
   });
 
+  it("scopes semanticSearch to a file_path prefix when pathPrefix is set", async () => {
+    await store.initAgent("repo-a", MANIFEST);
+    await store.writePassage("repo-a", "p-auth", "FILE: src/auth/login.ts\n\nauthentication login session");
+    await store.writePassage("repo-a", "p-ui", "FILE: src/ui/button.ts\n\nauthentication login session");
+
+    const results = await store.semanticSearch("repo-a", "authentication login session", 10, {
+      pathPrefix: "src/auth",
+    });
+
+    expect(results.map((r) => r.id)).toEqual(["p-auth"]);
+  });
+
   it("rejects embeddings whose dimension no longer matches the stored index", async () => {
     await store.initAgent("repo-a", MANIFEST);
     await store.writePassage("repo-a", "p-1", "eight dims");

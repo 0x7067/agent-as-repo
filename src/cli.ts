@@ -19,11 +19,13 @@ import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
 import { bootstrapAgent } from "./shell/bootstrap.js";
 import type { AgentProvider, CreateAgentParams, SendMessageOptions } from "./ports/agent-provider.js";
 import { LocalProvider } from "./shell/local-provider.js";
+import { createRepoAccess } from "./shell/repo-tools.js";
 import { SqlitePassageStore } from "./shell/sqlite-store.js";
 import { SqliteBlockStorage } from "./shell/sqlite-block-storage.js";
 import { resolveStoreDbPath } from "./shell/repo-expert-paths.js";
 import { createEmbedder } from "./shell/embedder-factory.js";
 import { selectChunkingStrategy } from "./core/chunker.js";
+import { hashFileContent } from "./core/content-hash.js";
 import { initTreeSitterChunker } from "./core/tree-sitter-chunker.js";
 import { repoFilterOptions, shouldIncludeFile } from "./core/filter.js";
 import { partitionDiffPaths } from "./core/submodule.js";
@@ -202,6 +204,7 @@ function createProvider(config: Config): AgentProvider {
     {
       baseUrl: config.provider.baseUrl,
       fallbackModels: config.provider.fallbackModels,
+      repoAccess: createRepoAccess(config.repos),
       ...(llmApiKey === undefined ? {} : { apiKey: llmApiKey }),
       ...getRuntimeOptionsFromEnv(),
     },
@@ -1105,7 +1108,11 @@ program
           if (loadResult.failedChunks > 0) {
             warn(`${String(loadResult.failedChunks)}/${String(chunks.length)} chunks failed to load`);
           }
+          const fileHashes = Object.fromEntries(
+            files.map((file) => [file.path, hashFileContent(file.content)]),
+          );
           state = updatePassageMap(state, repoName, loadResult.passages);
+          state = updateAgentField(state, repoName, { fileHashes });
           await saveState(STATE_FILE, state);
           indexMs = Date.now() - indexStart;
           log(`  Index phase completed in ${formatDurationMs(indexMs)}.`);
@@ -1385,9 +1392,15 @@ program
         log(`  Warning: ${String(changedFiles.length)} files changed — consider --full re-index`);
       }
 
-      log(`  Removed: ${String(result.filesRemoved)} files, Re-indexed: ${String(result.filesReIndexed)} files`);
+      log(
+        `  Removed: ${String(result.filesRemoved)} files, Re-indexed: ${String(result.filesReIndexed)} files, Skipped (unchanged): ${String(result.filesSkippedUnchanged)} files`,
+      );
 
-      state = updateAgentField(state, repoName, { passages: result.passages, lastSyncCommit: result.lastSyncCommit });
+      state = updateAgentField(state, repoName, {
+        passages: result.passages,
+        fileHashes: result.fileHashes,
+        lastSyncCommit: result.lastSyncCommit,
+      });
       await saveState(STATE_FILE, state);
 
       if (shouldConsolidate(result, config.consolidateOnSync)) {

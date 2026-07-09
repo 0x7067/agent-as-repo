@@ -82,9 +82,34 @@ describe("syncRepo", () => {
     expect(provider.storePassage).toHaveBeenCalled();
     expect(result.lastSyncCommit).toBe("def456");
     expect(result.passages["src/a.ts"]).toBeDefined();
+    expect(result.fileHashes["src/a.ts"]).toMatch(/^[0-9a-f]{64}$/);
     // b.ts passages unchanged
     expect(result.passages["src/b.ts"]).toEqual(["p-3"]);
     expect(result.failedFiles).toEqual([]);
+  });
+
+  it("skips re-index when file content hash is unchanged", async () => {
+    const { hashFileContent } = await import("../core/content-hash.js");
+    const content = "unchanged body";
+    const provider = makeMockProvider();
+    const agentWithHash = {
+      ...testAgent,
+      fileHashes: { "src/a.ts": hashFileContent(content), "src/b.ts": "other" },
+    };
+    const result = await syncRepo({
+      provider,
+      agent: agentWithHash,
+      changedFiles: ["src/a.ts"],
+      collectFile: (path) => Promise.resolve({ path, content, sizeKb: 1 }),
+      headCommit: "def456",
+    });
+
+    expect(provider.storePassage).not.toHaveBeenCalled();
+    expect(provider.deletePassage).not.toHaveBeenCalled();
+    expect(result.filesReIndexed).toBe(0);
+    expect(result.filesSkippedUnchanged).toBe(1);
+    expect(result.passages["src/a.ts"]).toEqual(["p-1", "p-2"]);
+    expect(result.fileHashes["src/a.ts"]).toBe(hashFileContent(content));
   });
 
   it("handles deleted files (collectFile returns null)", async () => {

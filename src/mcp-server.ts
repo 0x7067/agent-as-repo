@@ -1,9 +1,12 @@
 #!/usr/bin/env node
+import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod/v4";
 import type { AgentProvider, SendMessageOptions } from "./ports/agent-provider.js";
 import type { AdminPort } from "./ports/admin.js";
+import type { Config } from "./core/types.js";
+import { MEMORY_BLOCK_LIMIT } from "./core/types.js";
 import { LocalProvider, type LocalRuntimeOptions } from "./shell/local-provider.js";
 import { AdminAdapter } from "./shell/adapters/admin-adapter.js";
 import { SqlitePassageStore } from "./shell/sqlite-store.js";
@@ -13,7 +16,8 @@ import { createEmbedder, parseEmbeddingEngine } from "./shell/embedder-factory.j
 import { withTimeoutSignal } from "./shell/with-timeout.js";
 import { readPackageVersion } from "./shell/package-version.js";
 import { isMainModule } from "./shell/is-main-module.js";
-import { MEMORY_BLOCK_LIMIT } from "./core/types.js";
+import { loadConfig } from "./shell/config-loader.js";
+import { createRepoAccess } from "./shell/repo-tools.js";
 
 const ASK_DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_LLM_MODEL = "qwen3-coder:30b";
@@ -72,7 +76,19 @@ export function getRuntimeOptionsFromEnv(): LocalRuntimeOptions {
   };
 }
 
-export function buildRuntime(): Runtime {
+/** Load config.yaml for repo paths when present; agentic tools degrade gracefully if missing. */
+export async function loadOptionalReposConfig(): Promise<Config | null> {
+  const configPath = process.env["REPO_EXPERT_CONFIG"]
+    ? path.resolve(process.env["REPO_EXPERT_CONFIG"])
+    : path.resolve("config.yaml");
+  try {
+    return await loadConfig(configPath);
+  } catch {
+    return null;
+  }
+}
+
+export async function buildRuntime(): Promise<Runtime> {
   const model = process.env["LLM_MODEL"] ?? DEFAULT_LLM_MODEL;
   const baseUrl = process.env["LLM_BASE_URL"] ?? DEFAULT_LLM_BASE_URL;
   const embeddingModel = process.env["LLM_EMBEDDING_MODEL"] ?? DEFAULT_EMBEDDING_MODEL;
@@ -89,10 +105,12 @@ export function buildRuntime(): Runtime {
     }),
   });
   const blockStorage = new SqliteBlockStorage(dbPath);
+  const config = await loadOptionalReposConfig();
   const provider = new LocalProvider(store, model, blockStorage, {
     baseUrl,
     ...(apiKey === undefined ? {} : { apiKey }),
     ...getRuntimeOptionsFromEnv(),
+    ...(config === null ? {} : { repoAccess: createRepoAccess(config.repos) }),
   });
   return { provider, admin: new AdminAdapter(provider, store) };
 }
@@ -267,7 +285,7 @@ function errorMessage(err: unknown): string {
 
 export async function main(): Promise<void> {
   const server = new McpServer({ name: "repo-expert-mcp", version: readPackageVersion() });
-  const runtime = buildRuntime();
+  const runtime = await buildRuntime();
   registerTools(server, runtime.provider, runtime.admin);
   const transport = new StdioServerTransport();
   await server.connect(transport);

@@ -24,6 +24,7 @@ describe("state operations", () => {
     expect(next.agents["my-app"].agentId).toBe("agent-123");
     expect(next.agents["my-app"].repoName).toBe("my-app");
     expect(next.agents["my-app"].passages).toEqual({});
+    expect(next.agents["my-app"].fileHashes).toEqual({});
     expect(next.agents["my-app"].lastBootstrap).toBeNull();
   });
 

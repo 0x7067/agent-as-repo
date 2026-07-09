@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { LocalProvider } from "./local-provider.js";
 import type { PassageStore } from "../ports/passage-store.js";
 import type { BlockStorage } from "./block-storage.js";
+import { createRepoAccess } from "./repo-tools.js";
 
 vi.mock("./llm-client.js", () => ({
   DEFAULT_LLM_BASE_URL: "http://localhost:11434/v1",
@@ -226,7 +227,14 @@ describe("LocalProvider", () => {
       expect(callArgs.systemPrompt).toContain("I am the persona");
       expect(callArgs.systemPrompt).toContain("Arch content");
       expect(callArgs.systemPrompt).toContain("Conv content");
-      expect(callArgs.tools).toHaveLength(2);
+      expect(callArgs.tools).toHaveLength(5);
+      expect(callArgs.tools.map((t) => t.function.name)).toEqual([
+        "grep_repo",
+        "glob_files",
+        "read_file",
+        "archival_memory_search",
+        "memory_replace",
+      ]);
     });
 
     it("passes options.overrideModel as model to toolCallingLoop", async () => {
@@ -308,8 +316,85 @@ describe("LocalProvider", () => {
       ]);
       const result = await searchHandler({ query: "test query" });
 
-      expect(mockStore.semanticSearch).toHaveBeenCalledWith("myrepo", "test query", 10);
+      expect(mockStore.semanticSearch).toHaveBeenCalledWith("myrepo", "test query", 10, undefined);
       expect(result).toBe(JSON.stringify([{ id: "p-1", text: "t", score: 0.9 }]));
+    });
+
+    it("archival_memory_search passes path_prefix to semanticSearch", async () => {
+      await provider.sendMessage("myrepo", "hello");
+      const searchHandler = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers["archival_memory_search"];
+      mockStore.semanticSearch.mockResolvedValue([]);
+      await searchHandler({ query: "auth", path_prefix: "src/auth" });
+      expect(mockStore.semanticSearch).toHaveBeenCalledWith("myrepo", "auth", 10, {
+        pathPrefix: "src/auth",
+      });
+    });
+
+    it("agentic tools return a clear error when repoAccess is not configured", async () => {
+      await provider.sendMessage("myrepo", "hello");
+      const handlers = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers;
+      for (const name of ["grep_repo", "glob_files", "read_file"] as const) {
+        const result = JSON.parse(await handlers[name]!({ pattern: "x", path: "a.ts" })) as {
+          error: string;
+        };
+        expect(result.error).toMatch(/not configured|config\.yaml/i);
+      }
+    });
+
+    it("grep_repo / glob_files / read_file call repoAccess when configured", async () => {
+      const grep = vi.fn().mockReturnValue({ stdout: "src/a.ts:1:hit", exitCode: 0 });
+      const fakeFs = {
+        readFile: vi.fn().mockResolvedValue("file body"),
+        writeFile: vi.fn(),
+        stat: vi.fn().mockResolvedValue({ size: 100, isDirectory: () => false }),
+        access: vi.fn(),
+        rename: vi.fn(),
+        copyFile: vi.fn(),
+        glob: vi.fn().mockResolvedValue(["src/a.ts"]),
+        watch: vi.fn(),
+      };
+      const repoAccess = createRepoAccess(
+        {
+          myrepo: {
+            path: "/repo",
+            description: "test",
+            extensions: [".ts"],
+            ignoreDirs: ["node_modules"],
+          },
+        },
+        { fs: fakeFs, grep },
+      );
+      provider = new LocalProvider(mockStore as unknown as PassageStore, DEFAULT_MODEL, mockBlockStorage, {
+        apiKey: API_KEY,
+        repoAccess,
+      });
+      (mockBlockStorage.get as ReturnType<typeof vi.fn>).mockImplementation((_agentId: string, label: string) => {
+        if (label === "persona") return "I am the persona";
+        if (label === "architecture") return "Arch content";
+        if (label === "conventions") return "Conv content";
+        return "";
+      });
+
+      await provider.sendMessage("myrepo", "hello");
+      const handlers = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers;
+
+      const grepResult = JSON.parse(await handlers["grep_repo"]!({ pattern: "hit" })) as {
+        matches: string;
+      };
+      expect(grep).toHaveBeenCalled();
+      expect(grepResult.matches).toContain("hit");
+
+      const globResult = JSON.parse(await handlers["glob_files"]!({ pattern: "**/*.ts" })) as {
+        files: string[];
+      };
+      expect(fakeFs.glob).toHaveBeenCalled();
+      expect(globResult.files).toEqual(["src/a.ts"]);
+
+      const readResult = JSON.parse(await handlers["read_file"]!({ path: "src/a.ts" })) as {
+        content: string;
+      };
+      expect(fakeFs.readFile).toHaveBeenCalled();
+      expect(readResult.content).toBe("file body");
     });
 
     it("memory_replace handler calls blockStorage.set via updateBlock and returns confirmation", async () => {

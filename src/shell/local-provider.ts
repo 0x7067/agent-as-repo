@@ -10,8 +10,10 @@ import type {
   ConsolidateMemoryOptions,
 } from "../ports/agent-provider.js";
 import type { PassageStore } from "../ports/passage-store.js";
+import type { RepoAccessPort } from "../ports/repo-access.js";
 import { toolCallingLoop, DEFAULT_LLM_BASE_URL, type ToolDefinition, type ToolHandler } from "./llm-client.js";
 import type { BlockStorage } from "./block-storage.js";
+import { handleGlobFiles, handleGrepRepo, handleReadFile } from "./repo-tools.js";
 
 export interface LocalRuntimeOptions {
   baseUrl?: string;
@@ -20,6 +22,8 @@ export interface LocalRuntimeOptions {
   requestTimeoutMs?: number;
   maxRetriesPerModel?: number;
   retryBaseDelayMs?: number;
+  /** Live-repo access for agentic search tools (grep/glob/read_file). */
+  repoAccess?: RepoAccessPort;
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
@@ -79,6 +83,7 @@ export class LocalProvider implements AgentProvider {
   private readonly requestTimeoutMs: number;
   private readonly maxRetriesPerModel: number;
   private readonly retryBaseDelayMs: number;
+  private readonly repoAccess: RepoAccessPort | undefined;
 
   constructor(
     private store: PassageStore,
@@ -92,6 +97,7 @@ export class LocalProvider implements AgentProvider {
     this.requestTimeoutMs = runtimeOptions.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.maxRetriesPerModel = runtimeOptions.maxRetriesPerModel ?? DEFAULT_MAX_RETRIES_PER_MODEL;
     this.retryBaseDelayMs = runtimeOptions.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+    this.repoAccess = runtimeOptions.repoAccess;
   }
 
   async createAgent(params: CreateAgentParams): Promise<CreateAgentResult> {
@@ -178,11 +184,65 @@ export class LocalProvider implements AgentProvider {
       {
         type: "function",
         function: {
-          name: "archival_memory_search",
-          description: "Search for relevant code and documentation in archival memory",
+          name: "grep_repo",
+          description:
+            "Regex search the live repository with ripgrep. Prefer this for exact identifiers, strings, and patterns.",
           parameters: {
             type: "object",
-            properties: { query: { type: "string", description: "Search query" } },
+            properties: {
+              pattern: { type: "string", description: "Regex or fixed pattern to search for" },
+              path: { type: "string", description: "Optional relative directory or file to scope the search" },
+              glob: { type: "string", description: "Optional glob filter (e.g. *.ts)" },
+              case_insensitive: { type: "boolean", description: "Case-insensitive search" },
+              max_results: { type: "number", description: "Max matches per file (default 50)" },
+            },
+            required: ["pattern"],
+          },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "glob_files",
+          description: "List files in the live repository matching a glob pattern",
+          parameters: {
+            type: "object",
+            properties: {
+              pattern: { type: "string", description: "Glob pattern (default **/*)" },
+            },
+            required: [],
+          },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "read_file",
+          description: "Read a file from the live repository by relative path",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Relative path from the repo root" },
+            },
+            required: ["path"],
+          },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "archival_memory_search",
+          description:
+            "Semantic + BM25 recall over indexed passages. Use for conceptual questions; optionally narrow with path_prefix.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Search query" },
+              path_prefix: {
+                type: "string",
+                description: "Optional file_path prefix to stage-narrow results (e.g. src/auth)",
+              },
+            },
             required: ["query"],
           },
         },
@@ -204,10 +264,34 @@ export class LocalProvider implements AgentProvider {
       },
     ];
 
+    const missingRepoAccess = (): string =>
+      JSON.stringify({
+        error:
+          "Live repo access is not configured for this agent. Archival search still works; configure config.yaml repos to enable grep/glob/read.",
+      });
+
     const toolHandlers = {
+      grep_repo: async (args: Record<string, unknown>): Promise<string> => {
+        if (this.repoAccess === undefined) return missingRepoAccess();
+        return handleGrepRepo(this.repoAccess, agentId, args);
+      },
+      glob_files: async (args: Record<string, unknown>): Promise<string> => {
+        if (this.repoAccess === undefined) return missingRepoAccess();
+        return handleGlobFiles(this.repoAccess, agentId, args);
+      },
+      read_file: async (args: Record<string, unknown>): Promise<string> => {
+        if (this.repoAccess === undefined) return missingRepoAccess();
+        return handleReadFile(this.repoAccess, agentId, args);
+      },
       archival_memory_search: async (args: Record<string, unknown>): Promise<string> => {
         const query = args["query"] as string;
-        const results = await this.store.semanticSearch(agentId, query, 10);
+        const pathPrefix = typeof args["path_prefix"] === "string" ? args["path_prefix"] : undefined;
+        const results = await this.store.semanticSearch(
+          agentId,
+          query,
+          10,
+          pathPrefix === undefined || pathPrefix === "" ? undefined : { pathPrefix },
+        );
         return JSON.stringify(results);
       },
       memory_replace: async (args: Record<string, unknown>): Promise<string> => {

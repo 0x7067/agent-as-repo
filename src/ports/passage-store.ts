@@ -27,6 +27,12 @@ export interface PassageSearchResult {
   score: number;
 }
 
+/** Optional filters for hybrid semantic search (stage-retrieval narrowing). */
+export interface SemanticSearchOptions {
+  /** Restrict hits to passages whose `file_path` starts with this prefix. */
+  pathPrefix?: string;
+}
+
 /**
  * Narrow storage/retrieval surface the agent provider needs for passages.
  * Implementations own persistence and semantic search; passage IDs are
@@ -47,5 +53,11 @@ export interface PassageStore {
   readPassage(this: void, agentId: string, passageId: string): Promise<string>;
   deletePassage(this: void, agentId: string, passageId: string): Promise<void>;
   listPassages(this: void, agentId: string): Promise<StoredPassage[]>;
-  semanticSearch(this: void, agentId: string, query: string, limit: number): Promise<PassageSearchResult[]>;
+  semanticSearch(
+    this: void,
+    agentId: string,
+    query: string,
+    limit: number,
+    options?: SemanticSearchOptions,
+  ): Promise<PassageSearchResult[]>;
 }
