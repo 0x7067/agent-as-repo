@@ -271,12 +271,13 @@ describe("extractSymbolRefsFromFile", () => {
     expect(filterRefsByKind(refs, "call")[0]?.calleeName).toBe("helper");
   });
 
-  it("returns [] for non-JS/TS languages", () => {
+  it("extracts calls for Python", () => {
     const file: FileInfo = {
       path: "src/main.py",
       content: "def foo():\n  bar()\n",
       sizeKb: 0.1,
     };
-    expect(extractSymbolRefsFromFile(file)).toEqual([]);
+    const refs = extractSymbolRefsFromFile(file);
+    expect(filterRefsByKind(refs, "call")[0]?.calleeName).toBe("bar");
   });
 });

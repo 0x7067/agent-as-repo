@@ -42,7 +42,7 @@ a dependency graph + PageRank can hang off the definition index.
 
 - Definition extraction (`extractSymbolSpansJsTs` / `tree-sitter-lang-*`) is
   untouched — refs live in a parallel module.
-- `extractSymbolRefsFromFile` returns `[]` for non-JS/TS grammars (Python, Go, …).
+- `extractSymbolRefsFromFile` now also extracts Python/Go refs (see follow-ups findings).
 - Call extraction walks the full tree; import/export only top-level statements
   (matches how ESM modules are structured).
 

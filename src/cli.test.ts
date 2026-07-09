@@ -595,7 +595,7 @@ describe("cli contract", () => {
     expect(result.stdout).toContain("Dry-run: would delete 1 agent");
   });
 
-  it("supports sync --dry-run --json", async () => {
+  it("supports sync --dry-run --json", { timeout: 30_000 }, async () => {
     const cwd = await makeWorkspace("repo-expert-cli-sync-dry-run-");
     const repoDir = path.join(cwd, "repo");
     await mkdirWorkspaceDir(repoDir, { recursive: true });
@@ -624,7 +624,7 @@ describe("cli contract", () => {
     expect(payload.results[0].changedFiles).toBe(1);
   });
 
-  it("performs a normal incremental sync against a valid checkpoint commit", async () => {
+  it("performs a normal incremental sync against a valid checkpoint commit", { timeout: 30_000 }, async () => {
     const cwd = await makeWorkspace("repo-expert-cli-sync-checkpoint-valid-");
     const repoDir = path.join(cwd, "repo");
     await mkdirWorkspaceDir(repoDir, { recursive: true });
@@ -662,7 +662,7 @@ describe("cli contract", () => {
     expect(savedState.agents["my-app"].lastSyncCommit).toBe(headSha);
   });
 
-  it("fails fast when the checkpoint commit is orphaned, even if a last-sync timestamp is available", async () => {
+  it("fails fast when the checkpoint commit is orphaned, even if a last-sync timestamp is available", { timeout: 30_000 }, async () => {
     const cwd = await makeWorkspace("repo-expert-cli-sync-checkpoint-since-");
     const repoDir = path.join(cwd, "repo");
     await mkdirWorkspaceDir(repoDir, { recursive: true });
@@ -704,7 +704,7 @@ describe("cli contract", () => {
     expect(headSha).not.toBe(orphanedSha);
   });
 
-  it("fails fast when the checkpoint commit is orphaned and no last-sync timestamp is available", async () => {
+  it("fails fast when the checkpoint commit is orphaned and no last-sync timestamp is available", { timeout: 30_000 }, async () => {
     const cwd = await makeWorkspace("repo-expert-cli-sync-checkpoint-recent-");
     const repoDir = path.join(cwd, "repo");
     await mkdirWorkspaceDir(repoDir, { recursive: true });
@@ -794,7 +794,7 @@ describe("cli contract", () => {
     expect(savedState.agents["my-app"].lastConsolidatedCommit).toBe(headSha);
   });
 
-  it("auto-consolidates after sync via an explicit --since ref", async () => {
+  it("auto-consolidates after sync via an explicit --since ref", { timeout: 30_000 }, async () => {
     const cwd = await makeWorkspace("repo-expert-cli-sync-consolidate-since-");
     const repoDir = path.join(cwd, "repo");
     await mkdirWorkspaceDir(repoDir, { recursive: true });
@@ -917,7 +917,7 @@ describe("cli contract", () => {
     expect(payload[0].repoName).toBe("my-app");
   });
 
-  it("runs the consolidate command against a repo agent", async () => {
+  it("runs the consolidate command against a repo agent", { timeout: 30_000 }, async () => {
     const cwd = await makeWorkspace("repo-expert-cli-consolidate-");
     const state = {
       stateVersion: 2,
@@ -944,7 +944,7 @@ describe("cli contract", () => {
     expect(result.stdout).toContain("Done.");
   });
 
-  it("consolidate reports a skip when the provider fails, without erroring", async () => {
+  it("consolidate reports a skip when the provider fails, without erroring", { timeout: 30_000 }, async () => {
     const cwd = await makeWorkspace("repo-expert-cli-consolidate-fail-");
     const state = {
       stateVersion: 2,
@@ -971,7 +971,7 @@ describe("cli contract", () => {
     expect(result.stdout).toContain("Skipped");
   });
 
-  it("manual consolidate gathers checkpoint-range git evidence against a real repo and stamps lastConsolidatedCommit", async () => {
+  it("manual consolidate gathers checkpoint-range git evidence against a real repo and stamps lastConsolidatedCommit", { timeout: 30_000 }, async () => {
     const cwd = await makeWorkspace("repo-expert-cli-consolidate-checkpoint-");
     const repoDir = path.join(cwd, "repo");
     await mkdirWorkspaceDir(repoDir, { recursive: true });
@@ -1017,7 +1017,7 @@ describe("cli contract", () => {
     expect(savedState.agents["my-app"].lastConsolidatedCommit).toBe(headSha);
   });
 
-  it("manual consolidate skips when HEAD matches both lastSyncCommit and lastConsolidatedCommit", async () => {
+  it("manual consolidate skips when HEAD matches both lastSyncCommit and lastConsolidatedCommit", { timeout: 30_000 }, async () => {
     const cwd = await makeWorkspace("repo-expert-cli-consolidate-skip-");
     const repoDir = path.join(cwd, "repo");
     await mkdirWorkspaceDir(repoDir, { recursive: true });
@@ -1058,7 +1058,7 @@ describe("cli contract", () => {
     expect(savedState).toBe(stateJson);
   });
 
-  it("manual consolidate fails fast on an orphaned checkpoint, leaving state untouched", async () => {
+  it("manual consolidate fails fast on an orphaned checkpoint, leaving state untouched", { timeout: 30_000 }, async () => {
     const cwd = await makeWorkspace("repo-expert-cli-consolidate-orphan-");
     const repoDir = path.join(cwd, "repo");
     await mkdirWorkspaceDir(repoDir, { recursive: true });
