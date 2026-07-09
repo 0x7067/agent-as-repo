@@ -6,31 +6,28 @@ Depends on: hybrid BM25+vector search (`docs/plans/2026-07-05-hybrid-search-spec
 
 ## Why
 
-RAG is not just vector search. Agents need iterative tools (ripgrep, glob, file
-read) plus hybrid recall and path filters so they can stage-narrow large
-codebases. Semantic indexing stays; vector search becomes a recall booster.
+RAG is not just vector search. Standalone CLI ask needs iterative live-repo
+tools; under coding harnesses (Claude Code / Cursor / Codex) those tools are
+redundant — the host already has grep/glob/read. The MCP surface stays a
+**memory layer**: core blocks + hybrid archival recall.
+
+## Surface split
+
+| Surface | Tools |
+|---------|--------|
+| **CLI `ask`** (`agenticTools: true`) | `grep_repo`, `glob_files`, `read_file`, `archival_memory_search`, `memory_replace` |
+| **MCP / `agent_call`** (default) | `archival_memory_search`, `memory_replace` only |
+
+Persisted persona stays harness-friendly. CLI ask appends ephemeral
+`agenticSearchGuidance()` to the system prompt when live tools are enabled.
 
 ## Design
-
-### Agent tools (`LocalProvider.sendMessage`)
-
-| Tool | Role |
-|------|------|
-| `grep_repo` | Live ripgrep over the repo (`buildRipgrepArgs` + `execFileSync`) |
-| `glob_files` | Live glob filtered by `shouldIncludeFile` |
-| `read_file` | Safe relative read (`resolveSafeRepoPath` + size cap) |
-| `archival_memory_search` | Hybrid BM25+vector; optional `path_prefix` |
-| `memory_replace` | Unchanged |
-
-Repo access is injected via `RepoAccessPort` (`createRepoAccess` from
-`config.repos`). CLI always wires it; MCP loads `config.yaml` /
-`REPO_EXPERT_CONFIG` when present and degrades agentic tools with a clear
-error when missing.
 
 ### Path-scoped hybrid search
 
 `PassageStore.semanticSearch(agentId, query, limit, { pathPrefix? })` filters
-both vector and FTS legs with `file_path LIKE prefix%`.
+both vector and FTS legs with `file_path LIKE prefix%`. Available on both
+surfaces via `archival_memory_search.path_prefix`.
 
 ### Content-hash skip (Merkle-inspired, not a full Merkle tree)
 
@@ -38,9 +35,20 @@ both vector and FTS legs with `file_path LIKE prefix%`.
 re-chunk/re-embed when the hash is unchanged. Setup seeds hashes on first
 index.
 
+### Live-repo tools (CLI only)
+
+| Tool | Role |
+|------|------|
+| `grep_repo` | Live ripgrep (`buildRipgrepArgs` + `execFileSync`) |
+| `glob_files` | Live glob filtered by `shouldIncludeFile` |
+| `read_file` | Safe relative read (`resolveSafeRepoPath` + size cap) |
+
+Wired via `RepoAccessPort` / `createRepoAccess(config.repos)` when
+`agenticTools: true`.
+
 ## Deferred
 
 - Full Merkle trees
 - Tree-sitter symbol / PageRank repo map
 - Cross-encoder reranker
-- Direct MCP tools for grep/read (agents already get them via `agent_call`)
+- Direct MCP tools for grep/read (host harness already provides these)

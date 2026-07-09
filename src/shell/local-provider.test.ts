@@ -227,6 +227,29 @@ describe("LocalProvider", () => {
       expect(callArgs.systemPrompt).toContain("I am the persona");
       expect(callArgs.systemPrompt).toContain("Arch content");
       expect(callArgs.systemPrompt).toContain("Conv content");
+      // Default (MCP / harness): memory tools only — no nested grep/glob/read.
+      expect(callArgs.tools).toHaveLength(2);
+      expect(callArgs.tools.map((t) => t.function.name)).toEqual([
+        "archival_memory_search",
+        "memory_replace",
+      ]);
+      expect(callArgs.systemPrompt).not.toContain("grep_repo");
+    });
+
+    it("exposes agentic tools and guidance when agenticTools is enabled", async () => {
+      provider = new LocalProvider(mockStore as unknown as PassageStore, DEFAULT_MODEL, mockBlockStorage, {
+        apiKey: API_KEY,
+        agenticTools: true,
+      });
+      (mockBlockStorage.get as ReturnType<typeof vi.fn>).mockImplementation((_agentId: string, label: string) => {
+        if (label === "persona") return "I am the persona";
+        if (label === "architecture") return "Arch content";
+        if (label === "conventions") return "Conv content";
+        return "";
+      });
+
+      await provider.sendMessage("myrepo", "hello");
+      const callArgs = vi.mocked(toolCallingLoop).mock.calls[0][0];
       expect(callArgs.tools).toHaveLength(5);
       expect(callArgs.tools.map((t) => t.function.name)).toEqual([
         "grep_repo",
@@ -235,6 +258,7 @@ describe("LocalProvider", () => {
         "archival_memory_search",
         "memory_replace",
       ]);
+      expect(callArgs.systemPrompt).toContain("grep_repo");
     });
 
     it("passes options.overrideModel as model to toolCallingLoop", async () => {
@@ -331,6 +355,16 @@ describe("LocalProvider", () => {
     });
 
     it("agentic tools return a clear error when repoAccess is not configured", async () => {
+      provider = new LocalProvider(mockStore as unknown as PassageStore, DEFAULT_MODEL, mockBlockStorage, {
+        apiKey: API_KEY,
+        agenticTools: true,
+      });
+      (mockBlockStorage.get as ReturnType<typeof vi.fn>).mockImplementation((_agentId: string, label: string) => {
+        if (label === "persona") return "I am the persona";
+        if (label === "architecture") return "Arch content";
+        if (label === "conventions") return "Conv content";
+        return "";
+      });
       await provider.sendMessage("myrepo", "hello");
       const handlers = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers;
       for (const name of ["grep_repo", "glob_files", "read_file"] as const) {
@@ -366,6 +400,7 @@ describe("LocalProvider", () => {
       );
       provider = new LocalProvider(mockStore as unknown as PassageStore, DEFAULT_MODEL, mockBlockStorage, {
         apiKey: API_KEY,
+        agenticTools: true,
         repoAccess,
       });
       (mockBlockStorage.get as ReturnType<typeof vi.fn>).mockImplementation((_agentId: string, label: string) => {
@@ -395,6 +430,15 @@ describe("LocalProvider", () => {
       };
       expect(fakeFs.readFile).toHaveBeenCalled();
       expect(readResult.content).toBe("file body");
+    });
+
+    it("does not register agentic tool handlers when agenticTools is off", async () => {
+      await provider.sendMessage("myrepo", "hello");
+      const handlers = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers;
+      expect(handlers["grep_repo"]).toBeUndefined();
+      expect(handlers["glob_files"]).toBeUndefined();
+      expect(handlers["read_file"]).toBeUndefined();
+      expect(handlers["archival_memory_search"]).toBeDefined();
     });
 
     it("memory_replace handler calls blockStorage.set via updateBlock and returns confirmation", async () => {

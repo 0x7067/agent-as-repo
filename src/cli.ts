@@ -204,6 +204,8 @@ function createProvider(config: Config): AgentProvider {
     {
       baseUrl: config.provider.baseUrl,
       fallbackModels: config.provider.fallbackModels,
+      // Standalone CLI ask needs live-repo tools; MCP/coding harnesses do not.
+      agenticTools: true,
       repoAccess: createRepoAccess(config.repos),
       ...(llmApiKey === undefined ? {} : { apiKey: llmApiKey }),
       ...getRuntimeOptionsFromEnv(),

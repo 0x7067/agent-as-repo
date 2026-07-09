@@ -1,6 +1,15 @@
 const NO_TAGS_WARNING =
   "IMPORTANT: When using archival_memory_search, do NOT pass tags — just use the query parameter (path_prefix is allowed).";
 
+/** Ephemeral guidance appended to the system prompt for standalone CLI ask only. */
+export function agenticSearchGuidance(): string {
+  return [
+    "## Live repo tools (standalone CLI)",
+    "For exact identifiers, strings, or file navigation, prefer grep_repo / glob_files / read_file.",
+    "For conceptual recall, use archival_memory_search (optionally with path_prefix to stage-narrow results).",
+  ].join("\n");
+}
+
 export function buildPersona(
   repoName: string,
   description: string,
@@ -10,10 +19,8 @@ export function buildPersona(
 
   const lines = [
     base,
-    "I can navigate the live repository with grep_repo, glob_files, and read_file, and I also keep indexed passages in archival memory.",
-    "When answering questions, first consult my architecture and conventions memory blocks.",
-    "For exact identifiers, strings, or file navigation, prefer grep_repo / glob_files / read_file.",
-    "For conceptual recall, use archival_memory_search (optionally with path_prefix to stage-narrow results).",
+    "I keep durable project knowledge in architecture/conventions memory blocks and indexed passages in archival memory.",
+    "When answering questions, first consult my architecture and conventions memory blocks, then use archival_memory_search for supporting details (optionally with path_prefix to stage-narrow results).",
     "Be specific: name exact tools, frameworks, and versions rather than just wrapper commands.",
     NO_TAGS_WARNING,
   ];
@@ -23,7 +30,7 @@ export function buildPersona(
 
 export function architectureBootstrapPrompt(): string {
   return [
-    "Analyze the codebase. Prefer glob_files / grep_repo / read_file for structure and exact symbols; use archival_memory_search for broader recall.",
+    "Analyze the codebase via archival_memory_search (and live repo tools if available).",
     "Do NOT pass tags when using archival_memory_search.",
     "Then update your 'architecture' memory block with a concise summary (under 4000 chars) covering:",
     "- Project name and purpose",
@@ -37,7 +44,7 @@ export function architectureBootstrapPrompt(): string {
 
 export function conventionsBootstrapPrompt(): string {
   return [
-    "Explore coding conventions, dependencies, configuration, and API patterns via grep_repo / read_file and archival_memory_search as needed.",
+    "Search archival memory (and live repo tools if available) for coding conventions, dependencies, configuration, and API patterns.",
     "Do NOT pass tags when using archival_memory_search.",
     "Update your 'conventions' memory block with a concise summary covering:",
     "- Key dependencies and their roles",

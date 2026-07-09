@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { buildPersona } from "../core/prompts.js";
+import { agenticSearchGuidance, buildPersona } from "../core/prompts.js";
 import type {
   AgentProvider,
   CreateAgentParams,
@@ -22,7 +22,12 @@ export interface LocalRuntimeOptions {
   requestTimeoutMs?: number;
   maxRetriesPerModel?: number;
   retryBaseDelayMs?: number;
-  /** Live-repo access for agentic search tools (grep/glob/read_file). */
+  /**
+   * When true (standalone CLI ask), expose grep_repo / glob_files / read_file.
+   * MCP / coding-harness surfaces leave this false — the host already has those tools.
+   */
+  agenticTools?: boolean;
+  /** Live-repo access required when agenticTools is enabled. */
   repoAccess?: RepoAccessPort;
 }
 
@@ -83,6 +88,7 @@ export class LocalProvider implements AgentProvider {
   private readonly requestTimeoutMs: number;
   private readonly maxRetriesPerModel: number;
   private readonly retryBaseDelayMs: number;
+  private readonly agenticTools: boolean;
   private readonly repoAccess: RepoAccessPort | undefined;
 
   constructor(
@@ -97,6 +103,7 @@ export class LocalProvider implements AgentProvider {
     this.requestTimeoutMs = runtimeOptions.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.maxRetriesPerModel = runtimeOptions.maxRetriesPerModel ?? DEFAULT_MAX_RETRIES_PER_MODEL;
     this.retryBaseDelayMs = runtimeOptions.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+    this.agenticTools = runtimeOptions.agenticTools === true;
     this.repoAccess = runtimeOptions.repoAccess;
   }
 
@@ -174,60 +181,91 @@ export class LocalProvider implements AgentProvider {
       this.getBlock(agentId, "conventions"),
     ]);
 
-    const systemPrompt = [
+    const systemPromptParts = [
       personaBlock.value,
       `\n## Architecture\n${archBlock.value}`,
       `\n## Conventions\n${convBlock.value}`,
-    ].join("\n");
+    ];
+    if (this.agenticTools) {
+      systemPromptParts.push(`\n${agenticSearchGuidance()}`);
+    }
+    const systemPrompt = systemPromptParts.join("\n");
 
-    const tools: ToolDefinition[] = [
-      {
-        type: "function",
-        function: {
-          name: "grep_repo",
-          description:
-            "Regex search the live repository with ripgrep. Prefer this for exact identifiers, strings, and patterns.",
-          parameters: {
-            type: "object",
-            properties: {
-              pattern: { type: "string", description: "Regex or fixed pattern to search for" },
-              path: { type: "string", description: "Optional relative directory or file to scope the search" },
-              glob: { type: "string", description: "Optional glob filter (e.g. *.ts)" },
-              case_insensitive: { type: "boolean", description: "Case-insensitive search" },
-              max_results: { type: "number", description: "Max matches per file (default 50)" },
+    const tools: ToolDefinition[] = [];
+    const toolHandlers: Partial<Record<string, ToolHandler>> = {};
+
+    if (this.agenticTools) {
+      tools.push(
+        {
+          type: "function",
+          function: {
+            name: "grep_repo",
+            description:
+              "Regex search the live repository with ripgrep. Prefer this for exact identifiers, strings, and patterns.",
+            parameters: {
+              type: "object",
+              properties: {
+                pattern: { type: "string", description: "Regex or fixed pattern to search for" },
+                path: { type: "string", description: "Optional relative directory or file to scope the search" },
+                glob: { type: "string", description: "Optional glob filter (e.g. *.ts)" },
+                case_insensitive: { type: "boolean", description: "Case-insensitive search" },
+                max_results: { type: "number", description: "Max matches per file (default 50)" },
+              },
+              required: ["pattern"],
             },
-            required: ["pattern"],
           },
         },
-      },
-      {
-        type: "function",
-        function: {
-          name: "glob_files",
-          description: "List files in the live repository matching a glob pattern",
-          parameters: {
-            type: "object",
-            properties: {
-              pattern: { type: "string", description: "Glob pattern (default **/*)" },
+        {
+          type: "function",
+          function: {
+            name: "glob_files",
+            description: "List files in the live repository matching a glob pattern",
+            parameters: {
+              type: "object",
+              properties: {
+                pattern: { type: "string", description: "Glob pattern (default **/*)" },
+              },
+              required: [],
             },
-            required: [],
           },
         },
-      },
-      {
-        type: "function",
-        function: {
-          name: "read_file",
-          description: "Read a file from the live repository by relative path",
-          parameters: {
-            type: "object",
-            properties: {
-              path: { type: "string", description: "Relative path from the repo root" },
+        {
+          type: "function",
+          function: {
+            name: "read_file",
+            description: "Read a file from the live repository by relative path",
+            parameters: {
+              type: "object",
+              properties: {
+                path: { type: "string", description: "Relative path from the repo root" },
+              },
+              required: ["path"],
             },
-            required: ["path"],
           },
         },
-      },
+      );
+
+      const missingRepoAccess = (): string =>
+        JSON.stringify({
+          error:
+            "Live repo access is not configured for this agent. Archival search still works; configure config.yaml repos to enable grep/glob/read.",
+        });
+
+      toolHandlers["grep_repo"] = async (args: Record<string, unknown>): Promise<string> => {
+        if (this.repoAccess === undefined) return missingRepoAccess();
+        return handleGrepRepo(this.repoAccess, agentId, args);
+      };
+      toolHandlers["glob_files"] = async (args: Record<string, unknown>): Promise<string> => {
+        if (this.repoAccess === undefined) return missingRepoAccess();
+        return handleGlobFiles(this.repoAccess, agentId, args);
+      };
+      toolHandlers["read_file"] = async (args: Record<string, unknown>): Promise<string> => {
+        if (this.repoAccess === undefined) return missingRepoAccess();
+        return handleReadFile(this.repoAccess, agentId, args);
+      };
+    }
+
+    tools.push(
       {
         type: "function",
         function: {
@@ -262,44 +300,24 @@ export class LocalProvider implements AgentProvider {
           },
         },
       },
-    ];
+    );
 
-    const missingRepoAccess = (): string =>
-      JSON.stringify({
-        error:
-          "Live repo access is not configured for this agent. Archival search still works; configure config.yaml repos to enable grep/glob/read.",
-      });
-
-    const toolHandlers = {
-      grep_repo: async (args: Record<string, unknown>): Promise<string> => {
-        if (this.repoAccess === undefined) return missingRepoAccess();
-        return handleGrepRepo(this.repoAccess, agentId, args);
-      },
-      glob_files: async (args: Record<string, unknown>): Promise<string> => {
-        if (this.repoAccess === undefined) return missingRepoAccess();
-        return handleGlobFiles(this.repoAccess, agentId, args);
-      },
-      read_file: async (args: Record<string, unknown>): Promise<string> => {
-        if (this.repoAccess === undefined) return missingRepoAccess();
-        return handleReadFile(this.repoAccess, agentId, args);
-      },
-      archival_memory_search: async (args: Record<string, unknown>): Promise<string> => {
-        const query = args["query"] as string;
-        const pathPrefix = typeof args["path_prefix"] === "string" ? args["path_prefix"] : undefined;
-        const results = await this.store.semanticSearch(
-          agentId,
-          query,
-          10,
-          pathPrefix === undefined || pathPrefix === "" ? undefined : { pathPrefix },
-        );
-        return JSON.stringify(results);
-      },
-      memory_replace: async (args: Record<string, unknown>): Promise<string> => {
-        const label = args["label"] as string;
-        const value = args["value"] as string;
-        await this.updateBlock(agentId, label, value);
-        return `Updated block '${label}'`;
-      },
+    toolHandlers["archival_memory_search"] = async (args: Record<string, unknown>): Promise<string> => {
+      const query = args["query"] as string;
+      const pathPrefix = typeof args["path_prefix"] === "string" ? args["path_prefix"] : undefined;
+      const results = await this.store.semanticSearch(
+        agentId,
+        query,
+        10,
+        pathPrefix === undefined || pathPrefix === "" ? undefined : { pathPrefix },
+      );
+      return JSON.stringify(results);
+    };
+    toolHandlers["memory_replace"] = async (args: Record<string, unknown>): Promise<string> => {
+      const label = args["label"] as string;
+      const value = args["value"] as string;
+      await this.updateBlock(agentId, label, value);
+      return `Updated block '${label}'`;
     };
 
     return this.runToolCallingLoop({
