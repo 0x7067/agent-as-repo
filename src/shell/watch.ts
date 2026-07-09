@@ -183,12 +183,16 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     passages: AgentState["passages"],
     lastSyncCommit: string,
     fileHashes?: AgentState["fileHashes"],
+    symbolFiles?: AgentState["symbolFiles"],
+    symbolRanks?: AgentState["symbolRanks"],
   ): Promise<void> {
     stateWriteChain = stateWriteChain.then(() =>
       updateAndSaveState(statePath, repoName, {
         passages,
         lastSyncCommit,
         ...(fileHashes === undefined ? {} : { fileHashes }),
+        ...(symbolFiles === undefined ? {} : { symbolFiles }),
+        ...(symbolRanks === undefined ? {} : { symbolRanks }),
       }),
     ).catch(() => {});
     await stateWriteChain;
@@ -328,7 +332,14 @@ export async function watchRepos(params: WatchParams): Promise<void> {
         headCommit: currentHead,
       });
 
-      await persistSyncResult(repoName, result.passages, result.lastSyncCommit, result.fileHashes);
+      await persistSyncResult(
+        repoName,
+        result.passages,
+        result.lastSyncCommit,
+        result.fileHashes,
+        result.symbolFiles,
+        result.symbolRanks,
+      );
 
       if (shouldConsolidate(result, config.consolidateOnSync)) {
         // Same evidence-gathering path manual `consolidate` uses: derived

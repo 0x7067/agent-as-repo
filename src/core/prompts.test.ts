@@ -57,6 +57,7 @@ describe("agenticSearchGuidance", () => {
     expect(guidance).toContain("grep_repo");
     expect(guidance).toContain("glob_files");
     expect(guidance).toContain("read_file");
+    expect(guidance).toContain("find_symbol");
     expect(guidance).toContain(ARCHIVAL_MEMORY);
   });
 });

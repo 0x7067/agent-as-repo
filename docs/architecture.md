@@ -121,6 +121,10 @@ pnpm test   # architecture.test.ts catches violations at the file content level
 | Sqlite store | `src/shell/sqlite-store.ts` |
 | LLM client | `src/shell/llm-client.ts` |
 | Tree-sitter chunker | `src/core/tree-sitter-chunker.ts` |
+| Symbol index / refs | `src/core/symbol-index.ts`, `src/core/symbol-refs.ts`, `src/core/tree-sitter-refs-js.ts` |
+| Symbol graph / PageRank | `src/core/symbol-graph.ts`, `src/core/symbol-pagerank.ts`, `src/core/symbol-store.ts` |
+| Agentic ask tools | `src/shell/agent-tools.ts`, `src/shell/repo-tools.ts`, `src/shell/symbol-lookup.ts` |
+| Content-hash sync skip | `src/core/content-hash.ts`, `src/shell/sync.ts` |
 | Architecture tests | `src/__tests__/architecture.test.ts` |
 
 ---
@@ -152,15 +156,15 @@ pnpm test   # architecture.test.ts catches violations at the file content level
 
 **Hybrid retrieval**: archival-memory search (`SqlitePassageStore.semanticSearch`) fuses two legs. The vector leg is cosine similarity over sqlite-vec embeddings; the lexical leg is BM25 over an FTS5 external-content index on passage text (`tokenize="unicode61 tokenchars '_'"`, so `snake_case` identifiers stay whole), kept in sync by SQLite triggers on every write path and backfilled via FTS5 `'rebuild'` when a pre-FTS database is opened. Both legs over-fetch (`max(limit * 3, 15)` candidates) and are combined with Reciprocal Rank Fusion (`rrfFuse` in `src/core/hybrid-rank.ts`, k=60); the returned `score` is the fused RRF score, not cosine similarity. Queries are sanitized into quoted OR terms (`toFtsMatchQuery`) so no FTS5 operator syntax reaches `MATCH`; a query with no extractable terms — or any FTS failure, including FTS5 being unavailable at startup — degrades to vector-only search. An optional `pathPrefix` scopes both legs to passages whose `file_path` starts with that prefix (stage-retrieval narrowing).
 
-**Agentic search**: standalone CLI `ask` exposes live-repo tools (`grep_repo`, `glob_files`, `read_file`) alongside archival recall (`LocalRuntimeOptions.agenticTools`). MCP / coding-harness `agent_call` leaves those off — the host already has filesystem tools — and keeps memory + hybrid recall only. Path safety lives in `src/core/repo-path.ts`; ripgrep argv building in `src/core/ripgrep-args.ts`; handlers in `src/shell/repo-tools.ts`. Persisted persona stays harness-friendly; CLI ask appends ephemeral live-tool guidance.
+**Agentic search**: standalone CLI `ask` exposes live-repo tools (`grep_repo`, `glob_files`, `read_file`, `find_symbol`) alongside archival recall (`LocalRuntimeOptions.agenticTools`). MCP / coding-harness `agent_call` leaves those off — the host already has filesystem tools — and keeps memory + hybrid recall only (no MCP symbol/filesystem tools). Path safety lives in `src/core/repo-path.ts`; ripgrep argv building in `src/core/ripgrep-args.ts`; handlers in `src/shell/repo-tools.ts` / `src/shell/agent-tools.ts`. Persisted persona stays harness-friendly; CLI ask appends ephemeral live-tool guidance.
 
-**Incremental sync**: git-diff (or fs.watch) still selects candidate files; `syncRepo` additionally skips re-chunk/re-embed when `AgentState.fileHashes` matches the current content SHA-256 (`src/core/content-hash.ts`).
+**Incremental sync**: git-diff (or fs.watch) still selects candidate files; `syncRepo` additionally skips re-chunk/re-embed when `AgentState.fileHashes` matches the current content SHA-256 (`src/core/content-hash.ts`). The same hash gate refreshes or drops `AgentState.symbolFiles` (defs + refs) and recomputes `symbolRanks` (PageRank) when content changes.
 
 The chunk step uses **tree-sitter** symbol-boundary chunking for `.ts`/`.mts`/`.cts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs`/`.py`/`.go`/`.java`/`.rb`/`.rs`/`.php`/`.c`/`.h`/`.cpp`/`.hpp`/`.cs`/`.kt`/`.kts`/`.swift`; other file types automatically fall back to ~2KB raw text splits on paragraph boundaries. Implementation lives in `src/core/tree-sitter-chunker.ts` (per-language extractors in `src/core/tree-sitter-lang-*.ts`).
 
 **Symbol references (TS/JS):** alongside definition spans, `extractSymbolRefsFromFile` / `extractSymbolRefsJsTs` (`src/core/symbol-refs.ts`, `src/core/tree-sitter-refs-js.ts`) pull import, export, and call-site refs from the same grammars.
 
-**Repo-map ranking:** `buildSymbolGraph` (`src/core/symbol-graph.ts`) builds directed import/call edges onto definition nodes; `pageRank` / `rankDefinitions` (`src/core/symbol-pagerank.ts`) score importance (Aider lineage). Sync persistence + CLI `find_symbol` wiring follow.
+**Repo-map ranking:** `buildSymbolGraph` (`src/core/symbol-graph.ts`) builds directed import/call edges onto definition nodes; `pageRank` / `rankDefinitions` (`src/core/symbol-pagerank.ts`) score importance (Aider lineage). Persisted via `symbol-store.ts` helpers; CLI `find_symbol` returns ranked definition hits from sync-time state.
 
 **Vendored grammars**: every language above resolves its wasm from the grammar's own npm package (`node_modules/<pkg>/...`) except Kotlin and Swift, whose community grammars (`tree-sitter-kotlin`, `tree-sitter-swift`) ship grammar source but no `.wasm` at all. Those two are checked into `vendor/wasm/` instead, with a `checksums.json` recording their sha256 + provenance (source package, upstream grammar version, build tool). Rebuild/refresh with `pnpm tsx scripts/build-grammar-wasm.ts` — it tries a self-build via `tree-sitter-cli` first (no Docker/Emscripten needed since CLI 0.26), falling back to copying the prebuilt wasm out of the `@lumis-sh/wasm-kotlin`/`@lumis-sh/wasm-swift` npm packages when the CLI build can't run (e.g. a sandboxed environment that blocks the WASI SDK download). `src/shell/tree-sitter-paths.ts`'s `GRAMMAR_PACKAGE_INFO` table drives both resolution paths and the SEA wasm-manifest, so a new vendored grammar only needs an entry there.
 

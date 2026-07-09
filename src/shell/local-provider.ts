@@ -13,7 +13,7 @@ import type { PassageStore } from "../ports/passage-store.js";
 import type { RepoAccessPort } from "../ports/repo-access.js";
 import { toolCallingLoop, DEFAULT_LLM_BASE_URL, type ToolDefinition, type ToolHandler } from "./llm-client.js";
 import type { BlockStorage } from "./block-storage.js";
-import { buildAskTools, CONSOLIDATION_MEMORY_REPLACE_TOOL } from "./agent-tools.js";
+import { buildAskTools, CONSOLIDATION_MEMORY_REPLACE_TOOL, type SymbolLookupPort } from "./agent-tools.js";
 
 export interface LocalRuntimeOptions {
   baseUrl?: string;
@@ -23,12 +23,14 @@ export interface LocalRuntimeOptions {
   maxRetriesPerModel?: number;
   retryBaseDelayMs?: number;
   /**
-   * When true (standalone CLI ask), expose grep_repo / glob_files / read_file.
-   * MCP / coding-harness surfaces leave this false — the host already has those tools.
+   * When true (standalone CLI ask), expose grep_repo / glob_files / read_file / find_symbol.
+   * MCP / coding-harness surfaces leave this false — the host already has filesystem tools.
    */
   agenticTools?: boolean;
   /** Live-repo access required when agenticTools is enabled. */
   repoAccess?: RepoAccessPort;
+  /** Ranked symbol lookup from sync-time symbolFiles (CLI ask only). */
+  symbolLookup?: SymbolLookupPort;
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
@@ -90,6 +92,7 @@ export class LocalProvider implements AgentProvider {
   private readonly retryBaseDelayMs: number;
   private readonly agenticTools: boolean;
   private readonly repoAccess: RepoAccessPort | undefined;
+  private readonly symbolLookup: SymbolLookupPort | undefined;
 
   constructor(
     private store: PassageStore,
@@ -105,6 +108,7 @@ export class LocalProvider implements AgentProvider {
     this.retryBaseDelayMs = runtimeOptions.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
     this.agenticTools = runtimeOptions.agenticTools === true;
     this.repoAccess = runtimeOptions.repoAccess;
+    this.symbolLookup = runtimeOptions.symbolLookup;
   }
 
   async createAgent(params: CreateAgentParams): Promise<CreateAgentResult> {
@@ -194,6 +198,7 @@ export class LocalProvider implements AgentProvider {
       agentId,
       agenticTools: this.agenticTools,
       repoAccess: this.repoAccess,
+      symbolLookup: this.symbolLookup,
       store: this.store,
       updateBlock: (id, label, value) => this.updateBlock(id, label, value),
     });

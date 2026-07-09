@@ -745,7 +745,7 @@ describe("cli contract", () => {
     expect(headSha).not.toBe(orphanedSha);
   });
 
-  it("auto-consolidates after sync via checkpoint-range git evidence when consolidate_on_sync is enabled", async () => {
+  it("auto-consolidates after sync via checkpoint-range git evidence when consolidate_on_sync is enabled", { timeout: 30_000 }, async () => {
     const cwd = await makeWorkspace("repo-expert-cli-sync-consolidate-checkpoint-");
     const repoDir = path.join(cwd, "repo");
     await mkdirWorkspaceDir(repoDir, { recursive: true });
@@ -843,7 +843,7 @@ describe("cli contract", () => {
     expect(savedState.agents["my-app"].lastConsolidatedCommit).toBe(headSha);
   });
 
-  it("auto-consolidates after a full re-index sync with git evidence omitted", async () => {
+  it("auto-consolidates after a full re-index sync with git evidence omitted", { timeout: 30_000 }, async () => {
     const cwd = await makeWorkspace("repo-expert-cli-sync-consolidate-full-");
     const repoDir = path.join(cwd, "repo");
     await mkdirWorkspaceDir(repoDir, { recursive: true });

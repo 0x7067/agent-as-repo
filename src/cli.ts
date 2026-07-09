@@ -20,13 +20,18 @@ import { bootstrapAgent } from "./shell/bootstrap.js";
 import type { AgentProvider, CreateAgentParams, SendMessageOptions } from "./ports/agent-provider.js";
 import { LocalProvider } from "./shell/local-provider.js";
 import { createRepoAccess } from "./shell/repo-tools.js";
+import { createSymbolLookupFromState } from "./shell/symbol-lookup.js";
 import { SqlitePassageStore } from "./shell/sqlite-store.js";
 import { SqliteBlockStorage } from "./shell/sqlite-block-storage.js";
 import { resolveStoreDbPath } from "./shell/repo-expert-paths.js";
 import { createEmbedder } from "./shell/embedder-factory.js";
 import { selectChunkingStrategy } from "./core/chunker.js";
 import { hashFileContent } from "./core/content-hash.js";
-import { initTreeSitterChunker } from "./core/tree-sitter-chunker.js";
+import {
+  extractSymbolsAndRefsFromFile,
+  initTreeSitterChunker,
+} from "./core/tree-sitter-chunker.js";
+import { computeSymbolRanks, toStoredSymbolFile } from "./core/symbol-store.js";
 import { repoFilterOptions, shouldIncludeFile } from "./core/filter.js";
 import { partitionDiffPaths } from "./core/submodule.js";
 import { listSubmodules, expandSubmoduleFiles } from "./shell/submodule-collector.js";
@@ -51,9 +56,10 @@ import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
 import { generateMcpEntry, checkMcpEntry, resolveMcpLaunchSpec, type McpLaunchSpec, type McpProviderConfig } from "./core/mcp-config.js";
 import { buildPostSetupNextSteps, getSetupMode } from "./core/setup.js";
-import { MAX_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Config, type RepoConfig } from "./core/types.js";
+import { MAX_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Config, type FileInfo, type RepoConfig, type SymbolFileMap } from "./core/types.js";
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
 import type { LocalRuntimeOptions } from "./shell/local-provider.js";
+import type { SymbolLookupPort } from "./shell/agent-tools.js";
 
 interface SetupOpts {
   repo?: string;
@@ -184,7 +190,7 @@ class CliUserError extends Error {
   }
 }
 
-function createProvider(config: Config): AgentProvider {
+function createProvider(config: Config, symbolLookup?: SymbolLookupPort): AgentProvider {
   const llmApiKey = process.env["LLM_API_KEY"];
   const dbPath = resolveStoreDbPath();
   const store = new SqlitePassageStore({
@@ -207,10 +213,21 @@ function createProvider(config: Config): AgentProvider {
       // Standalone CLI ask needs live-repo tools; MCP/coding harnesses do not.
       agenticTools: true,
       repoAccess: createRepoAccess(config.repos),
+      ...(symbolLookup === undefined ? {} : { symbolLookup }),
       ...(llmApiKey === undefined ? {} : { apiKey: llmApiKey }),
       ...getRuntimeOptionsFromEnv(),
     },
   );
+}
+
+function buildSymbolFilesFromCollected(files: FileInfo[]): SymbolFileMap {
+  const symbolFiles: SymbolFileMap = {};
+  for (const file of files) {
+    const { spans, refs } = extractSymbolsAndRefsFromFile(file);
+    if (spans.length === 0 && refs.length === 0) continue;
+    symbolFiles[file.path] = toStoredSymbolFile(file.path, file.content, spans, refs);
+  }
+  return symbolFiles;
 }
 
 class FakeProvider implements AgentProvider {
@@ -321,14 +338,17 @@ class FakeProvider implements AgentProvider {
   }
 }
 
-function createProviderForCommands(config: Config | null): AgentProvider {
+function createProviderForCommands(
+  config: Config | null,
+  symbolLookup?: SymbolLookupPort,
+): AgentProvider {
   if (process.env["REPO_EXPERT_TEST_FAKE_PROVIDER"] === "1") {
     return new FakeProvider();
   }
   if (!config) {
     throw new CliUserError('Config required. Run "repo-expert init" or ensure config.yaml exists.');
   }
-  return createProvider(config);
+  return createProvider(config, symbolLookup);
 }
 
 interface SetupPreflightResult {
@@ -810,7 +830,7 @@ async function runBroadcastAsk(repo: string | undefined, opts: AskOpts): Promise
 
   const askSettings = await buildAskSettings(opts);
   const askAllConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
-  const provider = createProvider(askAllConfig);
+  const provider = createProvider(askAllConfig, createSymbolLookupFromState(state));
   const agents = entries.map(([repoName, agent]) => ({ repoName, agentId: agent.agentId }));
 
   console.log(`Broadcasting to ${String(agents.length)} agents...`);
@@ -842,7 +862,7 @@ async function runSingleAsk(repo: string | undefined, question: string | undefin
   if (!agentInfo) return;
 
   const askConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
-  const provider = createProviderForCommands(askConfig);
+  const provider = createProviderForCommands(askConfig, createSymbolLookupFromState(state));
   const askSettings = await buildAskSettings(opts);
   const stop = startSpinner(`Asking ${repo}...`);
   try {
@@ -1113,8 +1133,10 @@ program
           const fileHashes = Object.fromEntries(
             files.map((file) => [file.path, hashFileContent(file.content)]),
           );
+          const symbolFiles = buildSymbolFilesFromCollected(files);
+          const symbolRanks = computeSymbolRanks(symbolFiles);
           state = updatePassageMap(state, repoName, loadResult.passages);
-          state = updateAgentField(state, repoName, { fileHashes });
+          state = updateAgentField(state, repoName, { fileHashes, symbolFiles, symbolRanks });
           await saveState(STATE_FILE, state);
           indexMs = Date.now() - indexStart;
           log(`  Index phase completed in ${formatDurationMs(indexMs)}.`);
@@ -1401,6 +1423,8 @@ program
       state = updateAgentField(state, repoName, {
         passages: result.passages,
         fileHashes: result.fileHashes,
+        symbolFiles: result.symbolFiles,
+        symbolRanks: result.symbolRanks,
         lastSyncCommit: result.lastSyncCommit,
       });
       await saveState(STATE_FILE, state);

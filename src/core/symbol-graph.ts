@@ -5,7 +5,7 @@ import { isCallRef, isExportRef, isImportRef } from "./symbol-refs.js";
 
 /** Stable id for a definition node in the graph. */
 export function definitionNodeId(loc: Pick<SymbolLocation, "filePath" | "qualifiedName" | "startLine">): string {
-  return `def:${loc.filePath}#${loc.qualifiedName}@${loc.startLine}`;
+  return `def:${loc.filePath}#${loc.qualifiedName}@${String(loc.startLine)}`;
 }
 
 /** Stable id for a file node (import edges hang off these). */
@@ -39,6 +39,8 @@ export interface BuildSymbolGraphInput {
 
 const RELATIVE_SPEC_RE = /^\.{1,2}\//;
 
+const MODULE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"] as const;
+
 /**
  * Resolve a relative ESM module specifier against the importing file's directory.
  * Tries common extensions and `/index` variants. Returns undefined for non-relative
@@ -56,23 +58,11 @@ export function resolveRelativeModule(
 
   const candidates = [
     joined,
-    `${joined}.ts`,
-    `${joined}.tsx`,
-    `${joined}.js`,
-    `${joined}.jsx`,
-    `${joined}.mts`,
-    `${joined}.cts`,
-    `${joined}.mjs`,
-    `${joined}.cjs`,
-    path.posix.join(joined, "index.ts"),
-    path.posix.join(joined, "index.tsx"),
-    path.posix.join(joined, "index.js"),
+    ...MODULE_EXTENSIONS.map((ext) => `${joined}${ext}`),
+    ...(["index.ts", "index.tsx", "index.js"] as const).map((name) => path.posix.join(joined, name)),
   ];
 
-  for (const candidate of candidates) {
-    if (knownFiles.has(candidate)) return candidate;
-  }
-  return undefined;
+  return candidates.find((candidate) => knownFiles.has(candidate));
 }
 
 interface ImportBinding {
@@ -84,9 +74,7 @@ interface ImportBinding {
   imported: string;
 }
 
-function collectExportsByFile(
-  files: readonly FileSymbolBundle[],
-): Map<string, ExportRef[]> {
+function collectExportsByFile(files: readonly FileSymbolBundle[]): Map<string, ExportRef[]> {
   const map = new Map<string, ExportRef[]>();
   for (const file of files) {
     const exports = file.refs.filter(isExportRef);
@@ -99,64 +87,91 @@ function definitionsInFile(index: SymbolIndex, filePath: string): SymbolLocation
   return index.symbols.filter((s) => s.filePath === filePath);
 }
 
-function matchImportedSymbol(
+function exportedLocalIds(exportsInTarget: readonly ExportRef[]): Set<string> {
+  const exportedIds = new Set<string>();
+  for (const exp of exportsInTarget) {
+    for (const name of exp.exportedNames) {
+      if (name.exported !== "*") exportedIds.add(name.local ?? name.exported);
+    }
+  }
+  return exportedIds;
+}
+
+function matchNamespaceImport(
+  index: SymbolIndex,
+  targetFile: string,
+  exportsInTarget: readonly ExportRef[] | undefined,
+): SymbolLocation[] {
+  const defs = definitionsInFile(index, targetFile);
+  if (exportsInTarget === undefined || exportsInTarget.length === 0) return defs;
+  const exportedIds = exportedLocalIds(exportsInTarget);
+  return defs.filter((d) => exportedIds.has(d.name) || exportedIds.has(d.qualifiedName));
+}
+
+function findDefaultExportLocal(
+  defs: readonly SymbolLocation[],
+  exportsInTarget: readonly ExportRef[],
+): SymbolLocation | undefined {
+  for (const exp of exportsInTarget) {
+    for (const name of exp.exportedNames) {
+      if (name.exported === "default" && name.local !== undefined) {
+        const hit = defs.find((d) => d.name === name.local);
+        if (hit) return hit;
+      }
+    }
+  }
+  return undefined;
+}
+
+function matchDefaultImport(
+  index: SymbolIndex,
+  targetFile: string,
+  exportsInTarget: readonly ExportRef[] | undefined,
+): SymbolLocation[] {
+  const defs = definitionsInFile(index, targetFile);
+  const namedDefault = defs.find((d) => d.name === "default");
+  if (namedDefault) return [namedDefault];
+
+  if (exportsInTarget !== undefined) {
+    const fromExport = findDefaultExportLocal(defs, exportsInTarget);
+    if (fromExport) return [fromExport];
+  }
+
+  const top = defs.find((d) => d.kind !== "METHOD");
+  return top === undefined ? [] : [top];
+}
+
+function matchNamedImport(
   index: SymbolIndex,
   targetFile: string,
   imported: string,
   exportsInTarget: readonly ExportRef[] | undefined,
 ): SymbolLocation[] {
-  if (imported === "*") {
-    // Namespace import: edge to all exported defs in the target (or all defs if no export refs).
-    if (exportsInTarget && exportsInTarget.length > 0) {
-      const exportedIds = new Set<string>();
-      for (const exp of exportsInTarget) {
-        for (const name of exp.exportedNames) {
-          if (name.exported !== "*") exportedIds.add(name.local ?? name.exported);
-        }
-      }
-      return definitionsInFile(index, targetFile).filter(
-        (d) => exportedIds.has(d.name) || exportedIds.has(d.qualifiedName),
-      );
-    }
-    return definitionsInFile(index, targetFile);
-  }
-
-  if (imported === "default") {
-    // Prefer a symbol literally named default, else first top-level export / first def.
-    const defs = definitionsInFile(index, targetFile);
-    const namedDefault = defs.find((d) => d.name === "default");
-    if (namedDefault) return [namedDefault];
-    if (exportsInTarget) {
-      for (const exp of exportsInTarget) {
-        for (const name of exp.exportedNames) {
-          if (name.exported === "default" && name.local) {
-            const hit = defs.find((d) => d.name === name.local);
-            if (hit) return [hit];
-          }
-        }
-      }
-    }
-    // Heuristic: first non-method definition in the file
-    const top = defs.find((d) => d.kind !== "METHOD");
-    return top ? [top] : [];
-  }
-
-  // Named import: match by name or via export alias (local → exported)
   const defs = definitionsInFile(index, targetFile);
   const byName = defs.filter((d) => d.name === imported || d.qualifiedName === imported);
   if (byName.length > 0) return byName;
 
-  if (exportsInTarget) {
-    for (const exp of exportsInTarget) {
-      for (const name of exp.exportedNames) {
-        if (name.exported === imported && name.local && name.local !== imported) {
-          const hit = defs.filter((d) => d.name === name.local);
-          if (hit.length > 0) return hit;
-        }
+  if (exportsInTarget === undefined) return [];
+  for (const exp of exportsInTarget) {
+    for (const name of exp.exportedNames) {
+      if (name.exported === imported && name.local !== undefined && name.local !== imported) {
+        const hit = defs.filter((d) => d.name === name.local);
+        if (hit.length > 0) return hit;
       }
     }
   }
   return [];
+}
+
+function matchImportedSymbol(
+  index: SymbolIndex,
+  targetFile: string,
+  imported: string,
+  exportsInTarget?: readonly ExportRef[],
+): SymbolLocation[] {
+  if (imported === "*") return matchNamespaceImport(index, targetFile, exportsInTarget);
+  if (imported === "default") return matchDefaultImport(index, targetFile, exportsInTarget);
+  return matchNamedImport(index, targetFile, imported, exportsInTarget);
 }
 
 function buildImportBindings(
@@ -168,11 +183,9 @@ function buildImportBindings(
   for (const imp of imports) {
     const targetFile = resolveRelativeModule(filePath, imp.moduleSpecifier, knownFiles);
     for (const name of imp.importedNames) {
-      bindings.push({
-        local: name.local,
-        imported: name.imported,
-        ...(targetFile === undefined ? {} : { targetFile }),
-      });
+      const binding: ImportBinding = { local: name.local, imported: name.imported };
+      if (targetFile !== undefined) binding.targetFile = targetFile;
+      bindings.push(binding);
     }
   }
   return bindings;
@@ -183,6 +196,96 @@ function addEdge(edges: SymbolEdge[], from: string, to: string, kind: SymbolEdge
   if (seen.has(key)) return;
   seen.add(key);
   edges.push({ from, to, kind });
+}
+
+function addResolvedEdges(
+  edges: SymbolEdge[],
+  seen: Set<string>,
+  nodeSet: Set<string>,
+  from: string,
+  targets: readonly SymbolLocation[],
+  kind: SymbolEdgeKind,
+): void {
+  for (const target of targets) {
+    const to = definitionNodeId(target);
+    nodeSet.add(to);
+    addEdge(edges, from, to, kind, seen);
+  }
+}
+
+function resolveSameFileCall(
+  sameFile: readonly SymbolLocation[],
+  call: CallRef,
+  qualified: string,
+): SymbolLocation[] {
+  if (call.objectName !== undefined) {
+    return sameFile.filter(
+      (s) => s.name === call.calleeName && (s.className === call.objectName || s.qualifiedName === qualified),
+    );
+  }
+  return sameFile.filter((s) => s.qualifiedName === qualified || s.name === call.calleeName);
+}
+
+function resolveImportedBareCall(
+  index: SymbolIndex,
+  call: CallRef,
+  bindings: readonly ImportBinding[],
+): SymbolLocation[] {
+  const binding = bindings.find((b) => b.local === call.calleeName);
+  if (binding?.targetFile === undefined) return [];
+  const importedName = binding.imported === "*" ? call.calleeName : binding.imported;
+  return matchImportedSymbol(index, binding.targetFile, importedName);
+}
+
+function resolveMemberCallViaImport(
+  index: SymbolIndex,
+  call: CallRef,
+  bindings: readonly ImportBinding[],
+): SymbolLocation[] {
+  const objectName = call.objectName;
+  if (objectName === undefined) return [];
+
+  const ns = bindings.find((b) => b.local === objectName && b.imported === "*");
+  if (ns?.targetFile !== undefined) {
+    const hits = definitionsInFile(index, ns.targetFile).filter(
+      (d) => d.name === call.calleeName || d.qualifiedName === call.calleeName,
+    );
+    if (hits.length > 0) return hits;
+  }
+
+  const objBinding = bindings.find((b) => b.local === objectName);
+  if (objBinding?.targetFile === undefined) return [];
+
+  const classDefs = matchImportedSymbol(index, objBinding.targetFile, objBinding.imported);
+  const classNames = new Set(classDefs.map((d) => d.name));
+  return definitionsInFile(index, objBinding.targetFile).filter(
+    (d) => d.name === call.calleeName && d.className !== undefined && classNames.has(d.className),
+  );
+}
+
+function resolveCallTargets(
+  index: SymbolIndex,
+  callerFile: string,
+  call: CallRef,
+  bindings: readonly ImportBinding[],
+): SymbolLocation[] {
+  const qualified = call.objectName === undefined ? call.calleeName : `${call.objectName}.${call.calleeName}`;
+  const sameFile = index.symbols.filter((s) => s.filePath === callerFile);
+  const localHits = resolveSameFileCall(sameFile, call, qualified);
+  if (localHits.length > 0) return localHits;
+
+  if (call.objectName === undefined) {
+    const imported = resolveImportedBareCall(index, call, bindings);
+    if (imported.length > 0) return imported;
+    return findDefinitions(index, call.calleeName);
+  }
+
+  const memberHits = resolveMemberCallViaImport(index, call, bindings);
+  if (memberHits.length > 0) return memberHits;
+
+  const byQualified = findDefinitions(index, qualified);
+  if (byQualified.length > 0) return byQualified;
+  return findDefinitions(index, call.calleeName);
 }
 
 /**
@@ -196,7 +299,6 @@ function addEdge(edges: SymbolEdge[], from: string, to: string, kind: SymbolEdge
 export function buildSymbolGraph(input: BuildSymbolGraphInput): SymbolGraph {
   const { index, files } = input;
   const knownFiles = new Set(files.map((f) => f.filePath));
-  // Also include definition file paths that may lack refs
   for (const sym of index.symbols) knownFiles.add(sym.filePath);
 
   const exportsByFile = collectExportsByFile(files);
@@ -211,104 +313,26 @@ export function buildSymbolGraph(input: BuildSymbolGraphInput): SymbolGraph {
   for (const file of files) {
     const fileId = fileNodeId(file.filePath);
     nodeSet.add(fileId);
+    const bindings = buildImportBindings(file.filePath, file.refs.filter(isImportRef), knownFiles);
 
-    const imports = file.refs.filter(isImportRef);
-    const calls = file.refs.filter(isCallRef);
-    const bindings = buildImportBindings(file.filePath, imports, knownFiles);
-
-    // Import → symbol edges
     for (const binding of bindings) {
       if (binding.targetFile === undefined) continue;
-      const targets = matchImportedSymbol(
-        index,
-        binding.targetFile,
-        binding.imported,
-        exportsByFile.get(binding.targetFile),
+      addResolvedEdges(
+        edges,
+        seen,
+        nodeSet,
+        fileId,
+        matchImportedSymbol(index, binding.targetFile, binding.imported, exportsByFile.get(binding.targetFile)),
+        "import",
       );
-      for (const target of targets) {
-        const to = definitionNodeId(target);
-        nodeSet.add(to);
-        addEdge(edges, fileId, to, "import", seen);
-      }
     }
 
-    // Call → definition edges
-    for (const call of calls) {
-      const targets = resolveCallTargets(index, file.filePath, call, bindings);
-      for (const target of targets) {
-        const to = definitionNodeId(target);
-        nodeSet.add(to);
-        addEdge(edges, fileId, to, "call", seen);
-      }
+    for (const call of file.refs.filter(isCallRef)) {
+      addResolvedEdges(edges, seen, nodeSet, fileId, resolveCallTargets(index, file.filePath, call, bindings), "call");
     }
   }
 
   // eslint-disable-next-line unicorn/no-array-sort -- Array#toSorted requires ES2023
   const nodes = [...nodeSet].sort((a, b) => a.localeCompare(b));
   return { nodes, edges };
-}
-
-function resolveCallTargets(
-  index: SymbolIndex,
-  callerFile: string,
-  call: CallRef,
-  bindings: readonly ImportBinding[],
-): SymbolLocation[] {
-  const qualified = call.objectName ? `${call.objectName}.${call.calleeName}` : call.calleeName;
-
-  // 1. Same-file definitions (prefer qualified, then bare)
-  const sameFile = index.symbols.filter((s) => s.filePath === callerFile);
-  const sameQualified = sameFile.filter(
-    (s) => s.qualifiedName === qualified || s.name === call.calleeName,
-  );
-  if (call.objectName) {
-    const methodHits = sameFile.filter(
-      (s) => s.name === call.calleeName && (s.className === call.objectName || s.qualifiedName === qualified),
-    );
-    if (methodHits.length > 0) return methodHits;
-  }
-  if (sameQualified.length > 0 && !call.objectName) {
-    return sameQualified;
-  }
-
-  // 2. Imported local bindings
-  if (!call.objectName) {
-    const binding = bindings.find((b) => b.local === call.calleeName);
-    if (binding?.targetFile) {
-      const imported = matchImportedSymbol(
-        index,
-        binding.targetFile,
-        binding.imported === "*" ? call.calleeName : binding.imported,
-        undefined,
-      );
-      if (imported.length > 0) return imported;
-    }
-  } else {
-    // obj.method() where obj is a namespace import
-    const ns = bindings.find((b) => b.local === call.objectName && b.imported === "*");
-    if (ns?.targetFile) {
-      const hits = definitionsInFile(index, ns.targetFile).filter(
-        (d) => d.name === call.calleeName || d.qualifiedName === call.calleeName,
-      );
-      if (hits.length > 0) return hits;
-    }
-    // obj.method() where obj is a default/class import
-    const objBinding = bindings.find((b) => b.local === call.objectName);
-    if (objBinding?.targetFile) {
-      const classDefs = matchImportedSymbol(index, objBinding.targetFile, objBinding.imported, undefined);
-      const classNames = new Set(classDefs.map((d) => d.name));
-      const methods = definitionsInFile(index, objBinding.targetFile).filter(
-        (d) => d.name === call.calleeName && d.className !== undefined && classNames.has(d.className),
-      );
-      if (methods.length > 0) return methods;
-    }
-  }
-
-  // 3. Global findDefinitions (ambiguous → all matches)
-  if (call.objectName) {
-    const byQualified = findDefinitions(index, qualified);
-    if (byQualified.length > 0) return byQualified;
-    return findDefinitions(index, call.calleeName);
-  }
-  return findDefinitions(index, call.calleeName);
 }

@@ -19,28 +19,39 @@ function stringLiteralValue(node: Node | null | undefined): string | undefined {
   return undefined;
 }
 
+function collectNamedImports(namedImports: Node): ImportedName[] {
+  const names: ImportedName[] = [];
+  for (const spec of namedImports.namedChildren) {
+    if (spec.type !== "import_specifier") continue;
+    const nameNode = spec.childForFieldName("name");
+    if (!nameNode) continue;
+    const imported = nameNode.text;
+    const aliasNode = spec.childForFieldName("alias");
+    names.push({ local: aliasNode?.text ?? imported, imported });
+  }
+  return names;
+}
+
 function collectImportedNames(clause: Node): ImportedName[] {
   const names: ImportedName[] = [];
 
   for (const child of clause.namedChildren) {
-    if (child.type === "identifier") {
-      names.push({ local: child.text, imported: "default" });
-      continue;
-    }
-    if (child.type === "namespace_import") {
-      const id = child.namedChildren.find((n) => n.type === "identifier");
-      if (id) names.push({ local: id.text, imported: "*" });
-      continue;
-    }
-    if (child.type === "named_imports") {
-      for (const spec of child.namedChildren) {
-        if (spec.type !== "import_specifier") continue;
-        const nameNode = spec.childForFieldName("name");
-        const aliasNode = spec.childForFieldName("alias");
-        if (!nameNode) continue;
-        const imported = nameNode.text;
-        const local = aliasNode?.text ?? imported;
-        names.push({ local, imported });
+    switch (child.type) {
+      case "identifier": {
+        names.push({ local: child.text, imported: "default" });
+        break;
+      }
+      case "namespace_import": {
+        const id = child.namedChildren.find((n) => n.type === "identifier");
+        if (id) names.push({ local: id.text, imported: "*" });
+        break;
+      }
+      case "named_imports": {
+        names.push(...collectNamedImports(child));
+        break;
+      }
+      default: {
+        break;
       }
     }
   }

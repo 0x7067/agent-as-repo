@@ -1,5 +1,8 @@
 import type { PassageStore } from "../ports/passage-store.js";
 import type { RepoAccessPort } from "../ports/repo-access.js";
+import type { FindDefinitionsOptions } from "../core/symbol-index.js";
+import type { RankedSymbolHit } from "../core/symbol-store.js";
+import type { SymbolKind } from "../core/tree-sitter-symbols.js";
 import type { ToolDefinition, ToolHandler } from "./llm-client.js";
 import { handleGlobFiles, handleGrepRepo, handleReadFile } from "./repo-tools.js";
 
@@ -53,6 +56,37 @@ const READ_FILE_TOOL: ToolDefinition = {
   },
 };
 
+const FIND_SYMBOL_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "find_symbol",
+    description:
+      "Look up definition locations for a symbol by name (or Class.method). Results are ranked by repo-map importance when available. Prefer this over grep for known symbol names.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Bare symbol name or qualified name (e.g. SyncOrchestrator.run)",
+        },
+        kind: {
+          type: "string",
+          description: "Optional kind filter (FUNCTION, CLASS, METHOD, …)",
+        },
+        path_prefix: {
+          type: "string",
+          description: "Optional file path prefix to narrow results",
+        },
+        class_name: {
+          type: "string",
+          description: "Optional containing class/module name for methods",
+        },
+      },
+      required: ["name"],
+    },
+  },
+};
+
 const ARCHIVAL_SEARCH_TOOL: ToolDefinition = {
   type: "function",
   function: {
@@ -96,12 +130,81 @@ function missingRepoAccessError(): string {
   });
 }
 
+function missingSymbolIndexError(): string {
+  return JSON.stringify({
+    error:
+      "Symbol index is not available for this agent. Run setup/sync to build the repo map, or use grep_repo.",
+  });
+}
+
+/** Port for looking up ranked symbol definitions (backed by AgentState.symbolFiles). */
+export interface SymbolLookupPort {
+  find(
+    agentId: string,
+    name: string,
+    options?: FindDefinitionsOptions,
+  ): RankedSymbolHit[];
+}
+
 export interface BuildAskToolsParams {
   agentId: string;
   agenticTools: boolean;
   repoAccess: RepoAccessPort | undefined;
+  symbolLookup: SymbolLookupPort | undefined;
   store: PassageStore;
   updateBlock: (agentId: string, label: string, value: string) => Promise<unknown>;
+}
+
+const SYMBOL_KINDS = new Set<string>([
+  "FUNCTION",
+  "CLASS",
+  "INTERFACE",
+  "TYPE",
+  "CONST",
+  "METHOD",
+  "ENUM",
+  "MODULE",
+  "STRUCT",
+  "TRAIT",
+]);
+
+export function handleFindSymbol(
+  lookup: SymbolLookupPort,
+  agentId: string,
+  args: Record<string, unknown>,
+): string {
+  const name = typeof args["name"] === "string" ? args["name"] : "";
+  if (name.length === 0) {
+    return JSON.stringify({ error: "name is required" });
+  }
+
+  const options: FindDefinitionsOptions = {};
+  const kindRaw = args["kind"];
+  if (typeof kindRaw === "string" && SYMBOL_KINDS.has(kindRaw)) {
+    options.kind = kindRaw as SymbolKind;
+  }
+  const pathPrefix = args["path_prefix"];
+  if (typeof pathPrefix === "string" && pathPrefix.length > 0) {
+    options.pathPrefix = pathPrefix;
+  }
+  const className = args["class_name"];
+  if (typeof className === "string" && className.length > 0) {
+    options.className = className;
+  }
+
+  const hits = lookup.find(agentId, name, options);
+  return JSON.stringify(
+    hits.map((hit) => ({
+      filePath: hit.filePath,
+      kind: hit.kind,
+      name: hit.name,
+      qualifiedName: hit.qualifiedName,
+      ...(hit.className === undefined ? {} : { className: hit.className }),
+      startLine: hit.startLine,
+      endLine: hit.endLine,
+      rank: hit.rank,
+    })),
+  );
 }
 
 /** Build the ask-turn tool list and handlers for LocalProvider.sendMessage. */
@@ -109,12 +212,12 @@ export function buildAskTools(params: BuildAskToolsParams): {
   tools: ToolDefinition[];
   toolHandlers: Partial<Record<string, ToolHandler>>;
 } {
-  const { agentId, agenticTools, repoAccess, store, updateBlock } = params;
+  const { agentId, agenticTools, repoAccess, symbolLookup, store, updateBlock } = params;
   const tools: ToolDefinition[] = [];
   const toolHandlers: Partial<Record<string, ToolHandler>> = {};
 
   if (agenticTools) {
-    tools.push(GREP_TOOL, GLOB_TOOL, READ_FILE_TOOL);
+    tools.push(GREP_TOOL, GLOB_TOOL, READ_FILE_TOOL, FIND_SYMBOL_TOOL);
     toolHandlers["grep_repo"] = (args) => {
       if (repoAccess === undefined) return Promise.resolve(missingRepoAccessError());
       return Promise.resolve(handleGrepRepo(repoAccess, agentId, args));
@@ -126,6 +229,10 @@ export function buildAskTools(params: BuildAskToolsParams): {
     toolHandlers["read_file"] = async (args) => {
       if (repoAccess === undefined) return missingRepoAccessError();
       return handleReadFile(repoAccess, agentId, args);
+    };
+    toolHandlers["find_symbol"] = (args) => {
+      if (symbolLookup === undefined) return Promise.resolve(missingSymbolIndexError());
+      return Promise.resolve(handleFindSymbol(symbolLookup, agentId, args));
     };
   }
 

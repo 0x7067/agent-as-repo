@@ -297,14 +297,7 @@ export function resetTreeSitterChunkerForTests(): void {
  * after `initTreeSitterChunker`.
  */
 export function extractSymbolSpansFromFile(file: FileInfo): SymbolSpan[] {
-  if (!file.content.trim() || !initialized || !parser) return [];
-  try {
-    const parsed = parseFile(file);
-    if (!parsed) return [];
-    return extractSymbolSpans(parsed.tree, parsed.label);
-  } catch {
-    return [];
-  }
+  return extractSymbolsAndRefsFromFile(file).spans;
 }
 
 /**
@@ -313,22 +306,31 @@ export function extractSymbolSpansFromFile(file: FileInfo): SymbolSpan[] {
  * from definition extraction (`extractSymbolSpansFromFile`).
  */
 export function extractSymbolRefsFromFile(file: FileInfo): SymbolRef[] {
-  if (!file.content.trim() || !initialized || !parser) return [];
+  return extractSymbolsAndRefsFromFile(file).refs;
+}
+
+/**
+ * Single-parse extraction of definition spans + refs (avoids re-parsing the
+ * same file during sync when both are needed).
+ */
+export function extractSymbolsAndRefsFromFile(file: FileInfo): {
+  spans: SymbolSpan[];
+  refs: SymbolRef[];
+} {
+  if (!file.content.trim() || !initialized || !parser) {
+    return { spans: [], refs: [] };
+  }
   try {
     const parsed = parseFile(file);
-    if (!parsed) return [];
-    switch (parsed.label) {
-      case "typescript":
-      case "tsx":
-      case "javascript": {
-        return extractSymbolRefsJsTs(parsed.tree);
-      }
-      default: {
-        return [];
-      }
-    }
+    if (!parsed) return { spans: [], refs: [] };
+    const isJsTs =
+      parsed.label === "typescript" || parsed.label === "tsx" || parsed.label === "javascript";
+    return {
+      spans: extractSymbolSpans(parsed.tree, parsed.label),
+      refs: isJsTs ? extractSymbolRefsJsTs(parsed.tree) : [],
+    };
   } catch {
-    return [];
+    return { spans: [], refs: [] };
   }
 }
 

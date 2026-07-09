@@ -1,3 +1,6 @@
+export type { SymbolFileMap, SymbolRankMap } from "./symbol-store.js";
+import type { SymbolFileMap, SymbolRankMap } from "./symbol-store.js";
+
 /** A git submodule entry parsed from `git submodule status`. */
 export interface SubmoduleInfo {
   /** Relative path from repo root (e.g. "libs/my-lib"). */
@@ -93,6 +96,13 @@ export interface AgentState {
    * backward compatibility with older state files (missing → always reindex).
    */
   fileHashes?: FileHashMap;
+  /**
+   * Per-file symbol definitions + refs for the repo map. Invalidated with
+   * `fileHashes` during sync. Optional for backward compatibility.
+   */
+  symbolFiles?: SymbolFileMap;
+  /** PageRank scores keyed by graph node id (`def:…` / `file:…`), computed at sync. */
+  symbolRanks?: SymbolRankMap;
   lastBootstrap: string | null;
   lastSyncCommit: string | null;
   lastSyncAt: string | null;

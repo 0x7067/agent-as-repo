@@ -83,6 +83,8 @@ describe("syncRepo", () => {
     expect(result.lastSyncCommit).toBe("def456");
     expect(result.passages["src/a.ts"]).toBeDefined();
     expect(result.fileHashes["src/a.ts"]).toMatch(/^[0-9a-f]{64}$/);
+    expect(result.symbolFiles["src/a.ts"]).toBeDefined();
+    expect(result.symbolRanks).toBeDefined();
     // b.ts passages unchanged
     expect(result.passages["src/b.ts"]).toEqual(["p-3"]);
     expect(result.failedFiles).toEqual([]);
@@ -95,6 +97,11 @@ describe("syncRepo", () => {
     const agentWithHash = {
       ...testAgent,
       fileHashes: { "src/a.ts": hashFileContent(content), "src/b.ts": "other" },
+      symbolFiles: {
+        "src/a.ts": { symbols: [], refs: [] },
+        "src/b.ts": { symbols: [], refs: [] },
+      },
+      symbolRanks: { "file:src/a.ts": 0.1 },
     };
     const result = await syncRepo({
       provider,
@@ -110,6 +117,44 @@ describe("syncRepo", () => {
     expect(result.filesSkippedUnchanged).toBe(1);
     expect(result.passages["src/a.ts"]).toEqual(["p-1", "p-2"]);
     expect(result.fileHashes["src/a.ts"]).toBe(hashFileContent(content));
+    expect(result.symbolFiles["src/a.ts"]).toEqual({ symbols: [], refs: [] });
+    expect(result.symbolRanks).toEqual({ "file:src/a.ts": 0.1 });
+  });
+
+  it("refreshes symbolFiles when content changes and drops them on delete", async () => {
+    const provider = makeMockProvider();
+    const content = [
+      "export function helper() { return 1; }",
+      "helper();",
+    ].join("\n");
+    const result = await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: ["src/a.ts"],
+      collectFile: (path) => Promise.resolve({ path, content, sizeKb: 1 }),
+      headCommit: "def456",
+    });
+
+    const stored = result.symbolFiles["src/a.ts"];
+    expect(stored).toBeDefined();
+    expect(stored!.symbols.some((s) => s.name === "helper")).toBe(true);
+    expect(stored!.refs.some((r) => r.kind === "call")).toBe(true);
+    expect(Object.keys(result.symbolRanks).length).toBeGreaterThan(0);
+
+    const deleted = await syncRepo({
+      provider: makeMockProvider(),
+      agent: {
+        ...testAgent,
+        fileHashes: result.fileHashes,
+        symbolFiles: result.symbolFiles,
+        symbolRanks: result.symbolRanks,
+        passages: result.passages,
+      },
+      changedFiles: ["src/a.ts"],
+      collectFile: () => Promise.resolve(null),
+      headCommit: "ghi789",
+    });
+    expect(deleted.symbolFiles["src/a.ts"]).toBeUndefined();
   });
 
   it("handles deleted files (collectFile returns null)", async () => {

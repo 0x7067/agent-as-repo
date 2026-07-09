@@ -56,7 +56,8 @@ signal Aider uses to pick repo-map context.
 - File-level call edges (not caller-function → callee); fine for ranking, weaker for “who calls X inside Y”
 - Default-export matching is heuristic
 
-## Next
+## Follow-up (landed in same effort)
 
-Wire sync-time `symbolFiles` + CLI `find_symbol` behind `agenticTools`
-(no MCP symbol tools).
+Sync-time `symbolFiles` / `symbolRanks` + CLI `find_symbol` behind
+`agenticTools` (no MCP symbol tools). Multi-language refs and feeding
+PageRank into core-memory summaries remain later work.
