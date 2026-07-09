@@ -271,6 +271,26 @@ describe("extractSymbolRefsFromFile", () => {
     expect(filterRefsByKind(refs, "call")[0]?.calleeName).toBe("helper");
   });
 
+  it("extracts imports and calls for TSX", () => {
+    const file: FileInfo = {
+      path: "src/Widget.tsx",
+      content: `import { helper } from "./lib";\nexport function Widget() { helper(); return <div />; }\n`,
+      sizeKb: 0.1,
+    };
+    const refs = extractSymbolRefsFromFile(file);
+    expect(filterRefsByKind(refs, "import")).toHaveLength(1);
+    expect(filterRefsByKind(refs, "call")[0]?.calleeName).toBe("helper");
+  });
+
+  it("returns [] for languages without ref extractors", () => {
+    const file: FileInfo = {
+      path: "src/Main.java",
+      content: "class Main { void run() { foo(); } }\n",
+      sizeKb: 0.1,
+    };
+    expect(extractSymbolRefsFromFile(file)).toEqual([]);
+  });
+
   it("extracts calls for Python", () => {
     const file: FileInfo = {
       path: "src/main.py",

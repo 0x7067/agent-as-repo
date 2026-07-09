@@ -334,6 +334,7 @@ describe("LocalProvider", () => {
       expect(handlers["grep_repo"]).toBeUndefined();
       expect(handlers["glob_files"]).toBeUndefined();
       expect(handlers["read_file"]).toBeUndefined();
+      expect(handlers["find_symbol"]).toBeUndefined();
       expect(handlers["archival_memory_search"]).toBeDefined();
     });
 

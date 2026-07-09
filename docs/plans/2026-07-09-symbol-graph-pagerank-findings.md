@@ -51,13 +51,14 @@ signal Aider uses to pick repo-map context.
 
 ## Limits
 
-- TS/JS refs only (other languages contribute definitions but no edges yet)
-- No path-alias / package resolution
 - File-level call edges (not caller-function → callee); fine for ranking, weaker for “who calls X inside Y”
 - Default-export matching is heuristic
+- Bare package imports (e.g. `lodash`) still skipped — no `node_modules` resolution
+- Go module-path → directory mapping not yet implemented
 
 ## Follow-up (landed in same effort)
 
 Sync-time `symbolFiles` / `symbolRanks` + CLI `find_symbol` behind
-`agenticTools` (no MCP symbol tools). Multi-language refs and feeding
-PageRank into core-memory summaries remain later work.
+`agenticTools` (no MCP symbol tools). Later commits also added Python/Go refs,
+tsconfig path aliases, and PageRank evidence in consolidate prompts — see
+`2026-07-09-repo-map-followups-findings.md`.
