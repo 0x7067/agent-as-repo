@@ -671,7 +671,9 @@ describe("cli contract", () => {
     initGitRepo(repoDir);
     await writeWorkspaceFile(path.join(repoDir, "packages", "app", "a.ts"), "export const a = 1;\n");
     await writeWorkspaceFile(path.join(repoDir, "packages", "other", "a.ts"), "export const other = 1;\n");
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- git is the system under integration test
     execFileSync("git", ["add", "."], { cwd: repoDir });
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- git is the system under integration test
     execFileSync("git", ["commit", "-q", "-m", "initial"], { cwd: repoDir });
     const checkpointSha = gitHeadCommitForTest(repoDir);
     await commitFile(repoDir, "packages/app/b.ts", "export const b = 2;\n", "add app b");

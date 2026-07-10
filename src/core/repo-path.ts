@@ -1,7 +1,9 @@
 import path from "node:path";
 
 function normalizeRelativePath(filePath: string): string {
-  return filePath.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+$/, "");
+  let normalized = filePath.replaceAll("\\", "/").replace(/^\.\//, "");
+  while (normalized.endsWith("/")) normalized = normalized.slice(0, -1);
+  return normalized;
 }
 
 /** Map a git repo-relative path into an optional configured subtree. */

@@ -417,9 +417,9 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     const ignoredAbsoluteFiles = new Set<string>();
     const absoluteStatePath = path.resolve(statePath);
     ignoredAbsoluteFiles.add(path.normalize(absoluteStatePath));
-    const relativeStatePath = normalizeRelativePath(path.relative(repoConfig.path, absoluteStatePath));
+    const relativeStatePath = path.relative(repoConfig.path, absoluteStatePath).replaceAll("\\", "/");
     if (relativeStatePath && !relativeStatePath.startsWith("../") && relativeStatePath !== "..") {
-      const mappedStatePath = toAgentPath(repoConfig, relativeStatePath);
+      const mappedStatePath = toAgentPath(relativeStatePath, repoConfig.basePath);
       if (mappedStatePath) {
         ignoredFiles.add(mappedStatePath);
       }
@@ -439,7 +439,7 @@ export async function watchRepos(params: WatchParams): Promise<void> {
             ? path.normalize(rawName)
             : path.normalize(path.resolve(repoConfig.path, rawName));
           if (ignoredAbsoluteEventFilesByRepo.get(repoName)?.has(absoluteChangedPath)) return;
-          const mapped = toAgentPath(repoConfig, rawName);
+          const mapped = toAgentPath(rawName, repoConfig.basePath);
           if (!mapped) return;
           queueFileChange(repoName, mapped);
         },

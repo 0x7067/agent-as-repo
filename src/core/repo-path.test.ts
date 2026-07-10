@@ -41,6 +41,6 @@ describe("toAgentPath", () => {
   });
 
   it("normalizes Windows separators", () => {
-    expect(toAgentPath("packages\\app\\src\\a.ts", "packages/app/")).toBe("src/a.ts");
+    expect(toAgentPath(String.raw`packages\app\src\a.ts`, "packages/app/")).toBe("src/a.ts");
   });
 });
