@@ -31,6 +31,11 @@ export interface ChatCompletionResponse {
     };
     finish_reason: string;
   }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
 }
 
 interface ChatCompletionsRequestOptions {
@@ -40,6 +45,7 @@ interface ChatCompletionsRequestOptions {
 
 /** Default OpenAI-compatible endpoint: local Ollama. */
 export const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
+export const DEFAULT_MAX_TOOL_STEPS = 5;
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -183,6 +189,15 @@ function writeDebug(message: string): void {
   process.stderr.write(`[llm] ${message}\n`);
 }
 
+function usageDebugFields(usage: ChatCompletionResponse["usage"]): string {
+  if (usage === undefined) return "prompt_tokens=unknown completion_tokens=unknown total_tokens=unknown";
+  return [
+    `prompt_tokens=${String(usage.prompt_tokens ?? "unknown")}`,
+    `completion_tokens=${String(usage.completion_tokens ?? "unknown")}`,
+    `total_tokens=${String(usage.total_tokens ?? "unknown")}`,
+  ].join(" ");
+}
+
 function getMessageContentText(content: string | null): string {
   return (content ?? "").trim();
 }
@@ -295,7 +310,7 @@ export async function toolCallingLoop(params: {
     model,
     baseUrl,
     apiKey,
-    maxSteps = 10,
+    maxSteps = DEFAULT_MAX_TOOL_STEPS,
     signal,
     requestTimeoutMs,
   } = params;
@@ -316,12 +331,14 @@ export async function toolCallingLoop(params: {
 
   while (steps < maxSteps) {
     const startedAt = Date.now();
+    const messageChars = JSON.stringify(messages).length;
+    const toolSchemaChars = JSON.stringify(tools).length;
     const response = await callChatCompletions(messages, tools, model, baseUrl, apiKey, requestOptions);
     steps++;
     const choice = getFirstChoiceOrThrow(response, `step-${String(steps)}`);
     const toolCalls = getToolCalls(choice);
     const elapsedMs = Date.now() - startedAt;
-    debug(`step=${String(steps)} model=${model} finish_reason=${choice.finish_reason} tool_calls=${String(toolCalls.length)} elapsed_ms=${String(elapsedMs)}`);
+    debug(`step=${String(steps)} model=${model} finish_reason=${choice.finish_reason} tool_calls=${String(toolCalls.length)} message_chars=${String(messageChars)} tool_schema_chars=${String(toolSchemaChars)} ${usageDebugFields(response.usage)} elapsed_ms=${String(elapsedMs)}`);
 
     if (toolCalls.length === 0) {
       return readTerminalAssistantMessage(choice);
@@ -335,14 +352,15 @@ export async function toolCallingLoop(params: {
     });
 
     // Execute each tool call and append results
+    const beforeToolResults = messages.length;
     await executeToolCalls({ toolCalls, toolHandlers, messages });
+    const toolResultChars = messages
+      .slice(beforeToolResults)
+      .reduce((total, message) =>
+        total + (message.role === "tool" ? message.content.length : 0), 0);
+    debug(`step=${String(steps)} tool_result_chars=${String(toolResultChars)}`);
 
     if (steps >= maxSteps) {
-      const directContent = getMessageContentText(choice.message.content);
-      if (directContent.length > 0) {
-        return choice.message.content ?? "";
-      }
-
       const finalRequestParams = {
         messages,
         model,

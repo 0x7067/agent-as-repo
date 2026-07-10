@@ -4,6 +4,7 @@ import {
   embed,
   toolCallingLoop,
   DEFAULT_LLM_BASE_URL,
+  DEFAULT_MAX_TOOL_STEPS,
   type ToolDefinition,
   type ToolHandler,
 } from "./llm-client.js";
@@ -84,6 +85,10 @@ describe("callChatCompletions", () => {
 
   it("defaults to the local Ollama base URL", () => {
     expect(DEFAULT_LLM_BASE_URL).toBe("http://localhost:11434/v1");
+  });
+
+  it("uses a conservative default tool-step budget", () => {
+    expect(DEFAULT_MAX_TOOL_STEPS).toBe(5);
   });
 
   it("posts to the correct URL with correct headers and body", async () => {
@@ -223,6 +228,35 @@ describe("toolCallingLoop", () => {
     expect(result).toBe("The sky is blue.");
   });
 
+  it("logs request size and provider token usage when LLM debugging is enabled", async () => {
+    const response = {
+      ...makeChoice("The sky is blue."),
+      usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 },
+    };
+    mockFetch.mockResolvedValue(makeResponse(200, response));
+    process.env["REPO_EXPERT_DEBUG_LLM"] = "1";
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    try {
+      await toolCallingLoop({
+        systemPrompt: HELPFUL_SYSTEM_PROMPT,
+        userMessage: "Why is the sky blue?",
+        tools: [],
+        toolHandlers: {},
+        model: MODEL,
+        apiKey: API_KEY,
+      });
+    } finally {
+      delete process.env["REPO_EXPERT_DEBUG_LLM"];
+    }
+
+    const output = stderr.mock.calls.map((call) => String(call[0])).join("");
+    expect(output).toContain("message_chars=");
+    expect(output).toContain("prompt_tokens=12");
+    expect(output).toContain("completion_tokens=4");
+    stderr.mockRestore();
+  });
+
   it("throws when response has no tool_calls and empty content", async () => {
     mockFetch.mockResolvedValue(makeResponse(200, makeChoice(null)));
 
@@ -311,6 +345,36 @@ describe("toolCallingLoop", () => {
     const finalBody = getJsonRequestBody(mockFetch, 1) as Record<string, unknown>;
     expect(finalBody).not.toHaveProperty("tools");
     expect(result).toBe("Final answer after tool execution.");
+  });
+
+  it("finalizes with tool results when the last tool-calling response also has content", async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeResponse(200, makeChoice(
+        "I will check the weather.",
+        [{ id: "tc1", name: "get_weather", args: JSON.stringify({ city: "Paris" }) }],
+      )),
+    ).mockResolvedValueOnce(
+      makeResponse(200, makeChoice("It is sunny in Paris."))
+    );
+
+    const result = await toolCallingLoop({
+      systemPrompt: WEATHER_SYSTEM_PROMPT,
+      userMessage: PARIS_WEATHER_QUESTION,
+      tools: TOOLS,
+      toolHandlers,
+      model: MODEL,
+      apiKey: API_KEY,
+      maxSteps: 1,
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const finalBody = getJsonRequestBody(mockFetch, 1) as {
+      messages: Array<{ role: string; content?: string }>;
+    };
+    expect(finalBody.messages.some((message) =>
+      message.role === "tool" && message.content?.includes("sunny") === true
+    )).toBe(true);
+    expect(result).toBe("It is sunny in Paris.");
   });
 
   it("throws when maxSteps is reached and finalization has no content", async () => {
