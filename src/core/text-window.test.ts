@@ -27,4 +27,20 @@ describe("windowText", () => {
     expect(result.truncated).toBe(true);
     expect(result.content.length).toBe(8);
   });
+
+  it("reports the last line actually returned when the character budget truncates", () => {
+    const result = windowText([
+      "first line",
+      "second line",
+      "third line",
+    ].join("\n"), {
+      startLine: 1,
+      endLine: 3,
+      maxChars: 18,
+    });
+
+    expect(result.content).toBe("first line…");
+    expect(result.endLine).toBe(1);
+    expect(result.truncated).toBe(true);
+  });
 });

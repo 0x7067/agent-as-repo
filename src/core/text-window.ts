@@ -24,8 +24,35 @@ export function windowText(text: string, options: TextWindowOptions): TextWindow
     return { content: selected, startLine, endLine, totalLines, truncated: false };
   }
 
-  const content = options.maxChars <= 1
-    ? "…".slice(0, options.maxChars)
-    : `${selected.slice(0, options.maxChars - 1)}…`;
-  return { content, startLine, endLine, totalLines, truncated: true };
+  if (options.maxChars <= 1) {
+    return {
+      content: "…".slice(0, options.maxChars),
+      startLine,
+      endLine: startLine,
+      totalLines,
+      truncated: true,
+    };
+  }
+
+  const prefix = selected.slice(0, options.maxChars - 1);
+  const lastCompleteLineBreak = prefix.lastIndexOf("\n");
+  if (lastCompleteLineBreak === -1) {
+    return {
+      content: `${prefix}…`,
+      startLine,
+      endLine: startLine,
+      totalLines,
+      truncated: true,
+    };
+  }
+
+  const completeLines = prefix.slice(0, lastCompleteLineBreak);
+  const returnedLineCount = completeLines.split("\n").length;
+  return {
+    content: `${completeLines}…`,
+    startLine,
+    endLine: startLine + returnedLineCount - 1,
+    totalLines,
+    truncated: true,
+  };
 }

@@ -30,6 +30,11 @@ export function chunkWithHeader(
       }
 
       const available = maxChars - current.length;
+      if (available <= 0) {
+        throw new RangeError(
+          `chunk header leaves no content room within the ${String(maxChars)}-character limit`,
+        );
+      }
       if (remaining.length <= available) {
         current += remaining + "\n\n";
         hasContent = true;

@@ -129,7 +129,11 @@ const MEMORY_REPLACE_TOOL: ToolDefinition = {
     parameters: {
       type: "object",
       properties: {
-        label: { type: "string", description: "Block label (persona, architecture, conventions)" },
+        label: {
+          type: "string",
+          enum: ["architecture", "conventions"],
+          description: "Mutable block label",
+        },
         value: { type: "string", description: "New block content" },
       },
       required: ["label", "value"],

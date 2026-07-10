@@ -15,14 +15,19 @@ export interface SearchResultBudget {
   maxPerFile: number;
 }
 
+const CONTINUED_SUFFIX = " (continued)";
+
 function passageFilePath(text: string): string | null {
   const firstLine = text.split("\n", 1)[0] ?? "";
   if (!firstLine.startsWith("FILE: ")) return null;
   const pathAndMetadata = firstLine.slice("FILE: ".length);
   const separator = pathAndMetadata.indexOf(" | ");
-  const filePath = (separator === -1
+  let filePath = (separator === -1
     ? pathAndMetadata
     : pathAndMetadata.slice(0, separator)).trim();
+  if (filePath.endsWith(CONTINUED_SUFFIX)) {
+    filePath = filePath.slice(0, -CONTINUED_SUFFIX.length).trimEnd();
+  }
   return filePath.length > 0 ? filePath : null;
 }
 

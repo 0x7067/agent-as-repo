@@ -13,6 +13,7 @@ export function toAgentPath(repoRelativePath: string, basePath?: string): string
   if (basePath === undefined || basePath.trim() === "") return normalized;
 
   const normalizedBase = normalizeRelativePath(basePath);
+  if (normalizedBase === "" || normalizedBase === ".") return normalized;
   if (normalized === normalizedBase) return null;
   if (!normalized.startsWith(`${normalizedBase}/`)) return null;
   return normalized.slice(normalizedBase.length + 1);

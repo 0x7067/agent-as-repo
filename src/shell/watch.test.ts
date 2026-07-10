@@ -1365,6 +1365,60 @@ describe("watchRepos", () => {
       expect.arrayContaining(WATCH_SUBMODULE_FILES),
     );
   });
+
+  it("rebases expanded submodule files into the configured basePath", async () => {
+    const subConfig: Config = {
+      ...testConfig,
+      repos: {
+        [WATCH_REPO_NAME]: {
+          ...testConfig.repos[WATCH_REPO_NAME],
+          basePath: WATCH_SUBMODULE_PATH,
+          includeSubmodules: true,
+        },
+      },
+    };
+    mockedLoadState.mockResolvedValue(makeState("abc123"));
+    const fakeGit = makeFakeGit({
+      headCommit: vi.fn().mockReturnValue("def456"),
+      diffFiles: vi.fn().mockReturnValue([WATCH_SUBMODULE_PATH]),
+    });
+    mockedListSubmodules.mockReturnValue([
+      { path: WATCH_SUBMODULE_PATH, commit: "abc123", initialized: true },
+    ]);
+    mockedExpandSubmoduleFiles.mockResolvedValue(WATCH_SUBMODULE_FILES);
+    mockedSyncRepo.mockResolvedValue({
+      passages: {},
+      lastSyncCommit: "def456",
+      filesRemoved: 0,
+      fileHashes: {},
+      symbolFiles: {},
+      symbolRanks: {},
+      filesSkippedUnchanged: 0,
+      filesReIndexed: 2,
+      isFullReIndex: false,
+      failedFiles: [],
+    });
+
+    const ac = new AbortController();
+    const watchPromise = watchRepos({
+      provider: makeMockProvider(),
+      config: subConfig,
+      repoNames: [WATCH_REPO_NAME],
+      statePath: WATCH_STATE_FILE,
+      intervalMs: 5000,
+      signal: ac.signal,
+      git: fakeGit,
+      fs: makeFakeFs(),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ac.abort();
+    await vi.advanceTimersByTimeAsync(200);
+    await watchPromise;
+
+    const syncCall = mockedSyncRepo.mock.calls[0] as [{ changedFiles: string[] }] | undefined;
+    expect(syncCall?.[0].changedFiles).toEqual(["src/index.ts", "src/util.ts"]);
+  });
 });
 
 describe("watchRepos - orphaned checkpoint fail-fast", () => {

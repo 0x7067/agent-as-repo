@@ -43,4 +43,8 @@ describe("toAgentPath", () => {
   it("normalizes Windows separators", () => {
     expect(toAgentPath(String.raw`packages\app\src\a.ts`, "packages/app/")).toBe("src/a.ts");
   });
+
+  it.each([".", "./"])("treats %s as the repository root", (basePath) => {
+    expect(toAgentPath("src/a.ts", basePath)).toBe("src/a.ts");
+  });
 });

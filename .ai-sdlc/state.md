@@ -1,5 +1,5 @@
 # Project State
-updated: 2026-07-09
+updated: 2026-07-10
 
 ## Goal
 repo-expert is a local-first CLI + MCP server that keeps semantic memory for
@@ -7,22 +7,22 @@ git repos and answers questions about them. The codebase follows functional
 core / imperative shell, TDD, pnpm, Vitest, and Zod v4 (`zod/v4` import path).
 
 ## Now
-Current checkout is branch `cursor/repo-map-core-9ce6`. On 2026-07-09 an
-adversarial branch review found three issues in the repo-map work, and local
-uncommitted edits now address them: git-versioned memory stamps source commits
-per agent at write time, tsconfig path aliases are basePath-aware, and three
-extra EOF blank lines are removed. Tree is intentionally left dirty for Pedro
-to inspect/commit.
+Current checkout is `cursor/reduce-exploration-token-costs-612d`, already merged
+at the same tip as `main`. All six branch-review findings are fixed locally:
+read pagination reports returned lines, submodules and root aliases respect
+basePath, passage headers fail safely when over budget, continuation chunks
+share diversity limits, and the memory tool schema matches its handler. The
+tree is intentionally dirty for Pedro to review and commit.
 
 ## Verification path
-- `pnpm run typecheck` — clean, run 2026-07-09.
-- `pnpm run lint` — clean, run 2026-07-09.
-- `pnpm test src/shell/git-markdown-block-storage.test.ts src/shell/tsconfig-loader.test.ts src/core/symbol-graph.test.ts src/core/tree-sitter-chunker.test.ts src/core/tree-sitter-refs-python.test.ts -- --runInBand` — 42 passed (42), run 2026-07-09.
-- `pnpm test -- --runInBand` — 1157 passed (1157), 108 files, run
-  2026-07-09. Invalid-ref `fatal:` stderr lines are expected from tests that
-  exercise bad git refs.
-- `git diff --check` — clean, run 2026-07-09.
-- Full combined gate remains `pnpm run sanity`.
+- Baseline `pnpm run sanity` — clean on 2026-07-10: lint/typecheck passed and
+  1173 tests passed across 110 files.
+- Focused regression command covering chunker, repo-path, result-budget,
+  text-window, repo-tools, local-provider, watch, and CLI — 167 passed.
+- Real Git integration: advanced a local submodule gitlink and ran CLI sync with
+  `base_path` equal to the submodule; persisted paths were correctly rebased.
+- Final `pnpm run sanity` — lint/typecheck clean; 1180 tests passed across 110
+  files on 2026-07-10. `git diff --check` clean.
 
 ## Decisions
 - Zod imports stay on `zod/v4`, not `zod`.
@@ -48,10 +48,8 @@ to inspect/commit.
   PR #17 is still clean or still needs the same comments addressed.
 
 ## Next
-1. Review and commit the uncommitted fixes on `cursor/repo-map-core-9ce6`.
-2. Follow-up: `lastSyncAt` is only written by watch.ts, so sync-only users can
-   never reach the `since` fallback; decide whether manual `sync` should stamp
-   it too.
-3. Follow-up coverage: `includeSubmodules: true` across the shared sync
-   evidence paths, `sync --since <ref>` CLI-level coverage, and additional
-   `install-instructions` CLI option tests.
+1. Review and commit the six branch-review fixes and regression tests.
+2. Follow-up: decide whether manual `sync` should stamp `lastSyncAt`; today
+   only watch writes it, so sync-only users cannot reach the `since` fallback.
+3. Follow-up coverage: `sync --since <ref>` CLI behavior and additional
+   `install-instructions` option tests.

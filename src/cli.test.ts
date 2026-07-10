@@ -92,7 +92,11 @@ async function writeConfig(
   cwd: string,
   repoName: string,
   repoPath: string,
-  opts: { consolidateOnSync?: boolean; basePath?: string } = {},
+  opts: {
+    consolidateOnSync?: boolean;
+    basePath?: string;
+    includeSubmodules?: boolean;
+  } = {},
 ): Promise<void> {
   const config = [
     "provider:",
@@ -102,6 +106,7 @@ async function writeConfig(
     `  ${repoName}:`,
     `    path: ${repoPath}`,
     ...(opts.basePath === undefined ? [] : [`    base_path: ${opts.basePath}`]),
+    ...(opts.includeSubmodules ? ["    include_submodules: true"] : []),
     "    description: test repo",
     "    extensions: [.ts]",
     "    ignore_dirs: [node_modules, .git]",
@@ -708,6 +713,82 @@ describe("cli contract", () => {
     };
     expect(savedState.agents["my-app"].fileHashes).toHaveProperty("b.ts");
     expect(savedState.agents["my-app"].fileHashes).not.toHaveProperty("packages/other/b.ts");
+  });
+
+  it("rebases a real submodule pointer update into its configured base_path", { timeout: 30_000 }, async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-sync-submodule-base-path-");
+    const repoDir = path.join(cwd, "repo");
+    const sourceSubmoduleDir = path.join(cwd, "source-submodule");
+    const checkedOutSubmoduleDir = path.join(repoDir, "libs", "my-lib");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await mkdirWorkspaceDir(path.join(sourceSubmoduleDir, "src"), { recursive: true });
+    initGitRepo(repoDir);
+    initGitRepo(sourceSubmoduleDir);
+    await commitFile(sourceSubmoduleDir, "src/index.ts", "export const first = 1;\n", "initial submodule");
+
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- git submodule behavior is the integration boundary under test
+    execFileSync("git", [
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      sourceSubmoduleDir,
+      "libs/my-lib",
+    ], { cwd: repoDir });
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- git is the system under integration test
+    execFileSync("git", ["commit", "-q", "-am", "add submodule"], { cwd: repoDir });
+    const checkpointSha = gitHeadCommitForTest(repoDir);
+
+    const nextSubmoduleCommit = await commitFile(
+      sourceSubmoduleDir,
+      "src/util.ts",
+      "export const second = 2;\n",
+      "advance submodule",
+    );
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- git is the system under integration test
+    execFileSync("git", ["fetch", "-q"], { cwd: checkedOutSubmoduleDir });
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- git is the system under integration test
+    execFileSync("git", ["checkout", "-q", nextSubmoduleCommit], { cwd: checkedOutSubmoduleDir });
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- git is the system under integration test
+    execFileSync("git", ["add", "libs/my-lib"], { cwd: repoDir });
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- git is the system under integration test
+    execFileSync("git", ["commit", "-q", "-m", "advance submodule pointer"], { cwd: repoDir });
+    await writeConfig(cwd, "my-app", repoDir, {
+      basePath: "libs/my-lib",
+      includeSubmodules: true,
+    });
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          fileHashes: {},
+          lastBootstrap: null,
+          lastSyncCommit: checkpointSha,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state));
+
+    const result = runCli(["sync", "--config", "config.yaml"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("2 changed files since");
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { fileHashes?: Record<string, string> }>;
+    };
+    const fileHashes = savedState.agents["my-app"].fileHashes ?? {};
+    expect(new Set(Object.keys(fileHashes))).toEqual(new Set(["src/index.ts", "src/util.ts"]));
+    expect(typeof fileHashes["src/index.ts"]).toBe("string");
+    expect(typeof fileHashes["src/util.ts"]).toBe("string");
+    expect(fileHashes).not.toHaveProperty("libs/my-lib/src/index.ts");
   });
 
   it("fails fast when the checkpoint commit is orphaned, even if a last-sync timestamp is available", { timeout: 30_000 }, async () => {

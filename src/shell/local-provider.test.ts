@@ -361,13 +361,20 @@ describe("LocalProvider", () => {
 
     it("memory_replace rejects persona writes", async () => {
       await provider.sendMessage("myrepo", "hello");
-      const replaceHandler = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers["memory_replace"];
+      const callArgs = vi.mocked(toolCallingLoop).mock.calls[0][0];
+      const replaceHandler = callArgs.toolHandlers["memory_replace"];
       vi.clearAllMocks();
 
       const result = await replaceHandler({ label: "persona", value: "hacked" });
 
       expect(mockBlockStorage.set).not.toHaveBeenCalled();
       expect(result).toContain("cannot be modified");
+      const replaceTool = callArgs.tools.find((tool) => tool.function.name === "memory_replace");
+      const properties = replaceTool?.function.parameters["properties"] as
+        | Record<string, unknown>
+        | undefined;
+      const labelSchema = properties?.["label"] as Record<string, unknown> | undefined;
+      expect(labelSchema?.["enum"]).toEqual(["architecture", "conventions"]);
     });
 
     it("memory_replace rejects oversized values", async () => {

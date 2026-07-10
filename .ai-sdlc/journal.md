@@ -174,3 +174,22 @@
   when one provider spans multiple repos or a long-running watch process.
 - Left: source tree intentionally dirty with the review-fix edits for Pedro
   to inspect and commit.
+
+## 2026-07-10 — Fixed exploration-cost branch review findings
+- Did: fixed truthful read pagination, basePath-aware submodule expansion and
+  root aliases, strict chunk-header limits, continuation diversity, and the
+  ask-time memory schema; added one regression per reviewed defect.
+- Verified: focused affected tests passed 167; `pnpm run sanity` passed lint,
+  typecheck, and 1179 tests across 110 files; `git diff --check` clean.
+- Learned: expanded submodule paths stay repo-relative and must be mapped only
+  after expansion; character truncation must report the last complete line.
+- Left: tree intentionally dirty for Pedro to review and commit.
+
+## 2026-07-10 — Exercised real submodule sync boundary
+- Did: added a CLI integration test that creates a real local submodule,
+  advances its gitlink, and syncs with the submodule as `base_path`.
+- Verified: persisted hashes use `src/index.ts` and `src/util.ts`, never the
+  duplicated repo-relative prefix; `pnpm run sanity` passed 1180 tests.
+- Learned: local submodule tests require `protocol.file.allow=always` only for
+  the test-owned clone operation.
+- Left: tree intentionally dirty for Pedro to review and commit.

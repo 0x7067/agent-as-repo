@@ -504,7 +504,11 @@ async function filterChangedFiles(diffPaths: string[], repoConfig: RepoConfig): 
     );
     const expandedSubFiles: string[] = [];
     for (const sub of changedSubmodules) {
-      expandedSubFiles.push(...(await expandSubmoduleFiles(repoConfig, sub)));
+      const repoRelativeFiles = await expandSubmoduleFiles(repoConfig, sub);
+      for (const filePath of repoRelativeFiles) {
+        const agentPath = toAgentPath(filePath, repoConfig.basePath);
+        if (agentPath !== null) expandedSubFiles.push(agentPath);
+      }
     }
     return [...scopedFiles, ...expandedSubFiles];
   }

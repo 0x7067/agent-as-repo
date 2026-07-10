@@ -41,4 +41,26 @@ describe("budgetSearchResults", () => {
       "src/b.ts",
     ]);
   });
+
+  it("counts raw continuation chunks against the same file limit", () => {
+    const results = [
+      { id: "a-1", text: "FILE: src/a.ts\n\none", score: 0.9 },
+      { id: "a-2", text: "FILE: src/a.ts (continued)\n\ntwo", score: 0.8 },
+      { id: "a-3", text: "FILE: src/a.ts\n\nthree", score: 0.7 },
+      { id: "b-1", text: "FILE: src/b.ts\n\none", score: 0.6 },
+    ];
+
+    const budgeted = budgetSearchResults(results, {
+      limit: 4,
+      maxTextChars: 200,
+      maxPerFile: 2,
+    });
+
+    expect(budgeted.map((result) => result.id)).toEqual(["a-1", "a-2", "b-1"]);
+    expect(budgeted.map((result) => result.filePath)).toEqual([
+      "src/a.ts",
+      "src/a.ts",
+      "src/b.ts",
+    ]);
+  });
 });

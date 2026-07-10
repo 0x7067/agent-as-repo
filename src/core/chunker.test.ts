@@ -106,6 +106,12 @@ describe("chunkFile", () => {
       .toContain(bigSection);
   });
 
+  it("rejects a header that leaves no room within the chunk limit", () => {
+    expect(() => chunkFile("a".repeat(40), "content", 30)).toThrow(
+      /header.*30-character limit/i,
+    );
+  });
+
   it("does split on second section when current has content", () => {
     const sec1 = "a".repeat(20);
     const sec2 = "b".repeat(30);
