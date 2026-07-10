@@ -275,7 +275,7 @@ export function buildAskTools(params: BuildAskToolsParams): {
     const label = args["label"];
     const value = args["value"];
     if (typeof label !== "string" || !BLOCK_LABELS.includes(label as typeof BLOCK_LABELS[number])) {
-      return `Error: block '${label}' is not allowed. Use one of: ${BLOCK_LABELS.join(", ")}.`;
+      return `Error: block '${String(label)}' is not allowed. Use one of: ${BLOCK_LABELS.join(", ")}.`;
     }
     if (!MUTABLE_MEMORY_LABELS.has(label)) {
       return `Error: block '${label}' cannot be modified during an ask. Only 'architecture' and 'conventions' are allowed.`;

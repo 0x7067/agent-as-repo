@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- request transport and tool-loop state machine remain colocated for auditability. */
 export interface ToolDefinition {
   type: "function";
   function: {
@@ -377,3 +378,5 @@ export async function toolCallingLoop(params: {
 
   throw new Error(`Tool loop exited unexpectedly after ${String(maxSteps)} steps`);
 }
+
+/* eslint-enable max-lines */
