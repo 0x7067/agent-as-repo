@@ -92,7 +92,7 @@ async function writeConfig(
   cwd: string,
   repoName: string,
   repoPath: string,
-  opts: { consolidateOnSync?: boolean } = {},
+  opts: { consolidateOnSync?: boolean; basePath?: string } = {},
 ): Promise<void> {
   const config = [
     "provider:",
@@ -101,6 +101,7 @@ async function writeConfig(
     "repos:",
     `  ${repoName}:`,
     `    path: ${repoPath}`,
+    ...(opts.basePath === undefined ? [] : [`    base_path: ${opts.basePath}`]),
     "    description: test repo",
     "    extensions: [.ts]",
     "    ignore_dirs: [node_modules, .git]",
@@ -660,6 +661,51 @@ describe("cli contract", () => {
       agents: Record<string, { lastSyncCommit: string }>;
     };
     expect(savedState.agents["my-app"].lastSyncCommit).toBe(headSha);
+  });
+
+  it("scopes incremental sync paths to a configured monorepo base_path", { timeout: 30_000 }, async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-sync-base-path-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(path.join(repoDir, "packages", "app"), { recursive: true });
+    await mkdirWorkspaceDir(path.join(repoDir, "packages", "other"), { recursive: true });
+    initGitRepo(repoDir);
+    await writeWorkspaceFile(path.join(repoDir, "packages", "app", "a.ts"), "export const a = 1;\n");
+    await writeWorkspaceFile(path.join(repoDir, "packages", "other", "a.ts"), "export const other = 1;\n");
+    execFileSync("git", ["add", "."], { cwd: repoDir });
+    execFileSync("git", ["commit", "-q", "-m", "initial"], { cwd: repoDir });
+    const checkpointSha = gitHeadCommitForTest(repoDir);
+    await commitFile(repoDir, "packages/app/b.ts", "export const b = 2;\n", "add app b");
+    await commitFile(repoDir, "packages/other/b.ts", "export const otherB = 2;\n", "add other b");
+    await writeConfig(cwd, "my-app", repoDir, { basePath: "packages/app" });
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          fileHashes: {},
+          lastBootstrap: null,
+          lastSyncCommit: checkpointSha,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state));
+
+    const result = runCli(["sync", "--config", "config.yaml"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("1 changed files since");
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { fileHashes?: Record<string, string> }>;
+    };
+    expect(savedState.agents["my-app"].fileHashes).toHaveProperty("b.ts");
+    expect(savedState.agents["my-app"].fileHashes).not.toHaveProperty("packages/other/b.ts");
   });
 
   it("fails fast when the checkpoint commit is orphaned, even if a last-sync timestamp is available", { timeout: 30_000 }, async () => {

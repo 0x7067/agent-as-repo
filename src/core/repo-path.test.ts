@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveSafeRepoPath } from "./repo-path.js";
+import { resolveSafeRepoPath, toAgentPath } from "./repo-path.js";
 
 describe("resolveSafeRepoPath", () => {
   it("resolves a relative path under the repo root", () => {
@@ -28,5 +28,19 @@ describe("resolveSafeRepoPath", () => {
 
   it("rejects empty relative paths", () => {
     expect(() => resolveSafeRepoPath("/repo", "")).toThrow(/empty|required/i);
+  });
+});
+
+describe("toAgentPath", () => {
+  it("maps a repo-relative path into a configured base path", () => {
+    expect(toAgentPath("packages/app/src/a.ts", "packages/app")).toBe("src/a.ts");
+  });
+
+  it("rejects paths outside the configured base path", () => {
+    expect(toAgentPath("packages/other/src/a.ts", "packages/app")).toBeNull();
+  });
+
+  it("normalizes Windows separators", () => {
+    expect(toAgentPath("packages\\app\\src\\a.ts", "packages/app/")).toBe("src/a.ts");
   });
 });

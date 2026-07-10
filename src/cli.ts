@@ -36,6 +36,7 @@ import {
 } from "./core/tree-sitter-chunker.js";
 import { computeSymbolRanks, toStoredSymbolFile } from "./core/symbol-store.js";
 import { repoFilterOptions, shouldIncludeFile } from "./core/filter.js";
+import { toAgentPath } from "./core/repo-path.js";
 import { partitionDiffPaths } from "./core/submodule.js";
 import { listSubmodules, expandSubmoduleFiles } from "./shell/submodule-collector.js";
 import { addAgentToState, removeAgentFromState, updateAgentField, updatePassageMap } from "./core/state.js";
@@ -489,20 +490,25 @@ async function loadOptionalConfig(configPath: string): Promise<Config | null> {
  * (an explicit --since ref or a validated checkpoint commit).
  */
 async function filterChangedFiles(diffPaths: string[], repoConfig: RepoConfig): Promise<string[]> {
+  const scopedFiles = diffPaths
+    .map((filePath) => toAgentPath(filePath, repoConfig.basePath))
+    .filter((filePath): filePath is string =>
+      filePath !== null && shouldIncludeFile(filePath, 0, repoFilterOptions(repoConfig))
+    );
   if (repoConfig.includeSubmodules) {
     const submodules = listSubmodules(repoConfig.path);
-    const { changedSubmodules, regularFiles } = partitionDiffPaths(
+    const { changedSubmodules } = partitionDiffPaths(
       diffPaths,
       submodules,
-      (f) => shouldIncludeFile(f, 0, repoFilterOptions(repoConfig)),
+      () => true,
     );
     const expandedSubFiles: string[] = [];
     for (const sub of changedSubmodules) {
       expandedSubFiles.push(...(await expandSubmoduleFiles(repoConfig, sub)));
     }
-    return [...regularFiles, ...expandedSubFiles];
+    return [...scopedFiles, ...expandedSubFiles];
   }
-  return diffPaths.filter((f) => shouldIncludeFile(f, 0, repoFilterOptions(repoConfig)));
+  return scopedFiles;
 }
 
 /**
@@ -1423,7 +1429,10 @@ program
         agent: agentInfo,
         changedFiles,
         collectFile: async (filePath: string) => {
-          const absPath = path.join(repoConfig.path, filePath);
+          const repoRoot = repoConfig.basePath
+            ? path.join(repoConfig.path, repoConfig.basePath)
+            : repoConfig.path;
+          const absPath = path.join(repoRoot, filePath);
           try {
             const fs = await import("node:fs/promises");
             const content = await fs.readFile(absPath, "utf8");

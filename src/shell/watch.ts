@@ -12,6 +12,7 @@ import { gatherGitEvidence } from "./git-evidence.js";
 import { loadPathAliasesFromRepo } from "./tsconfig-loader.js";
 import { updateAgentField } from "../core/state.js";
 import { repoFilterOptions, shouldIncludeFile } from "../core/filter.js";
+import { toAgentPath } from "../core/repo-path.js";
 import { partitionDiffPaths } from "../core/submodule.js";
 import { listSubmodules, expandSubmoduleFiles } from "./submodule-collector.js";
 import type { AgentProvider } from "../ports/agent-provider.js";
@@ -54,37 +55,14 @@ async function collectFile(repoPath: string, filePath: string, fs: FileSystemPor
   }
 }
 
-function normalizeRelativePath(filePath: string): string {
-  return filePath.replaceAll("\\", "/").replace(/^\.\//, "");
-}
-
-function trimTrailingSlashes(value: string): string {
-  let trimmed = value;
-  while (trimmed.endsWith("/")) {
-    trimmed = trimmed.slice(0, -1);
-  }
-  return trimmed;
-}
-
 function getAgentInfo(state: { agents: Record<string, AgentState> }, repoName: string): AgentState | undefined {
   if (!Object.hasOwn(state.agents, repoName)) return undefined;
   return state.agents[repoName];
 }
 
-function toAgentPath(repoConfig: RepoConfig, repoRelativePath: string): string | null {
-  const normalized = normalizeRelativePath(repoRelativePath);
-  if (!normalized) return null;
-  if (!repoConfig.basePath) return normalized;
-
-  const normalizedBase = trimTrailingSlashes(normalizeRelativePath(repoConfig.basePath));
-  if (normalized === normalizedBase) return null;
-  if (!normalized.startsWith(`${normalizedBase}/`)) return null;
-  return normalized.slice(normalizedBase.length + 1);
-}
-
 async function filterChangedFiles(repoConfig: RepoConfig, changedFiles: string[]): Promise<string[]> {
   const regularFiles = changedFiles
-    .map((filePath) => toAgentPath(repoConfig, filePath))
+    .map((filePath) => toAgentPath(filePath, repoConfig.basePath))
     .filter((filePath): filePath is string => filePath !== null && shouldIncludeFile(filePath, 0, repoFilterOptions(repoConfig)));
 
   if (!repoConfig.includeSubmodules) return regularFiles;
