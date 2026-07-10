@@ -1,13 +1,18 @@
 import type { PassageStore } from "../ports/passage-store.js";
 import type { RepoAccessPort } from "../ports/repo-access.js";
+import { budgetSearchResults } from "../core/search-result-budget.js";
 import type { FindDefinitionsOptions } from "../core/symbol-index.js";
 import type { RankedSymbolHit } from "../core/symbol-store.js";
 import type { SymbolKind } from "../core/tree-sitter-symbols.js";
-import { BLOCK_LABELS } from "../core/types.js";
+import { BLOCK_LABELS, MEMORY_BLOCK_LIMIT } from "../core/types.js";
 import type { ToolDefinition, ToolHandler } from "./llm-client.js";
 import { handleGlobFiles, handleGrepRepo, handleReadFile } from "./repo-tools.js";
 
-const ALLOWED_MEMORY_LABELS = new Set<string>(BLOCK_LABELS);
+const MUTABLE_MEMORY_LABELS = new Set(["architecture", "conventions"]);
+const DEFAULT_SEARCH_RESULTS = 5;
+const MAX_SEARCH_RESULTS = 10;
+const SEARCH_RESULT_TEXT_CHARS = 1200;
+const MAX_RESULTS_PER_FILE = 2;
 
 const GREP_TOOL: ToolDefinition = {
   type: "function",
@@ -48,11 +53,13 @@ const READ_FILE_TOOL: ToolDefinition = {
   type: "function",
   function: {
     name: "read_file",
-    description: "Read a file from the live repository by relative path",
+    description: "Read a bounded line range from a live repository file",
     parameters: {
       type: "object",
       properties: {
         path: { type: "string", description: "Relative path from the repo root" },
+        start_line: { type: "number", description: "Optional one-based first line (default 1)" },
+        end_line: { type: "number", description: "Optional one-based last line (default: 400 lines)" },
       },
       required: ["path"],
     },
@@ -103,6 +110,10 @@ const ARCHIVAL_SEARCH_TOOL: ToolDefinition = {
         path_prefix: {
           type: "string",
           description: "Optional file_path prefix to stage-narrow results (e.g. src/auth)",
+        },
+        top_k: {
+          type: "number",
+          description: "Number of passages to return (default 5, maximum 10)",
         },
       },
       required: ["query"],
@@ -244,19 +255,36 @@ export function buildAskTools(params: BuildAskToolsParams): {
   toolHandlers["archival_memory_search"] = async (args) => {
     const query = args["query"] as string;
     const pathPrefix = typeof args["path_prefix"] === "string" ? args["path_prefix"] : undefined;
+    const requestedTopK = typeof args["top_k"] === "number" && Number.isFinite(args["top_k"])
+      ? Math.floor(args["top_k"])
+      : DEFAULT_SEARCH_RESULTS;
+    const topK = Math.max(1, Math.min(MAX_SEARCH_RESULTS, requestedTopK));
     const results = await store.semanticSearch(
       agentId,
       query,
-      10,
+      Math.min(MAX_SEARCH_RESULTS * 2, topK * 2),
       pathPrefix === undefined || pathPrefix === "" ? undefined : { pathPrefix },
     );
-    return JSON.stringify(results);
+    return JSON.stringify(budgetSearchResults(results, {
+      limit: topK,
+      maxTextChars: SEARCH_RESULT_TEXT_CHARS,
+      maxPerFile: MAX_RESULTS_PER_FILE,
+    }));
   };
   toolHandlers["memory_replace"] = async (args) => {
-    const label = args["label"] as string;
-    const value = args["value"] as string;
-    if (!ALLOWED_MEMORY_LABELS.has(label)) {
-      return `Error: block '${label}' is not allowed. Use one of: ${BLOCK_LABELS.join(", ")}.`;
+    const label = args["label"];
+    const value = args["value"];
+    if (typeof label !== "string" || !BLOCK_LABELS.includes(label as typeof BLOCK_LABELS[number])) {
+      return `Error: block '${String(label)}' is not allowed. Use one of: ${BLOCK_LABELS.join(", ")}.`;
+    }
+    if (!MUTABLE_MEMORY_LABELS.has(label)) {
+      return `Error: block '${label}' cannot be modified during an ask. Only 'architecture' and 'conventions' are allowed.`;
+    }
+    if (typeof value !== "string") {
+      return `Error: value for '${label}' must be a string.`;
+    }
+    if (value.length > MEMORY_BLOCK_LIMIT) {
+      return `Error: value for '${label}' is ${String(value.length)} chars, over the ${String(MEMORY_BLOCK_LIMIT)}-char limit.`;
     }
     await updateBlock(agentId, label, value);
     return `Updated block '${label}'`;

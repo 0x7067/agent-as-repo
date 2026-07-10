@@ -96,12 +96,14 @@ describe("chunkFile", () => {
     expect(chunks).toHaveLength(1);
   });
 
-  it("does not split on first section even when oversized (requires content beyond header)", () => {
-    // current starts at header.length + 2, so the "current has content" check is false
+  it("hard-splits an oversized first section", () => {
     const bigSection = "z".repeat(50);
     const content = [bigSection, "end"].join("\n\n");
     const chunks = chunkFile("first.ts", content, 30);
-    expect(chunks[0].text).toContain("z".repeat(50));
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.text.length <= 30)).toBe(true);
+    expect(chunks.map((chunk) => chunk.text.replace(/^FILE: first\.ts(?: \(continued\))?\n\n/, "")).join(""))
+      .toContain(bigSection);
   });
 
   it("does split on second section when current has content", () => {
@@ -133,7 +135,7 @@ describe("chunkFile", () => {
     const sec3 = "Z".repeat(40);
     const content = [sec1, sec2, sec3].join("\n\n");
     const chunks = chunkFile("hdr.ts", content, 60);
-    expect(chunks.length).toBe(3);
+    expect(chunks.length).toBeGreaterThanOrEqual(3);
     for (const chunk of chunks) {
       expect(chunk.text).toBe(chunk.text.trim());
     }

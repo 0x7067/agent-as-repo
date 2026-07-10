@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { buildRipgrepArgs } from "../core/ripgrep-args.js";
 import { resolveSafeRepoPath } from "../core/repo-path.js";
+import { windowText } from "../core/text-window.js";
 import { repoFilterOptions, shouldIncludeFile } from "../core/filter.js";
 import { MAX_FILE_SIZE_KB, type RepoConfig } from "../core/types.js";
 import type { GrepRunnerResult, RepoAccessPort } from "../ports/repo-access.js";
@@ -10,6 +11,8 @@ import { nodeFileSystem } from "./adapters/node-filesystem.js";
 
 const GREP_OUTPUT_CAP_CHARS = 32_000;
 const GLOB_RESULT_CAP = 200;
+const READ_OUTPUT_CAP_CHARS = 16_000;
+const DEFAULT_READ_LINES = 400;
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
@@ -230,7 +233,14 @@ export async function handleReadFile(
       );
     }
     const content = await access.fs.readFile(absPath, "utf8");
-    return JSON.stringify({ path: relativePath, content });
+    const startLine = asOptionalPositiveInt(args["start_line"]) ?? 1;
+    const endLine = asOptionalPositiveInt(args["end_line"]) ?? startLine + DEFAULT_READ_LINES - 1;
+    const window = windowText(content, {
+      startLine,
+      endLine,
+      maxChars: READ_OUTPUT_CAP_CHARS,
+    });
+    return JSON.stringify({ path: relativePath, ...window });
   } catch (error) {
     return toolError(error instanceof Error ? error.message : String(error));
   }
