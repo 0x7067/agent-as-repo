@@ -88,7 +88,50 @@ describe("repo-tools handlers", () => {
       content: string;
       path: string;
     };
-    expect(result).toEqual({ path: "src/a.ts", content: "hello" });
+    expect(result).toEqual({
+      path: "src/a.ts",
+      content: "hello",
+      startLine: 1,
+      endLine: 1,
+      totalLines: 1,
+      truncated: false,
+    });
+  });
+
+  it("read_file supports bounded line ranges", async () => {
+    const fs = makeFakeFs({
+      readFile: vi.fn().mockResolvedValue("one\ntwo\nthree\nfour"),
+      stat: vi.fn().mockResolvedValue({ size: 18, isDirectory: () => false }),
+    });
+    const access = createRepoAccess({ myrepo: REPO }, { fs, grep: vi.fn() });
+
+    const result = JSON.parse(await handleReadFile(access, "myrepo", {
+      path: "src/a.ts",
+      start_line: 2,
+      end_line: 3,
+    })) as { content: string; startLine: number; endLine: number };
+
+    expect(result).toEqual(expect.objectContaining({
+      content: "two\nthree",
+      startLine: 2,
+      endLine: 3,
+    }));
+  });
+
+  it("read_file caps default output size", async () => {
+    const content = "x".repeat(20_000);
+    const fs = makeFakeFs({
+      readFile: vi.fn().mockResolvedValue(content),
+      stat: vi.fn().mockResolvedValue({ size: content.length, isDirectory: () => false }),
+    });
+    const access = createRepoAccess({ myrepo: REPO }, { fs, grep: vi.fn() });
+
+    const result = JSON.parse(await handleReadFile(access, "myrepo", {
+      path: "src/a.ts",
+    })) as { content: string; truncated: boolean };
+
+    expect(result.content.length).toBeLessThanOrEqual(16_000);
+    expect(result.truncated).toBe(true);
   });
 
   it("read_file rejects oversized files", async () => {
