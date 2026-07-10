@@ -12,21 +12,42 @@ export function chunkWithHeader(
   const sections = content.split(/\n{2,}/);
   const chunks: Chunk[] = [];
   let current = `${header}\n\n`;
+  let hasContent = false;
+
+  const flush = (): void => {
+    if (!hasContent) return;
+    chunks.push({ text: current.trim(), sourcePath });
+    current = `${header} (continued)\n\n`;
+    hasContent = false;
+  };
 
   for (const section of sections) {
-    if (
-      current.length + section.length > maxChars &&
-      current.length > header.length + 2
-    ) {
-      chunks.push({ text: current.trim(), sourcePath });
-      current = `${header} (continued)\n\n`;
+    let remaining = section;
+    while (remaining.length > 0) {
+      if (hasContent && current.length + remaining.length > maxChars) {
+        flush();
+        continue;
+      }
+
+      const available = maxChars - current.length;
+      if (remaining.length <= available) {
+        current += remaining + "\n\n";
+        hasContent = true;
+        remaining = "";
+        continue;
+      }
+
+      // A single paragraph/symbol can exceed maxChars. Hard-split it so one
+      // pathological source section cannot create an unbounded passage.
+      const take = Math.max(1, available);
+      current += remaining.slice(0, take);
+      remaining = remaining.slice(take);
+      hasContent = true;
+      flush();
     }
-    current += section + "\n\n";
   }
 
-  if (current.trim().length > header.length) {
-    chunks.push({ text: current.trim(), sourcePath });
-  }
+  flush();
 
   return chunks;
 }
