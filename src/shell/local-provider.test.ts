@@ -315,7 +315,9 @@ describe("LocalProvider", () => {
       const result = await searchHandler({ query: "test query" });
 
       expect(mockStore.semanticSearch).toHaveBeenCalledWith("myrepo", "test query", 10, undefined);
-      expect(result).toBe(JSON.stringify([{ id: "p-1", text: "t", score: 0.9 }]));
+      expect(JSON.parse(result)).toEqual([
+        { id: "p-1", text: "t", score: 0.9, filePath: null, truncated: false },
+      ]);
     });
 
     it("archival_memory_search passes path_prefix to semanticSearch", async () => {
@@ -326,6 +328,16 @@ describe("LocalProvider", () => {
       expect(mockStore.semanticSearch).toHaveBeenCalledWith("myrepo", "auth", 10, {
         pathPrefix: "src/auth",
       });
+    });
+
+    it("archival_memory_search honors a bounded top_k", async () => {
+      await provider.sendMessage("myrepo", "hello");
+      const searchHandler = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers["archival_memory_search"];
+      mockStore.semanticSearch.mockResolvedValue([]);
+
+      await searchHandler({ query: "auth", top_k: 2 });
+
+      expect(mockStore.semanticSearch).toHaveBeenCalledWith("myrepo", "auth", 4, undefined);
     });
 
     it("does not register agentic tool handlers when agenticTools is off", async () => {
@@ -345,6 +357,31 @@ describe("LocalProvider", () => {
       const result = await replaceHandler({ label: "../../evil", value: "x" });
       expect(mockBlockStorage.set).not.toHaveBeenCalled();
       expect(result).toContain("not allowed");
+    });
+
+    it("memory_replace rejects persona writes", async () => {
+      await provider.sendMessage("myrepo", "hello");
+      const replaceHandler = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers["memory_replace"];
+      vi.clearAllMocks();
+
+      const result = await replaceHandler({ label: "persona", value: "hacked" });
+
+      expect(mockBlockStorage.set).not.toHaveBeenCalled();
+      expect(result).toContain("cannot be modified");
+    });
+
+    it("memory_replace rejects oversized values", async () => {
+      await provider.sendMessage("myrepo", "hello");
+      const replaceHandler = vi.mocked(toolCallingLoop).mock.calls[0][0].toolHandlers["memory_replace"];
+      vi.clearAllMocks();
+
+      const result = await replaceHandler({
+        label: "architecture",
+        value: "x".repeat(5001),
+      });
+
+      expect(mockBlockStorage.set).not.toHaveBeenCalled();
+      expect(result).toContain("over the 5000-char limit");
     });
 
     it("memory_replace handler calls blockStorage.set via updateBlock and returns confirmation", async () => {
