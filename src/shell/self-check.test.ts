@@ -472,6 +472,10 @@ describe("native modules check", () => {
       expect(nativeResult?.message).toContain("ABI version");
       expect(nativeResult?.message).toContain("Node");
       expect(nativeResult?.message).toContain("pnpm approve-builds");
+      // pnpm 10 + node-linker=hoisted can leave (or wipe, on a later `pnpm run`)
+      // a manually built addon; point straight at the node-gyp recovery.
+      expect(nativeResult?.message).toContain("node_modules/better-sqlite3");
+      expect(nativeResult?.message).toContain("node-gyp rebuild --release");
     });
   });
 

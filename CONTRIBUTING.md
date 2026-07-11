@@ -35,6 +35,30 @@ and only approve packages that genuinely need a native build — see the
 comment above `onlyBuiltDependencies` in `pnpm-workspace.yaml` for why
 `tree-sitter-kotlin`/`tree-sitter-swift` are deliberately excluded.
 
+### If `better-sqlite3` won't load (pnpm 10 + `node-linker=hoisted`)
+
+This repo's `.npmrc` pins `node-linker=hoisted`. Under pnpm 10, that
+combination has two known failure modes for `better-sqlite3`'s native addon:
+
+- A fresh `pnpm install` can leave the addon unbuilt even after
+  `pnpm approve-builds` reports success.
+- Once it *is* built, a later `pnpm run <script>` (including `pnpm test`,
+  `pnpm lint`, etc.) can re-link `node_modules` and silently wipe the
+  compiled addon — this has been observed to turn into ~52 sqlite-backed test
+  failures (`better-sqlite3/sqlite-vec failed to load`) with no code change.
+
+Recovery is a direct native rebuild, bypassing pnpm's link step:
+
+```bash
+cd node_modules/better-sqlite3 && npx node-gyp rebuild --release
+```
+
+Then run tests/scripts via the `node_modules/.bin` binaries directly
+(`node_modules/.bin/vitest run`, `node_modules/.bin/tsx <file>`) rather than
+`pnpm test`/`pnpm run ...`, until you're done — each `pnpm run` invocation
+risks re-wiping the addon in this environment. `repo-expert self-check` will
+diagnose this (native modules check) and print the same rebuild command.
+
 ## Dev commands
 
 ```bash
