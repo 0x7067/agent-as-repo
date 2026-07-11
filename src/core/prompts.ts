@@ -32,15 +32,34 @@ export function agenticSearchGuidance(): string {
   ].join("\n");
 }
 
+export interface BuildPersonaOptions {
+  /**
+   * Set when the index covers only a subtree of the repo (config `base_path`).
+   * Disclosed in the persona so questions about excluded subprojects get an
+   * honest "that part isn't indexed" instead of an answer inferred from
+   * in-scope references — observed on a `base_path: lib` sinatra index asked
+   * about the excluded rack-protection subproject.
+   */
+  indexedScope?: string;
+}
+
 export function buildPersona(
   repoName: string,
   description: string,
   customPersona?: string,
+  options: BuildPersonaOptions = {},
 ): string {
   const base = customPersona || `I am a codebase expert for the "${repoName}" repository. ${description}.`;
 
+  const scopeLines = options.indexedScope === undefined
+    ? []
+    : [
+        `My index covers only the \`${options.indexedScope}\` subtree of this repository. If asked about parts of the repository outside that subtree, I say they are not indexed rather than inferring their internals from in-scope references.`,
+      ];
+
   const lines = [
     base,
+    ...scopeLines,
     "I keep durable project knowledge in architecture/conventions memory blocks and indexed passages in archival memory.",
     "When answering questions, first consult my architecture and conventions memory blocks, then use archival_memory_search for supporting details (optionally with path_prefix to stage-narrow results).",
     "Be specific: name exact tools, frameworks, and versions rather than just wrapper commands.",

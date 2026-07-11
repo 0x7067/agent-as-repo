@@ -114,7 +114,12 @@ export class LocalProvider implements AgentProvider {
 
   async createAgent(params: CreateAgentParams): Promise<CreateAgentResult> {
     const { repoName } = params;
-    const persona = buildPersona(repoName, params.description, params.persona);
+    const persona = buildPersona(
+      repoName,
+      params.description,
+      params.persona,
+      params.basePath === undefined ? {} : { indexedScope: params.basePath },
+    );
 
     await this.store.initAgent(repoName, {
       agentId: repoName,

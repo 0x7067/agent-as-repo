@@ -4,6 +4,8 @@ export interface CreateAgentParams {
   description: string;
   persona?: string;
   model: string;
+  /** Config `base_path` when the index covers only a subtree — disclosed in the persona. */
+  basePath?: string;
 }
 
 export interface CreateAgentResult {

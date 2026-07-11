@@ -60,6 +60,22 @@ describe("buildPersona", () => {
     }
   });
 
+  it("discloses a restricted index scope when basePath narrows it", () => {
+    const withDefault = buildPersona(REPO_NAME, "desc", undefined, { indexedScope: "lib" });
+    const withCustom = buildPersona(REPO_NAME, "desc", "I am the ultimate expert.", { indexedScope: "lib" });
+    for (const persona of [withDefault, withCustom]) {
+      expect(persona).toContain("`lib`");
+      expect(persona).toContain("only the");
+      expect(persona.toLowerCase()).toContain("not indexed");
+    }
+  });
+
+  it("omits the scope disclosure when the whole repo is indexed", () => {
+    const persona = buildPersona(REPO_NAME, "desc");
+    expect(persona).not.toContain("only the");
+    expect(persona.toLowerCase()).not.toContain("subtree");
+  });
+
   it("includes the negative-space grounding rule even with a custom persona", () => {
     const withDefault = buildPersona(REPO_NAME, "desc");
     const withCustom = buildPersona(REPO_NAME, "desc", "I am the ultimate expert.");
