@@ -15,6 +15,11 @@ export interface Passage {
   text: string;
 }
 
+/** A passage retrieval preview hit: same shape `archival_memory_search` returns, plus an optional relevance score. */
+export interface RetrievedPassage extends Passage {
+  score?: number;
+}
+
 export interface MemoryBlock {
   value: string;
   limit: number;
@@ -65,6 +70,14 @@ export interface AgentProvider {
   storePassages?(agentId: string, texts: string[]): Promise<string[]>;
   deletePassage(this: void, agentId: string, passageId: string): Promise<void>;
   listPassages(this: void, agentId: string): Promise<Passage[]>;
+  /**
+   * Preview what `archival_memory_search` would retrieve for a query, without
+   * running a full ask turn — lets `ask --verbose` show retrieved passages
+   * for audit. Optional: implementations without a searchable store may
+   * omit it. Deliberately NOT `this: void` for the same reason as
+   * `storePassages` (class implementations read instance state).
+   */
+  searchPassages?(agentId: string, query: string, topK: number): Promise<RetrievedPassage[]>;
   getBlock(this: void, agentId: string, label: string): Promise<MemoryBlock>;
   updateBlock(this: void, agentId: string, label: string, value: string): Promise<MemoryBlock>;
   sendMessage(this: void, agentId: string, content: string, options?: SendMessageOptions): Promise<string>;

@@ -202,6 +202,23 @@ describe("LocalProvider", () => {
     });
   });
 
+  describe("searchPassages", () => {
+    it("delegates to store.semanticSearch and maps id/text/score", async () => {
+      mockStore.semanticSearch.mockResolvedValue([
+        { id: "uuid-1", text: "FILE: src/a.ts\nconst x = 1;", score: 0.92 },
+        { id: "uuid-2", text: "FILE: src/b.ts\nconst y = 2;", score: 0.5 },
+      ]);
+
+      const results = await provider.searchPassages("myrepo", "how does auth work?", 5);
+
+      expect(mockStore.semanticSearch).toHaveBeenCalledWith("myrepo", "how does auth work?", 5);
+      expect(results).toEqual([
+        { id: "uuid-1", text: "FILE: src/a.ts\nconst x = 1;", score: 0.92 },
+        { id: "uuid-2", text: "FILE: src/b.ts\nconst y = 2;", score: 0.5 },
+      ]);
+    });
+  });
+
   describe("getBlock", () => {
     it("reads from blockStorage and returns { value, limit: 5000 }", async () => {
       (mockBlockStorage.get as ReturnType<typeof vi.fn>).mockReturnValue("block content");

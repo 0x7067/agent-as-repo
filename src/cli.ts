@@ -19,7 +19,7 @@ import { collectFiles } from "./shell/file-collector.js";
 import { StateFileError, loadState, saveState } from "./shell/state-store.js";
 import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
 import { bootstrapAgent } from "./shell/bootstrap.js";
-import type { AgentProvider, CreateAgentParams, SendMessageOptions } from "./ports/agent-provider.js";
+import type { AgentProvider, CreateAgentParams, RetrievedPassage, SendMessageOptions } from "./ports/agent-provider.js";
 import { LocalProvider } from "./shell/local-provider.js";
 import { createRepoAccess } from "./shell/repo-tools.js";
 import { formatTopSymbolsEvidence } from "./core/symbol-summary.js";
@@ -67,6 +67,8 @@ import { buildPostSetupNextSteps, getSetupMode, resolveEffectiveSetupMode } from
 import { MAX_INDEXABLE_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Chunk, type ChunkingStrategy, type Config, type FileInfo, type RepoConfig, type SkippedFile, type SymbolFileMap } from "./core/types.js";
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
 import { resolveRepoTarget } from "./core/repo-target.js";
+import { renderSpinnerFrame, renderStaticSpinnerLine } from "./core/spinner.js";
+import { formatRetrievedPassages } from "./core/retrieved-passages.js";
 import type { LocalRuntimeOptions } from "./shell/local-provider.js";
 import type { SymbolLookupPort } from "./shell/agent-tools.js";
 import type { BlockStorage } from "./shell/block-storage.js";
@@ -118,6 +120,7 @@ interface AskOpts {
   askTimeoutMs?: string;
   maxSteps?: string;
   config?: string;
+  verbose?: boolean;
 }
 
 interface SyncOpts {
@@ -132,6 +135,11 @@ interface SyncOpts {
 interface RepoOpts {
   repo?: string;
   json?: boolean;
+}
+
+interface ExportOpts {
+  repo?: string;
+  output?: string;
 }
 
 interface OnboardOpts {
@@ -351,6 +359,13 @@ class FakeProvider implements AgentProvider {
 
   listPassages(agentId: string): Promise<Array<{ id: string; text: string }>> {
     return Promise.resolve(this.passagesByAgent[agentId] ?? []);
+  }
+
+  /** Deterministic descending fake score by position — good enough for `ask --verbose` tests, no real search behind it. */
+  searchPassages(agentId: string, _query: string, topK: number): Promise<RetrievedPassage[]> {
+    const passages = this.passagesByAgent[agentId] ?? [];
+    const scored = passages.map((passage, index) => ({ ...passage, score: Number((1 - index * 0.1).toFixed(3)) }));
+    return Promise.resolve(scored.slice(0, topK));
   }
 
   getBlock(agentId: string, label: string): Promise<{ value: string; limit: number }> {
@@ -880,6 +895,8 @@ function question(rl: ReadlineInterface, prompt: string): Promise<string> {
 }
 
 const ASK_DEFAULT_TIMEOUT_MS = 60_000;
+/** Passages shown by `ask --verbose`'s retrieval preview before the answer. */
+const VERBOSE_RETRIEVAL_TOP_K = 5;
 /** Onboarding walks the full memory + archival search, so it gets a longer budget than `ask` (consistent with setup's bootstrap-timeout-ms default). */
 const ONBOARD_DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -991,6 +1008,12 @@ async function runSingleAsk(repo: string | undefined, question: string | undefin
 
   const askConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
   const provider = createProviderForCommands(askConfig, createSymbolLookupFromState(state));
+
+  if (opts.verbose) {
+    const retrieved = (await provider.searchPassages?.(agentInfo.agentId, question, VERBOSE_RETRIEVAL_TOP_K)) ?? [];
+    console.error(formatRetrievedPassages(retrieved));
+  }
+
   const askSettings = await buildAskSettings(opts);
   const stop = startSpinner(`Asking ${repo}...`);
   try {
@@ -1004,10 +1027,15 @@ async function runSingleAsk(repo: string | undefined, question: string | undefin
 }
 
 function startSpinner(label: string): () => void {
-  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  if (!process.stderr.isTTY) {
+    // Piped/non-interactive output (CI logs, redirected files): print one
+    // static line instead of flooding the log with animation frames.
+    process.stderr.write(renderStaticSpinnerLine(label));
+    return () => {};
+  }
   let i = 0;
   const id = setInterval(() => {
-    process.stderr.write(`\r${frames[i++ % frames.length]} ${label}`);
+    process.stderr.write(renderSpinnerFrame(label, i++));
   }, 80);
   return () => {
     clearInterval(id);
@@ -1442,6 +1470,7 @@ program
   .option("--ask-timeout-ms <ms>", "Timeout for single-agent asks (ms)")
   .option("--max-steps <n>", "Maximum agent reasoning/tool steps per ask")
   .option("--config <path>", "Optional config file path for ask defaults")
+  .option("--verbose", "Print retrieved passages (path + snippet + score) to stderr before the answer")
   .action(async (repo: string | undefined, question: string | undefined, opts: AskOpts) => {
     if (opts.all) {
       await runBroadcastAsk(repo, opts);
@@ -1800,7 +1829,8 @@ program
   .command("export [repo]")
   .description("Export agent memory to markdown")
   .option("--repo <name>", "Export a single repo agent")
-  .action(async (repoArg: string | undefined, opts: RepoOpts) => {
+  .option("--output <file>", "Write the export to a file instead of stdout")
+  .action(async (repoArg: string | undefined, opts: ExportOpts) => {
     const target = resolveRepoArgOrExit(repoArg, opts.repo);
     if (!target.ok) return;
 
@@ -1809,13 +1839,24 @@ program
     const provider = createProvider(exportConfig);
     const repoNames = target.repo ? [target.repo] : Object.keys(state.agents);
 
+    const exported: string[] = [];
     for (const repoName of repoNames) {
       const agentInfo = requireAgent(state, repoName);
       if (!agentInfo) return;
 
       const md = await exportAgent(provider, repoName, agentInfo.agentId);
-      console.log(md);
+      exported.push(md);
     }
+
+    if (opts.output) {
+      const fs = await import("node:fs/promises");
+      const outputPath = path.resolve(opts.output);
+      await fs.writeFile(outputPath, `${exported.join("\n\n")}\n`, "utf8");
+      console.log(`Export written to ${outputPath}`);
+      return;
+    }
+
+    for (const md of exported) console.log(md);
   });
 
 program

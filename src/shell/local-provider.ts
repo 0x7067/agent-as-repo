@@ -6,6 +6,7 @@ import type {
   CreateAgentResult,
   Passage,
   MemoryBlock,
+  RetrievedPassage,
   SendMessageOptions,
   ConsolidateMemoryOptions,
 } from "../ports/agent-provider.js";
@@ -177,6 +178,11 @@ export class LocalProvider implements AgentProvider {
 
   async listPassages(agentId: string): Promise<Passage[]> {
     return this.store.listPassages(agentId);
+  }
+
+  async searchPassages(agentId: string, query: string, topK: number): Promise<RetrievedPassage[]> {
+    const results = await this.store.semanticSearch(agentId, query, topK);
+    return results.map((result) => ({ id: result.id, text: result.text, score: result.score }));
   }
 
   getBlock(agentId: string, label: string): Promise<MemoryBlock> {

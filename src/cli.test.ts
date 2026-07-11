@@ -889,6 +889,23 @@ describe("cli contract", () => {
     expect(result.stderr).toContain("other-app");
   });
 
+  it("writes the export to a file with --output instead of stdout", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-export-output-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+    const outputPath = path.join(cwd, "export.md");
+
+    const result = runCli(["export", "my-app", "--output", outputPath], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(outputPath);
+    expect(result.stdout).not.toContain("# my-app");
+
+    const written = await readWorkspaceFile(outputPath, "utf8");
+    expect(written).toContain("my-app");
+  });
+
   it("supports sync --dry-run --json", { timeout: 30_000 }, async () => {
     const cwd = await makeWorkspace("repo-expert-cli-sync-dry-run-");
     const repoDir = path.join(cwd, "repo");
@@ -1791,6 +1808,48 @@ describe("cli contract", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("model=default");
+  });
+
+  it("does not print a retrieval preview when --verbose is omitted", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-ask-no-verbose-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+
+    const result = runCli(["ask", "my-app", "q"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain("Retrieved passages");
+  });
+
+  it("prints a retrieval preview to stderr before the answer with --verbose", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-ask-verbose-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+
+    // This ask invocation's FakeProvider has no passages stored (setup never
+    // ran in this process), so the preview reports none — this test verifies
+    // the flag wires the preview above the answer, not retrieval quality.
+    const result = runCli(["ask", "my-app", "q", "--verbose"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("Retrieved passages: none.");
+    expect(result.stdout.trim()).toBe("ok");
+  });
+
+  it("prints a single static spinner line on stderr instead of animation frames in non-TTY output", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-ask-spinner-nontty-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+
+    // spawnSync's stdio is never a TTY, so this always exercises the non-TTY path.
+    const result = runCli(["ask", "my-app", "q"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("Asking my-app...\n");
+    // None of the braille spinner glyphs or carriage returns leaked through.
+    expect(result.stderr).not.toContain("\r");
+    for (const frame of ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]) {
+      expect(result.stderr).not.toContain(frame);
+    }
   });
 
   it("prints a walkthrough for onboard", async () => {
