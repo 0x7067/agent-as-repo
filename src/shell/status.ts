@@ -32,6 +32,7 @@ export async function getAgentStatusData(
     lastBootstrap: agent.lastBootstrap,
     lastSyncCommit: agent.lastSyncCommit,
     lastSyncAt: agent.lastSyncAt,
+    lastConsolidatedAt: agent.lastConsolidatedAt ?? null,
   };
 }
 

@@ -1608,6 +1608,7 @@ describe("watchRepos - daemon consolidation parity", () => {
     await watchPromise;
 
     expect(currentState.agents[WATCH_REPO_NAME].lastConsolidatedCommit).toBe("def456");
+    expect(currentState.agents[WATCH_REPO_NAME].lastConsolidatedAt).toEqual(expect.any(String));
     expect(log).toHaveBeenCalledWith(expect.stringContaining("consolidated architecture/conventions memory blocks"));
   });
 
@@ -1651,5 +1652,8 @@ describe("watchRepos - daemon consolidation parity", () => {
 
     expect(currentState.agents[WATCH_REPO_NAME].lastConsolidatedCommit).toBeUndefined();
     expect(log).not.toHaveBeenCalledWith(expect.stringContaining("consolidated architecture/conventions memory blocks"));
+    // lastConsolidatedAt still stamps on a no-op run: it answers "did this
+    // last run", separate from lastConsolidatedCommit's "did it change".
+    expect(currentState.agents[WATCH_REPO_NAME].lastConsolidatedAt).toEqual(expect.any(String));
   });
 });

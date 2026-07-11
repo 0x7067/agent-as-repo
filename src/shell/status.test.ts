@@ -48,4 +48,23 @@ describe("getAgentStatus", () => {
     expect(provider.listPassages as ReturnType<typeof vi.fn>).toHaveBeenCalledWith("agent-abc");
     expect(provider.getBlock as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(3);
   });
+
+  it("shows 'never' for last consolidated at when the field is absent (backward compat)", async () => {
+    const provider = makeStatusProvider();
+
+    const output = await getAgentStatus(provider, "my-app", testAgent);
+
+    expect(output).toContain("last consolidated at: never");
+  });
+
+  it("shows the last consolidated at timestamp when set", async () => {
+    const provider = makeStatusProvider();
+
+    const output = await getAgentStatus(provider, "my-app", {
+      ...testAgent,
+      lastConsolidatedAt: "2026-02-01T00:00:00.000Z",
+    });
+
+    expect(output).toContain("last consolidated at: 2026-02-01T00:00:00.000Z");
+  });
 });

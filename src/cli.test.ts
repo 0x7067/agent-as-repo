@@ -1385,9 +1385,10 @@ describe("cli contract", () => {
     expect(result.stdout).not.toContain("Commit log since the last sync");
 
     const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
-      agents: Record<string, { lastConsolidatedCommit?: string | null }>;
+      agents: Record<string, { lastConsolidatedCommit?: string | null; lastConsolidatedAt?: string | null }>;
     };
     expect(savedState.agents["my-app"].lastConsolidatedCommit).toBe(headSha);
+    expect(savedState.agents["my-app"].lastConsolidatedAt).toEqual(expect.any(String));
   });
 
   it("supports status --json", async () => {
@@ -1442,6 +1443,109 @@ describe("cli contract", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Consolidating memory for "my-app"');
     expect(result.stdout).toContain("Done.");
+  });
+
+  it("consolidate reports per-block modified/unchanged status and stamps lastConsolidatedAt", { timeout: 30_000 }, async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-consolidate-blocks-");
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const before = Date.now();
+    const result = runCli(["consolidate", "--repo", "my-app"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+
+    expect(result.status).toBe(0);
+    // FakeProvider's consolidateMemory rewrites both blocks from empty, so
+    // both report as modified.
+    expect(result.stdout).toContain("architecture: modified");
+    expect(result.stdout).toContain("conventions: modified");
+
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastConsolidatedAt?: string | null }>;
+    };
+    const stamped = savedState.agents["my-app"].lastConsolidatedAt;
+    expect(stamped).toEqual(expect.any(String));
+    expect(new Date(stamped ?? "").getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it("stamps lastConsolidatedAt even when consolidation is a true no-op (blocks unchanged)", { timeout: 30_000 }, async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-consolidate-noop-");
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["consolidate", "--repo", "my-app"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_CONSOLIDATE_NOOP: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("architecture: unchanged");
+    expect(result.stdout).toContain("conventions: unchanged");
+    expect(result.stdout).not.toContain("  Done.");
+
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastConsolidatedAt?: string | null; lastConsolidatedCommit?: string | null }>;
+    };
+    expect(savedState.agents["my-app"].lastConsolidatedAt).toEqual(expect.any(String));
+    expect(savedState.agents["my-app"].lastConsolidatedCommit ?? null).toBeNull();
+  });
+
+  it("status displays the lastConsolidatedAt timestamp stamped by consolidate", { timeout: 30_000 }, async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-consolidate-noop-at-");
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["consolidate", "--repo", "my-app"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+    expect(result.status).toBe(0);
+
+    const statusResult = runCli(["status", "--repo", "my-app"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+    expect(statusResult.status).toBe(0);
+    expect(statusResult.stdout).toContain("last consolidated at:");
+    expect(statusResult.stdout).not.toContain("last consolidated at: never");
   });
 
   it("consolidate reports a skip when the provider fails, without erroring", { timeout: 30_000 }, async () => {

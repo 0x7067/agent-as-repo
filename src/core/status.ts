@@ -12,6 +12,7 @@ export interface AgentStatusData {
   lastBootstrap: string | null;
   lastSyncCommit: string | null;
   lastSyncAt: string | null;
+  lastConsolidatedAt: string | null;
 }
 
 export function formatAgentStatus(data: AgentStatusData): string {
@@ -28,7 +29,12 @@ export function formatAgentStatus(data: AgentStatusData): string {
     }
   }
 
-  lines.push(`  last bootstrap: ${data.lastBootstrap ?? "never"}`, `  last sync: ${data.lastSyncCommit ?? "never"}`, `  last sync at: ${data.lastSyncAt ?? "never"}`);
+  lines.push(
+    `  last bootstrap: ${data.lastBootstrap ?? "never"}`,
+    `  last sync: ${data.lastSyncCommit ?? "never"}`,
+    `  last sync at: ${data.lastSyncAt ?? "never"}`,
+    `  last consolidated at: ${data.lastConsolidatedAt ?? "never"}`,
+  );
 
   return lines.join("\n");
 }

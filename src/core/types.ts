@@ -134,6 +134,13 @@ export interface AgentState {
   createdAt: string;
   /** Commit HEAD was at when a consolidation last actually changed the blocks (unset until then). */
   lastConsolidatedCommit?: string | null;
+  /**
+   * Timestamp of the last time consolidation actually ran (whether or not it
+   * changed anything). Optional for backward compatibility with older state
+   * files; missing means "never". Distinct from `lastConsolidatedCommit`,
+   * which only stamps when a run produced a real change.
+   */
+  lastConsolidatedAt?: string | null;
 }
 
 /** Top-level persisted state. */

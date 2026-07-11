@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildConsolidationPrompt, shouldConsolidate, shouldSkipConsolidation } from "./consolidate.js";
+import { buildConsolidationPrompt, diffConsolidationBlocks, shouldConsolidate, shouldSkipConsolidation } from "./consolidate.js";
 
 describe("buildConsolidationPrompt", () => {
   const base = {
@@ -87,6 +87,35 @@ describe("buildConsolidationPrompt", () => {
     });
     expect(prompt).toContain("High-centrality symbols");
     expect(prompt).toContain("FUNCTION helper");
+  });
+});
+
+describe("diffConsolidationBlocks", () => {
+  it("reports both blocks unchanged when byte-identical before and after", () => {
+    const pre = { architecture: "same arch", conventions: "same conv" };
+    const post = { architecture: "same arch", conventions: "same conv" };
+    expect(diffConsolidationBlocks(pre, post)).toEqual([
+      { label: "architecture", changed: false },
+      { label: "conventions", changed: false },
+    ]);
+  });
+
+  it("reports only the block that actually changed", () => {
+    const pre = { architecture: "old arch", conventions: "same conv" };
+    const post = { architecture: "new arch", conventions: "same conv" };
+    expect(diffConsolidationBlocks(pre, post)).toEqual([
+      { label: "architecture", changed: true },
+      { label: "conventions", changed: false },
+    ]);
+  });
+
+  it("reports both blocks changed when both differ", () => {
+    const pre = { architecture: "old arch", conventions: "old conv" };
+    const post = { architecture: "new arch", conventions: "new conv" };
+    expect(diffConsolidationBlocks(pre, post)).toEqual([
+      { label: "architecture", changed: true },
+      { label: "conventions", changed: true },
+    ]);
   });
 });
 

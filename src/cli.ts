@@ -400,6 +400,9 @@ class FakeProvider implements AgentProvider {
     if (process.env["REPO_EXPERT_TEST_ECHO_PROMPT"] === "1") {
       console.log(`[fake-consolidate-prompt]${prompt}[/fake-consolidate-prompt]`);
     }
+    // Test-only escape hatch to exercise the true no-op path (blocks
+    // byte-identical before/after) without a real LLM leaving them alone.
+    if (process.env["REPO_EXPERT_TEST_CONSOLIDATE_NOOP"] === "1") return;
     await this.updateBlock(agentId, "architecture", "consolidated architecture");
     await this.updateBlock(agentId, "conventions", "consolidated conventions");
   }
@@ -617,14 +620,19 @@ async function consolidateRepoAgent(params: {
     return state;
   }
 
+  // Stamp lastConsolidatedAt on every actual run (changed or not) — it answers
+  // "when did this last run", distinct from lastConsolidatedCommit, which only
+  // stamps when a run produced a real change.
+  state = updateAgentField(state, repoName, { lastConsolidatedAt: new Date().toISOString() });
+  if (result.changed && headCommit !== null) {
+    state = updateAgentField(state, repoName, { lastConsolidatedCommit: headCommit });
+  }
+  await saveState(STATE_FILE, state);
+
   if (result.changed) {
-    if (headCommit !== null) {
-      state = updateAgentField(state, repoName, { lastConsolidatedCommit: headCommit });
-      await saveState(STATE_FILE, state);
-    }
     console.log(`  Done.`);
   }
-  // else: "consolidation: blocks unchanged" was already logged inside consolidateAgentMemory.
+  // else: per-block unchanged status was already logged inside consolidateAgentMemory.
 
   return state;
 }
@@ -1647,10 +1655,13 @@ program
           symbolRankEvidence: formatTopSymbolsEvidence(result.symbolFiles, result.symbolRanks),
           log,
         });
-        if (consolidation.consolidated && consolidation.changed) {
-          state = updateAgentField(state, repoName, { lastConsolidatedCommit: headCommit });
+        if (consolidation.consolidated) {
+          state = updateAgentField(state, repoName, { lastConsolidatedAt: new Date().toISOString() });
+          if (consolidation.changed) {
+            state = updateAgentField(state, repoName, { lastConsolidatedCommit: headCommit });
+          }
           await saveState(STATE_FILE, state);
-          log(`  Consolidated architecture/conventions memory blocks.`);
+          if (consolidation.changed) log(`  Consolidated architecture/conventions memory blocks.`);
         }
       }
 
