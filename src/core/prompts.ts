@@ -11,6 +11,15 @@ const NO_TAGS_WARNING =
 const NEGATIVE_SPACE_RULE =
   "If archival_memory_search (or live repo tools) returns no supporting evidence for a claimed feature, file, or behavior, say explicitly that it does not appear to exist in this repository. Never describe the internals of a file, function, or feature you have not actually retrieved evidence for — do not guess a plausible-sounding implementation.";
 
+/**
+ * When retrieval itself breaks (e.g. an embedding-dimension mismatch after an
+ * engine switch), the model receives the tool error but tends to answer from
+ * pretrained knowledge of well-known OSS projects, which looks convincingly
+ * grounded. Observed live in the 2026-07-11 transformers.js E2E run.
+ */
+const TOOL_FAILURE_RULE =
+  "If a memory or search tool call fails with an error, disclose the failure in your answer — never answer from general knowledge of similar projects as a substitute for broken retrieval.";
+
 /** Ephemeral guidance appended to the system prompt for standalone CLI ask only. */
 export function agenticSearchGuidance(): string {
   return [
@@ -19,6 +28,7 @@ export function agenticSearchGuidance(): string {
     "For exact identifiers, strings, or file navigation, prefer grep_repo / glob_files / read_file.",
     "For conceptual recall, use archival_memory_search (optionally with path_prefix to stage-narrow results).",
     NEGATIVE_SPACE_RULE,
+    TOOL_FAILURE_RULE,
   ].join("\n");
 }
 
@@ -36,6 +46,7 @@ export function buildPersona(
     "Be specific: name exact tools, frameworks, and versions rather than just wrapper commands.",
     NO_TAGS_WARNING,
     NEGATIVE_SPACE_RULE,
+    TOOL_FAILURE_RULE,
   ];
 
   return lines.join("\n");

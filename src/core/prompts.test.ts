@@ -50,6 +50,16 @@ describe("buildPersona", () => {
     expect(persona).toContain("path_prefix");
   });
 
+  it("instructs disclosure of tool failures instead of answering from prior knowledge", () => {
+    const withDefault = buildPersona(REPO_NAME, "desc");
+    const withCustom = buildPersona(REPO_NAME, "desc", "I am the ultimate expert.");
+    for (const persona of [withDefault, withCustom]) {
+      expect(persona).toContain("tool call fails");
+      expect(persona.toLowerCase()).toContain("disclose");
+      expect(persona).toContain("never answer from general knowledge");
+    }
+  });
+
   it("includes the negative-space grounding rule even with a custom persona", () => {
     const withDefault = buildPersona(REPO_NAME, "desc");
     const withCustom = buildPersona(REPO_NAME, "desc", "I am the ultimate expert.");
@@ -75,6 +85,12 @@ describe("agenticSearchGuidance", () => {
     const guidance = agenticSearchGuidance();
     expect(guidance).toContain("does not appear to exist in this repository");
     expect(guidance).toContain("Never describe");
+  });
+
+  it("carries the tool-failure disclosure rule (guards --fast/agentic asks too)", () => {
+    const guidance = agenticSearchGuidance();
+    expect(guidance).toContain("tool call fails");
+    expect(guidance).toContain("never answer from general knowledge");
   });
 });
 
