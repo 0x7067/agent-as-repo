@@ -61,7 +61,7 @@ import { isMainModule } from "./shell/is-main-module.js";
 import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
 import { generateMcpEntry, checkMcpEntry, resolveMcpLaunchSpec, type McpLaunchSpec, type McpProviderConfig } from "./core/mcp-config.js";
-import { buildPostSetupNextSteps, getSetupMode } from "./core/setup.js";
+import { buildPostSetupNextSteps, getSetupMode, resolveEffectiveSetupMode } from "./core/setup.js";
 import { MAX_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Chunk, type ChunkingStrategy, type Config, type FileInfo, type RepoConfig, type SymbolFileMap } from "./core/types.js";
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
 import type { LocalRuntimeOptions } from "./shell/local-provider.js";
@@ -298,6 +298,21 @@ class FakeProvider implements AgentProvider {
     return Promise.resolve();
   }
 
+  /**
+   * FakeProvider is in-memory per-process, so it can't reflect real
+   * cross-process store persistence. Default to "exists" (matches prior
+   * behavior for every test that doesn't care about this) and let tests opt
+   * into simulating a store-vs-state drift via
+   * REPO_EXPERT_TEST_FAKE_PROVIDER_MISSING_AGENTS (comma-separated agent ids).
+   */
+  agentExists(agentId: string): Promise<boolean> {
+    const missing = (process.env["REPO_EXPERT_TEST_FAKE_PROVIDER_MISSING_AGENTS"] ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    return Promise.resolve(!missing.includes(agentId));
+  }
+
   async storePassage(agentId: string, text: string): Promise<string> {
     const delayMs = Number.parseInt(process.env["REPO_EXPERT_TEST_DELAY_STORE_MS"] ?? "0", 10);
     if (!Number.isNaN(delayMs) && delayMs > 0) {
@@ -306,6 +321,9 @@ class FakeProvider implements AgentProvider {
     if (process.env["REPO_EXPERT_TEST_FAIL_LOAD_ONCE"] === "1") {
       process.env["REPO_EXPERT_TEST_FAIL_LOAD_ONCE"] = "0";
       throw new Error("simulated load failure");
+    }
+    if (process.env["REPO_EXPERT_TEST_FAIL_LOAD_ALWAYS"] === "1") {
+      throw new Error("simulated load failure (every chunk)");
     }
     if (!Object.hasOwn(this.passagesByAgent, agentId)) this.passagesByAgent[agentId] = [];
     const passages = getOwnRecordValue(this.passagesByAgent, agentId);
@@ -1102,7 +1120,9 @@ program
     }
 
     const log = opts.json ? (_: string) => {} : (line: string) => { console.log(line); };
-    const warn = opts.json ? (_: string) => {} : (line: string) => { console.warn(line); };
+    // Warnings go to stderr in BOTH modes: they never corrupt the JSON on stdout,
+    // and silencing them in --json mode previously hid "N/N chunks failed to load" entirely.
+    const warn = (line: string): void => { console.warn(line); };
     const loadRetries = parseNonNegativeInt(opts.loadRetries, 2);
     const bootstrapRetries = parseNonNegativeInt(opts.bootstrapRetries, 2);
     const loadTimeoutMs = parseNonNegativeInt(opts.loadTimeoutMs, 300_000);
@@ -1142,10 +1162,22 @@ program
       }
 
       const existingAgent = getOwnRecordValue(state.agents, repoName);
-      const mode = getSetupMode(existingAgent, opts.bootstrap, {
+      let mode = getSetupMode(existingAgent, opts.bootstrap, {
         forceResume: Boolean(opts.resume),
         forceReindex: Boolean(opts.reindex),
       });
+
+      if (existingAgent !== undefined) {
+        const existsInStore = (await provider.agentExists?.(existingAgent.agentId)) ?? true;
+        const resolvedMode = resolveEffectiveSetupMode(mode, existsInStore);
+        if (resolvedMode !== mode) {
+          warn(
+            `Agent for "${repoName}" (${existingAgent.agentId}) is in state but missing from the store — ` +
+              `self-healing by recreating it.`,
+          );
+        }
+        mode = resolvedMode;
+      }
 
       if (mode === "skip") {
         if (existingAgent === undefined) {
@@ -1172,6 +1204,7 @@ program
       let bootstrapMs = 0;
       let filesFound = 0;
       let chunksLoaded = 0;
+      let chunksFailed = 0;
 
       let agentId: string;
       try {
@@ -1204,7 +1237,6 @@ program
           log(`  Found ${String(files.length)} files`);
 
           const { chunks, symbolFiles } = buildBulkIndexArtifacts(files, chunkingStrategy);
-          chunksLoaded = chunks.length;
           log(`  Loading ${String(chunks.length)} passages...`);
           const loadResult = await withRetry(
             `loading passages for "${repoName}"`,
@@ -1217,8 +1249,17 @@ program
             warn,
           );
           if (chunks.length > 0 && !opts.json) process.stdout.write("\n");
+          // Report reality, not intent: chunksLoaded is the count that actually landed
+          // in the store, so JSON consumers can't mistake a failed load for a full one.
+          chunksFailed = loadResult.failedChunks;
+          chunksLoaded = chunks.length - loadResult.failedChunks;
           if (loadResult.failedChunks > 0) {
             warn(`${String(loadResult.failedChunks)}/${String(chunks.length)} chunks failed to load`);
+            if (loadResult.failedChunks === chunks.length) {
+              throw new Error(
+                `All ${String(chunks.length)} chunks failed to load for "${repoName}" — aborting setup for this repo.`,
+              );
+            }
           }
           const fileHashes = Object.fromEntries(
             files.map((file) => [file.path, hashFileContent(file.content)]),
@@ -1265,6 +1306,7 @@ program
           agentId,
           filesFound,
           chunksLoaded,
+          chunksFailed,
           createMs,
           indexMs,
           bootstrapMs,
@@ -1278,6 +1320,9 @@ program
           status: "error",
           mode,
           error: message,
+          filesFound,
+          chunksLoaded,
+          chunksFailed,
           totalMs: Date.now() - repoStart,
         });
         process.exitCode = 1;
@@ -1286,6 +1331,8 @@ program
 
     if (opts.json) {
       console.log(JSON.stringify({ results: setupResults }, null, 2));
+    } else if (setupResults.some((r) => r["status"] === "error")) {
+      console.error("Setup did not complete for all repos — see errors above.");
     } else {
       console.log("Setup complete.");
       const exampleRepoName = repoNames[0] ?? "my-repo";
@@ -1812,8 +1859,11 @@ program
         serverPassageCount: r.serverPassageCount,
         orphanCount: r.orphanPassageIds.length,
         missingCount: r.missingPassageIds.length,
+        agentMissingFromStore: r.agentMissingFromStore,
         inSync: r.inSync,
-        fixed: Boolean(opts.fix) && !r.inSync,
+        // reconcile --fix only cleans passage-level drift; a missing agent registry row
+        // can only be self-healed by "repo-expert setup".
+        fixed: Boolean(opts.fix) && (r.orphanPassageIds.length > 0 || r.missingPassageIds.length > 0),
         ...(opts.verbose ? { orphanPassageIds: r.orphanPassageIds, missingPassageIds: r.missingPassageIds } : {}),
       }));
       console.log(JSON.stringify(jsonResults, null, 2));
@@ -1826,13 +1876,18 @@ program
         console.log(`${result.repoName}: in sync (${String(result.serverPassageCount)} passages)`);
       } else {
         console.log(`${result.repoName}: drift detected`);
+        if (result.agentMissingFromStore) {
+          console.log(`  agent missing from store registry — run "repo-expert setup" to self-heal.`);
+        }
         if (result.orphanPassageIds.length > 0) {
           console.log(`  orphan passages (on server, not in local map): ${String(result.orphanPassageIds.length)}`);
         }
         if (result.missingPassageIds.length > 0) {
           console.log(`  missing passages (in local map, not on server): ${String(result.missingPassageIds.length)}`);
         }
-        if (opts.fix) console.log(`  fixed.`);
+        if (opts.fix && (result.orphanPassageIds.length > 0 || result.missingPassageIds.length > 0)) {
+          console.log(`  fixed.`);
+        }
       }
     }
 

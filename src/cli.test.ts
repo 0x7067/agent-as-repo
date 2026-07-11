@@ -1497,6 +1497,127 @@ describe("cli contract", () => {
     expect(result.stderr).not.toContain("ollama serve");
   });
 
+  it("self-heals when the state file claims an agent that is missing from the store, instead of skipping", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-selfheal-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "ghost-agent",
+          repoName: "my-app",
+          passages: { "a.ts": ["p-1"] },
+          lastBootstrap: "2026-01-01T00:00:00.000Z",
+          lastSyncCommit: "abc123",
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(
+      ["setup", "--config", "config.yaml", "--skip-preflight", "--no-bootstrap"],
+      cwd,
+      {
+        REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+        REPO_EXPERT_TEST_FAKE_PROVIDER_MISSING_AGENTS: "ghost-agent",
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("skipping");
+    expect(result.stderr.toLowerCase()).toContain("self-heal");
+
+    const stateRaw = await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), "utf8");
+    const updatedState = JSON.parse(stateRaw) as {
+      agents: Record<string, { passages: Record<string, string[]> }>;
+    };
+    expect(Object.keys(updatedState.agents["my-app"].passages)).toContain("a.ts");
+  });
+
+  it("fails setup (no 'Setup complete', bootstrap skipped) when every chunk fails to load", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-total-load-failure-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(
+      ["setup", "--config", "config.yaml", "--load-retries", "0"],
+      cwd,
+      {
+        REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+        REPO_EXPERT_TEST_FAIL_LOAD_ALWAYS: "1",
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).not.toContain("Setup complete");
+    expect(result.stderr.toLowerCase()).toContain("chunks failed to load");
+
+    const stateRaw = await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), "utf8");
+    const state = JSON.parse(stateRaw) as { agents: Record<string, { lastBootstrap: string | null }> };
+    expect(state.agents["my-app"].lastBootstrap).toBeNull();
+  });
+
+  it("reports real chunk counts, error status, and non-zero exit in --json mode on total load failure", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-total-load-failure-json-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(
+      ["setup", "--config", "config.yaml", "--json", "--no-bootstrap", "--load-retries", "0"],
+      cwd,
+      {
+        REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+        REPO_EXPERT_TEST_FAIL_LOAD_ALWAYS: "1",
+      },
+    );
+
+    expect(result.status).toBe(1);
+    const payload = JSON.parse(result.stdout) as {
+      results: Array<{ status: string; error?: string; chunksLoaded?: number; chunksFailed?: number }>;
+    };
+    expect(payload.results[0].status).toBe("error");
+    expect(payload.results[0].chunksLoaded).toBe(0);
+    expect(payload.results[0].chunksFailed).toBe(1);
+    expect(String(payload.results[0].error)).toContain("chunks failed to load");
+    // The "N/N chunks failed" warning must not be silenced in JSON mode (stderr, not stdout).
+    expect(result.stderr.toLowerCase()).toContain("chunks failed to load");
+  });
+
+  it("reports chunksLoaded as real successes (not attempted) plus chunksFailed in --json mode on partial failure", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-partial-load-failure-json-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+    await writeWorkspaceFile(path.join(repoDir, "b.ts"), "export const b = 2;\n", "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(
+      ["setup", "--config", "config.yaml", "--json", "--no-bootstrap", "--load-retries", "0"],
+      cwd,
+      {
+        REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+        REPO_EXPERT_TEST_FAIL_LOAD_ONCE: "1",
+      },
+    );
+
+    expect(result.status).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      results: Array<{ status: string; chunksLoaded: number; chunksFailed: number }>;
+    };
+    expect(payload.results[0].status).toBe("ok");
+    expect(payload.results[0].chunksLoaded).toBe(1);
+    expect(payload.results[0].chunksFailed).toBe(1);
+  });
+
   it("supports setup --reindex and emits JSON timings", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-setup-reindex-");
     const repoDir = path.join(cwd, "repo");
@@ -1629,5 +1750,44 @@ describe("cli contract", () => {
     };
     expect(payload.results[0].filesFound).toBe(120);
     expect(payload.results[0].totalMs).toBeLessThan(12_000);
+  });
+
+  it("reconcile detects a state-file agent missing from the store, even with matching passage counts", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-reconcile-missing-agent-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "ghost-agent",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const jsonResult = runCli(["reconcile", "--json"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_FAKE_PROVIDER_MISSING_AGENTS: "ghost-agent",
+    });
+    expect(jsonResult.status).toBe(1);
+    const payload = JSON.parse(jsonResult.stdout) as Array<{ agentMissingFromStore: boolean; inSync: boolean }>;
+    expect(payload[0].agentMissingFromStore).toBe(true);
+    expect(payload[0].inSync).toBe(false);
+
+    const textResult = runCli(["reconcile"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_FAKE_PROVIDER_MISSING_AGENTS: "ghost-agent",
+    });
+    expect(textResult.status).toBe(1);
+    expect(textResult.stdout).toContain("drift detected");
+    expect(textResult.stdout.toLowerCase()).toContain("missing from store registry");
   });
 });

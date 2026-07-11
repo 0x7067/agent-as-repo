@@ -42,6 +42,22 @@ describe("computeReconcilePlan", () => {
     const plan = computeReconcilePlan({}, []);
     expect(plan.inSync).toBe(true);
   });
+
+  it("defaults agentMissingFromStore to false and does not affect inSync when omitted", () => {
+    const plan = computeReconcilePlan({ "a.ts": ["p1"] }, [{ id: "p1" }]);
+    expect(plan.agentMissingFromStore).toBe(false);
+    expect(plan.inSync).toBe(true);
+  });
+
+  it("reports drift when the agent itself is missing from the store, even with matching passages", () => {
+    const passageMap: PassageMap = { "a.ts": ["p1"] };
+    const serverPassages = [{ id: "p1" }];
+    const plan = computeReconcilePlan(passageMap, serverPassages, true);
+    expect(plan.agentMissingFromStore).toBe(true);
+    expect(plan.inSync).toBe(false);
+    expect(plan.orphanPassageIds).toEqual([]);
+    expect(plan.missingPassageIds).toEqual([]);
+  });
 });
 
 describe("cleanMissingFromMap", () => {

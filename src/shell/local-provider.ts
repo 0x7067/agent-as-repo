@@ -137,6 +137,12 @@ export class LocalProvider implements AgentProvider {
     this.blockStorage.delete(agentId);
   }
 
+  /** Ground truth for "does this agent actually exist" — the store's agent registry, not local state. */
+  async agentExists(agentId: string): Promise<boolean> {
+    const ids = await this.store.listAgents();
+    return ids.includes(agentId);
+  }
+
   async storePassage(agentId: string, text: string): Promise<string> {
     const uuid = randomUUID();
     await this.store.writePassage(agentId, uuid, text);

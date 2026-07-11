@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentState } from "./types.js";
-import { buildPostSetupNextSteps, getSetupMode } from "./setup.js";
+import { buildPostSetupNextSteps, getSetupMode, resolveEffectiveSetupMode } from "./setup.js";
 
 function makeAgent(overrides: Partial<AgentState> = {}): AgentState {
   return {
@@ -174,6 +174,27 @@ describe("getSetupMode", () => {
     expect(getSetupMode(agent, false)).toBe("resume_full");
   });
 
+});
+
+describe("resolveEffectiveSetupMode", () => {
+  it("leaves mode unchanged when the agent exists in the store", () => {
+    expect(resolveEffectiveSetupMode("skip", true)).toBe("skip");
+    expect(resolveEffectiveSetupMode("resume_bootstrap", true)).toBe("resume_bootstrap");
+    expect(resolveEffectiveSetupMode("resume_full", true)).toBe("resume_full");
+    expect(resolveEffectiveSetupMode("reindex_full", true)).toBe("reindex_full");
+  });
+
+  it("forces create (self-heal) when the store lacks the agent, regardless of computed mode", () => {
+    expect(resolveEffectiveSetupMode("skip", false)).toBe("create");
+    expect(resolveEffectiveSetupMode("resume_bootstrap", false)).toBe("create");
+    expect(resolveEffectiveSetupMode("resume_full", false)).toBe("create");
+    expect(resolveEffectiveSetupMode("reindex_full", false)).toBe("create");
+  });
+
+  it("leaves create unaffected either way (nothing to self-heal from)", () => {
+    expect(resolveEffectiveSetupMode("create", true)).toBe("create");
+    expect(resolveEffectiveSetupMode("create", false)).toBe("create");
+  });
 });
 
 describe("buildPostSetupNextSteps", () => {

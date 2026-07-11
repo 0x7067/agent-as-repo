@@ -196,7 +196,18 @@ export function checkGit(git: GitPort = nodeGit): CheckResult {
   }
 }
 
-export async function checkStateConsistency(configPath: string): Promise<CheckResult[]> {
+/**
+ * `configPath`/state comparison is purely local-file bookkeeping and always
+ * ran; the store-registry check (`provider.agentExists`) is the part that
+ * actually catches state-file/store drift (bug: doctor said "State matches
+ * config" even when the store's `agents` table was empty). `provider` is
+ * optional — when omitted (or when it doesn't implement `agentExists`) this
+ * degrades to the old config/state-only comparison.
+ */
+export async function checkStateConsistency(
+  configPath: string,
+  provider: AgentProvider | null = null,
+): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
   let configRepos: Set<string>;
@@ -208,14 +219,16 @@ export async function checkStateConsistency(configPath: string): Promise<CheckRe
     return [];
   }
 
-  let stateAgents: Set<string>;
+  let stateAgentsMap: Record<string, { agentId: string }>;
   try {
     const { loadState } = await import("./state-store.js");
     const state = await loadState(".repo-expert-state.json");
-    stateAgents = new Set(Object.keys(state.agents));
+    stateAgentsMap = state.agents;
   } catch {
     return [];
   }
+
+  const stateAgents = new Set(Object.keys(stateAgentsMap));
 
   for (const name of stateAgents) {
     if (!configRepos.has(name)) {
@@ -228,6 +241,20 @@ export async function checkStateConsistency(configPath: string): Promise<CheckRe
     if (!stateAgents.has(name)) {
       const message = `Repo "${name}" in config but no agent created yet`;
       results.push({ name: "State consistency", status: "warn", message });
+    }
+  }
+
+  if (provider?.agentExists) {
+    for (const name of stateAgents) {
+      const agent = stateAgentsMap[name];
+      if (agent === undefined) continue;
+      const exists = await provider.agentExists(agent.agentId);
+      if (!exists) {
+        const message =
+          `Agent "${name}" (${agent.agentId}) is in state but missing from the store's agent registry — ` +
+          `run "repo-expert setup" to self-heal.`;
+        results.push({ name: "State consistency", status: "fail", message });
+      }
     }
   }
 
@@ -286,7 +313,7 @@ export async function runAllChecks(
   if (configExists) {
     const [repoPathResults, stateConsistencyResults] = await Promise.all([
       checkRepoPaths(configPath),
-      checkStateConsistency(configPath),
+      checkStateConsistency(configPath, provider),
     ]);
     results.push(...repoPathResults, ...stateConsistencyResults);
   }

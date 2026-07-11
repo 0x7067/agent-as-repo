@@ -111,6 +111,20 @@ describe("LocalProvider", () => {
     });
   });
 
+  describe("agentExists", () => {
+    it("returns true when the store's agent list contains the agent id", async () => {
+      mockStore.listAgents.mockResolvedValue(["myrepo", "other-repo"]);
+
+      await expect(provider.agentExists("myrepo")).resolves.toBe(true);
+    });
+
+    it("returns false when the store's agent list does not contain the agent id", async () => {
+      mockStore.listAgents.mockResolvedValue(["other-repo"]);
+
+      await expect(provider.agentExists("myrepo")).resolves.toBe(false);
+    });
+  });
+
   describe("storePassage", () => {
     it("writes the passage under a generated UUID and returns the UUID", async () => {
       const passageId = await provider.storePassage("myrepo", "some passage text");

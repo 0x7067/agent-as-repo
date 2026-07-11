@@ -9,6 +9,7 @@ import {
   checkLlmEndpoint,
   checkModelAvailable,
   checkRepoPaths,
+  checkStateConsistency,
   runAllChecks,
   runDoctorFixes,
 } from "./doctor.js";
@@ -295,6 +296,119 @@ describe("doctor shell checks", () => {
     expect(listPassages).toHaveBeenCalledTimes(1);
     expect(listPassages).toHaveBeenCalledWith("configured-agent");
     expect(apiConnection?.status).toBe("pass");
+  });
+
+  it("checkStateConsistency reports fail when a state agent is missing from the store's agent registry", async () => {
+    const tempDir = await makeTempDir("doctor-");
+    const repoDir = path.join(tempDir, "repo");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.mkdir(repoDir, { recursive: true });
+    const configPath = path.join(tempDir, "config.yaml");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.writeFile(configPath, providerYaml(repoDir), "utf8");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.writeFile(
+      path.join(tempDir, ".repo-expert-state.json"),
+      JSON.stringify({
+        stateVersion: 2,
+        agents: {
+          "my-app": {
+            agentId: "ghost-agent",
+            repoName: "my-app",
+            passages: {},
+            lastBootstrap: null,
+            lastSyncCommit: null,
+            lastSyncAt: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      }),
+      "utf8",
+    );
+    process.chdir(tempDir);
+
+    const provider = { agentExists: vi.fn().mockResolvedValue(false) } as unknown as AgentProvider;
+    const results = await checkStateConsistency(configPath, provider);
+
+    const failure = results.find((r) => r.status === "fail");
+    expect(failure).toBeDefined();
+    expect(failure?.message).toContain("ghost-agent");
+    expect(results.some((r) => r.status === "pass" && r.message === "State matches config")).toBe(false);
+  });
+
+  it("checkStateConsistency does not fail when the provider confirms the agent exists in the store", async () => {
+    const tempDir = await makeTempDir("doctor-");
+    const repoDir = path.join(tempDir, "repo");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.mkdir(repoDir, { recursive: true });
+    const configPath = path.join(tempDir, "config.yaml");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.writeFile(configPath, providerYaml(repoDir), "utf8");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.writeFile(
+      path.join(tempDir, ".repo-expert-state.json"),
+      JSON.stringify({
+        stateVersion: 2,
+        agents: {
+          "my-app": {
+            agentId: "real-agent",
+            repoName: "my-app",
+            passages: {},
+            lastBootstrap: null,
+            lastSyncCommit: null,
+            lastSyncAt: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      }),
+      "utf8",
+    );
+    process.chdir(tempDir);
+
+    const provider = { agentExists: vi.fn().mockResolvedValue(true) } as unknown as AgentProvider;
+    const results = await checkStateConsistency(configPath, provider);
+
+    expect(results.some((r) => r.status === "fail")).toBe(false);
+    expect(results.some((r) => r.status === "pass" && r.message === "State matches config")).toBe(true);
+  });
+
+  it("runAllChecks surfaces the store-agent-missing failure end to end", async () => {
+    stubFetchOk();
+    const tempDir = await makeTempDir("doctor-");
+    process.chdir(tempDir);
+    const repoDir = path.join(tempDir, "repo");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.mkdir(repoDir, { recursive: true });
+    const configPath = path.join(tempDir, "config.yaml");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.writeFile(configPath, providerYaml(repoDir), "utf8");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.writeFile(
+      path.join(tempDir, ".repo-expert-state.json"),
+      JSON.stringify({
+        stateVersion: 2,
+        agents: {
+          "my-app": {
+            agentId: "ghost-agent",
+            repoName: "my-app",
+            passages: {},
+            lastBootstrap: null,
+            lastSyncCommit: null,
+            lastSyncAt: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const listPassages = vi.fn().mockResolvedValue([]);
+    const agentExists = vi.fn().mockResolvedValue(false);
+    const provider = { listPassages, agentExists } as unknown as AgentProvider;
+
+    const results = await runAllChecks(provider, configPath);
+
+    expect(results.some((r) => r.name === "State consistency" && r.status === "fail")).toBe(true);
   });
 });
 

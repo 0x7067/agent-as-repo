@@ -37,6 +37,13 @@ export interface ConsolidateMemoryOptions {
 export interface AgentProvider {
   createAgent(this: void, params: CreateAgentParams): Promise<CreateAgentResult>;
   deleteAgent(this: void, agentId: string): Promise<void>;
+  /**
+   * Whether `agentId` actually has a row in the underlying store's agent
+   * registry (not just in local state). Optional — callers that skip it
+   * (or implementations that omit it) fall back to trusting local state,
+   * same as before this existed.
+   */
+  agentExists?(this: void, agentId: string): Promise<boolean>;
   storePassage(this: void, agentId: string, text: string): Promise<string>;
   /**
    * Batch write path: stores multiple passages together (fewer embedding

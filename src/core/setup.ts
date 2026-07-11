@@ -35,6 +35,20 @@ export function getSetupMode(
   return "skip";
 }
 
+/**
+ * Override a computed setup mode when the state file claims an agent exists
+ * but the passage store has no row for it (store wiped, `REPO_EXPERT_DATA_DIR`
+ * changed, etc.). Self-heals by forcing a full "create" pass — which
+ * recreates the agent record and reindexes from scratch — instead of trusting
+ * the state file and silently skipping (or resuming into a store that will
+ * never actually hold the agent). Pure function: the actual store check is
+ * the shell's job; this just decides what to do with the answer.
+ */
+export function resolveEffectiveSetupMode(mode: SetupMode, existsInStore: boolean): SetupMode {
+  if (mode === "create" || existsInStore) return mode;
+  return "create";
+}
+
 export function buildPostSetupNextSteps(exampleRepoName: string): string[] {
   return [
     "Next steps:",
