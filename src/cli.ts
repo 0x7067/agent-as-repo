@@ -11,6 +11,7 @@ import { runInit } from "./shell/init.js";
 import { checkLlmEndpoint, checkModelAvailable, runAllChecks, runDoctorFixes } from "./shell/doctor.js";
 import { formatSelfChecks, runSelfChecks } from "./shell/self-check.js";
 import { completionFileName, generateCompletionScript, type CompletionShell } from "./core/completion.js";
+import { nonInteractiveInitError } from "./core/init.js";
 import { computeDoctorExitCode, formatDoctorReport } from "./core/doctor.js";
 import { ConfigError, formatConfigError } from "./core/config.js";
 import { collectFiles } from "./shell/file-collector.js";
@@ -788,7 +789,11 @@ function noInputEnabled(): boolean {
 }
 
 function interactiveInputAvailable(): boolean {
-  return process.stdin.isTTY && process.stdout.isTTY;
+  // Explicit `=== true` (not a bare `&&`) so this always yields a real boolean:
+  // `isTTY` is `undefined` on piped/non-TTY streams, and an `undefined` value
+  // handed to a destructured option with a default (e.g. `allowPrompts = true`)
+  // silently falls back to that default instead of being treated as falsy.
+  return process.stdin.isTTY === true && process.stdout.isTTY === true;
 }
 
 function readDebugEnabled(argv: string[]): boolean {
@@ -796,8 +801,20 @@ function readDebugEnabled(argv: string[]): boolean {
 }
 
 function question(rl: ReadlineInterface, prompt: string): Promise<string> {
-  return new Promise((resolve) => {
-    rl.question(prompt, resolve);
+  return new Promise((resolve, reject) => {
+    // If stdin ends (EOF) before the question is answered, readline's
+    // `question()` callback is simply never invoked — without this listener
+    // the returned promise would hang forever unsettled, and a process with
+    // no other pending work then exits 0 with the rejection silently
+    // dropped (finding 7's "swallowed readline rejection").
+    const onClose = (): void => {
+      reject(new Error("stdin closed before answering prompt"));
+    };
+    rl.once("close", onClose);
+    rl.question(prompt, (answer) => {
+      rl.removeListener("close", onClose);
+      resolve(answer);
+    });
   });
 }
 
@@ -969,6 +986,21 @@ program
       process.exitCode = 1;
       return;
     }
+    const allowPrompts = !noInputEnabled() && interactiveInputAvailable();
+    // Fail fast (finding 7): piped/non-TTY stdin with no --repo-path used to
+    // silently consume buffered answer lines, then exit 0 having written
+    // nothing once stdin hit EOF mid-prompt. Bail before even opening a
+    // readline interface when we can already tell prompting won't work.
+    const guardError = nonInteractiveInitError({
+      allowPrompts,
+      repoPathProvided: Boolean(opts.repoPath?.trim()),
+      noInputFlagSet: noInputEnabled(),
+    });
+    if (guardError) {
+      console.error(guardError);
+      process.exitCode = 1;
+      return;
+    }
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     try {
       const initOptions = {
@@ -978,13 +1010,21 @@ program
         ...(opts.baseUrl === undefined ? {} : { baseUrl: opts.baseUrl }),
         ...(opts.embeddingEngine === undefined ? {} : { embeddingEngine: opts.embeddingEngine }),
         assumeYes: Boolean(opts.yes),
-        allowPrompts: !noInputEnabled() && interactiveInputAvailable(),
+        allowPrompts,
       };
       await runInit({ question: (prompt) => question(rl, prompt) }, {
         ...initOptions,
       });
-    } catch {
-      // runInit sets process.exitCode and logs errors
+    } catch (error) {
+      // runInit already prints its own error + sets process.exitCode for its
+      // known failure paths. This is a safety net for anything that doesn't
+      // (e.g. a readline rejection from stdin closing mid-prompt) so no path
+      // can exit 0 without either completing or printing an error.
+      if (!process.exitCode) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`init failed: ${message}`);
+        process.exitCode = 1;
+      }
     } finally {
       rl.close();
     }

@@ -17,11 +17,12 @@ function tsxBinPath(): string {
 
 const cliEntryPath = path.resolve("src/cli.ts");
 
-function runCli(args: string[], cwd: string, extraEnv: NodeJS.ProcessEnv = {}): CliResult {
+function runCli(args: string[], cwd: string, extraEnv: NodeJS.ProcessEnv = {}, input?: string): CliResult {
   const result = spawnSync(tsxBinPath(), [cliEntryPath, ...args], {
     cwd,
     env: { ...process.env, COLUMNS: "160", ...extraEnv },
     encoding: "utf8",
+    ...(input === undefined ? {} : { input }),
   });
   return {
     status: result.status,
@@ -526,6 +527,29 @@ describe("cli contract", () => {
     expect(result.stderr).toContain(".repo-expert-state.json");
     expect(result.stderr).toContain("remove or fix it");
     expect(result.stderr).not.toContain("Unexpected error");
+  });
+
+  it("fails fast with a clear error on piped (non-TTY) stdin instead of silently exiting 0 (finding 7)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-init-non-tty-");
+
+    // Reproduces the exact finding-7 repro: two buffered lines piped to `init`
+    // with no flags at all (no --no-input, no --repo-path, no --yes).
+    const result = runCli(["init"], cwd, {}, "some\nanswers\n");
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("stdin is not a TTY");
+    expect(result.stderr).toContain("--repo-path");
+    await expect(fs.access(path.join(cwd, "config.yaml"))).rejects.toThrow();
+  });
+
+  it("fails fast on piped stdin with zero bytes written (immediate EOF)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-init-non-tty-eof-");
+
+    const result = runCli(["init"], cwd, {}, "");
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("stdin is not a TTY");
+    await expect(fs.access(path.join(cwd, "config.yaml"))).rejects.toThrow();
   });
 
   it("supports non-interactive init with flags", async () => {
