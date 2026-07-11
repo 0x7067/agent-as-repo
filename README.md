@@ -98,7 +98,7 @@ provider:
   base_url: https://openrouter.ai/api/v1
 ```
 
-Embeddings for archival search come from the same OpenAI-compatible endpoint by default (`POST {base_url}/embeddings`), using `provider.embedding_model` (default `nomic-embed-text`). Set `provider.embedding_engine: transformersjs` to compute embeddings in-process instead, via `@huggingface/transformers` running an ONNX model on CPU — no Ollama embedding model needed. In that mode `embedding_model` is a Hugging Face model id (default `nomic-ai/nomic-embed-text-v1.5`, q8-quantized ONNX); weights (~140 MB) download from the Hugging Face Hub on first use and are cached locally, so the first `setup`/`sync`/search is slower and everything after runs fully offline. Switching `embedding_engine` or `embedding_model` changes the vector space, so re-run `repo-expert setup --reindex` afterwards — same-dimension swaps need it too, not just ones the store's dimension check would catch. Passages, vectors, and memory blocks live in one local SQLite database at `~/.repo-expert/store.db` (override the directory with `REPO_EXPERT_DATA_DIR`).
+Embeddings for archival search come from the same OpenAI-compatible endpoint by default (`POST {base_url}/embeddings`), using `provider.embedding_model` (default `nomic-embed-text`). Set `provider.embedding_engine: transformersjs` to compute embeddings in-process instead, via `@huggingface/transformers` running an ONNX model on CPU — no Ollama embedding model needed. In that mode `embedding_model` is a Hugging Face model id (default `nomic-ai/nomic-embed-text-v1.5`, q8-quantized ONNX); weights (~140 MB) download from the Hugging Face Hub on first use and are cached locally, so the first `setup`/`sync`/search is slower and everything after runs fully offline. When `embedding_model` names a nomic-embed variant (both the default `nomic-embed-text` and `nomic-ai/nomic-embed-text-v1.5`), retrieval automatically applies the model's required asymmetric task prefixes — passages are embedded as `search_document:` and search queries as `search_query:` — for materially better dense retrieval; other models are unaffected. Switching `embedding_engine` or `embedding_model` changes the vector space, so re-run `repo-expert setup --reindex` afterwards — same-dimension swaps (and upgrading an existing index to the prefixed vectors) need it too, not just ones the store's dimension check would catch. Passages, vectors, and memory blocks live in one local SQLite database at `~/.repo-expert/store.db` (override the directory with `REPO_EXPERT_DATA_DIR`).
 
 ### Memory consolidation
 
@@ -135,6 +135,7 @@ Key points:
 ```bash
 pnpm install              # install dependencies
 pnpm test                 # run all tests (vitest)
+pnpm bench                # retrieval-quality benchmark (deterministic tier + gates)
 pnpm repo-expert --help   # CLI entry point
 pnpm mcp-server           # start MCP server (stdio)
 ```

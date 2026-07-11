@@ -1,0 +1,112 @@
+{
+  "engine": "deterministic",
+  "gitSha": "20993eb",
+  "queryCount": 21,
+  "legs": {
+    "vector": {
+      "recallAt1": {
+        "mean": 0.42857142857142855,
+        "byKind": {
+          "identifier": 0.6666666666666666,
+          "error-string": 0.6666666666666666,
+          "config-key": 0.5,
+          "paraphrase": 0,
+          "no-term": 0
+        }
+      },
+      "recallAt5": {
+        "mean": 0.5714285714285714,
+        "byKind": {
+          "identifier": 0.8888888888888888,
+          "error-string": 1,
+          "config-key": 0.5,
+          "paraphrase": 0,
+          "no-term": 0
+        }
+      },
+      "mrr": {
+        "mean": 0.5590508257174923,
+        "byKind": {
+          "identifier": 0.7777777777777778,
+          "error-string": 0.75,
+          "config-key": 1,
+          "paraphrase": 0.07983164983164984,
+          "no-term": 0.045454545454545456
+        }
+      }
+    },
+    "lexical": {
+      "recallAt1": {
+        "mean": 0.6190476190476191,
+        "byKind": {
+          "identifier": 1,
+          "error-string": 1,
+          "config-key": 0.5,
+          "paraphrase": 0,
+          "no-term": 0
+        }
+      },
+      "recallAt5": {
+        "mean": 0.6904761904761905,
+        "byKind": {
+          "identifier": 1,
+          "error-string": 1,
+          "config-key": 0.75,
+          "paraphrase": 0.2,
+          "no-term": 0
+        }
+      },
+      "mrr": {
+        "mean": 0.6964285714285714,
+        "byKind": {
+          "identifier": 1,
+          "error-string": 1,
+          "config-key": 1,
+          "paraphrase": 0.125,
+          "no-term": 0
+        }
+      }
+    },
+    "fused": {
+      "recallAt1": {
+        "mean": 0.6190476190476191,
+        "byKind": {
+          "identifier": 1,
+          "error-string": 1,
+          "config-key": 0.5,
+          "paraphrase": 0,
+          "no-term": 0
+        }
+      },
+      "recallAt5": {
+        "mean": 0.6904761904761905,
+        "byKind": {
+          "identifier": 1,
+          "error-string": 1,
+          "config-key": 0.75,
+          "paraphrase": 0.2,
+          "no-term": 0
+        }
+      },
+      "mrr": {
+        "mean": 0.697818082300841,
+        "byKind": {
+          "identifier": 1,
+          "error-string": 1,
+          "config-key": 1,
+          "paraphrase": 0.11265412748171369,
+          "no-term": 0.045454545454545456
+        }
+      }
+    }
+  },
+  "performance": {
+    "indexWallMs": 0,
+    "chunkCount": 78,
+    "passageCount": 78,
+    "chunksPerSec": 0,
+    "dbSizeBytes": 4096,
+    "searchP50Ms": 0,
+    "searchP95Ms": 0
+  }
+}

@@ -105,6 +105,35 @@ pnpm test   # architecture.test.ts catches violations at the file content level
 
 ---
 
+## Verification
+
+Beyond unit tests, a **retrieval-quality benchmark** (`pnpm bench`,
+`eval/bench.ts`) exercises the real indexing + hybrid-search path end to end.
+It copies the checked-in fixture corpus (`eval/fixtures/mini-corpus/`) into a
+temp git repo, indexes it through the actual collect → chunk → enrich → store
+pipeline, then runs every gold query (`eval/retrieval-gold.json`) through the
+leg-isolated `SqlitePassageStore.searchLegs` diagnostic and scores the vector,
+lexical, and fused legs with the pure metrics in `src/core/eval-metrics.ts`
+(Recall@1, Recall@5, MRR — overall and per query kind).
+
+The default **deterministic tier** uses a shared hash bag-of-words stub
+embedder (no network, no model), so two runs produce identical reports
+(excluding timing). It enforces three quality gates:
+
+- identifier-kind Recall@1 = 1.0 (the hybrid exact-identifier guarantee),
+- hybrid Recall@5 ≥ vector-only Recall@5 (fusion never hurts recall),
+- hybrid MRR ≥ max(vector, lexical) MRR − 0.05 (fusion never badly hurts rank).
+
+`--engine transformersjs` swaps in real in-process embeddings (report-only,
+needs a model download — not run in CI). Performance numbers (index wall time,
+chunks/sec, search p50/p95, DB size) are always report-only. `--baseline
+eval/baselines/deterministic.json` compares against the committed reference and
+exits non-zero on a gated regression; the corpus, gold set, and baseline must
+change together in one PR. A vitest smoke test (`eval/bench.test.ts`) runs a
+small slice on every push so the script can't rot.
+
+---
+
 ## Key Files
 
 | Concept | File |
@@ -154,7 +183,7 @@ pnpm test   # architecture.test.ts catches violations at the file content level
  └──────────────────────────────────────────────────────────────────┘
 ```
 
-**Hybrid retrieval**: archival-memory search (`SqlitePassageStore.semanticSearch`) fuses two legs. The vector leg is cosine similarity over sqlite-vec embeddings; the lexical leg is BM25 over an FTS5 external-content index on passage text (`tokenize="unicode61 tokenchars '_'"`, so `snake_case` identifiers stay whole), kept in sync by SQLite triggers on every write path and backfilled via FTS5 `'rebuild'` when a pre-FTS database is opened. Both legs over-fetch (`max(limit * 3, 15)` candidates) and are combined with Reciprocal Rank Fusion (`rrfFuse` in `src/core/hybrid-rank.ts`, k=60); the returned `score` is the fused RRF score, not cosine similarity. Queries are sanitized into quoted OR terms (`toFtsMatchQuery`) so no FTS5 operator syntax reaches `MATCH`; a query with no extractable terms — or any FTS failure, including FTS5 being unavailable at startup — degrades to vector-only search. An optional `pathPrefix` scopes both legs to passages whose `file_path` starts with that prefix (stage-retrieval narrowing).
+**Hybrid retrieval**: archival-memory search (`SqlitePassageStore.semanticSearch`) fuses two legs. The vector leg is cosine similarity over sqlite-vec embeddings; the lexical leg is BM25 over an FTS5 external-content index on passage text (`tokenize="unicode61 tokenchars '_'"`, so `snake_case` identifiers stay whole), kept in sync by SQLite triggers on every write path and backfilled via FTS5 `'rebuild'` when a pre-FTS database is opened. Both legs over-fetch (`max(limit * 3, 15)` candidates) and are combined with Reciprocal Rank Fusion (`rrfFuse` in `src/core/hybrid-rank.ts`, k=60); the returned `score` is the fused RRF score, not cosine similarity. Queries are sanitized into quoted OR terms (`toFtsMatchQuery`) so no FTS5 operator syntax reaches `MATCH`; a query with no extractable terms — or any FTS failure, including FTS5 being unavailable at startup — degrades to vector-only search. An optional `pathPrefix` scopes both legs to passages whose `file_path` starts with that prefix (stage-retrieval narrowing). The vector leg is task-aware for asymmetric models: `embeddingTaskPrefixes` in `src/core/embedding-prefix.ts` (applied by the `createEmbedder` wrapper in `src/shell/embedder-factory.ts`) prepends `search_document:` to passages and `search_query:` to queries for nomic-embed models, so upgrading an existing index to the prefixed vector space requires `repo-expert setup --reindex`.
 
 **Agentic search**: standalone CLI `ask` exposes live-repo tools (`grep_repo`, `glob_files`, `read_file`, `find_symbol`) alongside archival recall (`LocalRuntimeOptions.agenticTools`). MCP / coding-harness `agent_call` leaves those off — the host already has filesystem tools — and keeps memory + hybrid recall only (no MCP symbol/filesystem tools). Path safety lives in `src/core/repo-path.ts`; ripgrep argv building in `src/core/ripgrep-args.ts`; handlers in `src/shell/repo-tools.ts` / `src/shell/agent-tools.ts`. Persisted persona stays harness-friendly; CLI ask appends ephemeral live-tool guidance.
 
