@@ -12,8 +12,10 @@ import type {
 } from "../core/types.js";
 import { computeSyncPlan } from "../core/sync.js";
 import { selectChunkingStrategy } from "../core/chunker.js";
+import { enrichChunks } from "../core/chunk-context.js";
 import { extractSymbolsAndRefsFromFile } from "../core/tree-sitter-chunker.js";
 import { computeSymbolRanks, toStoredSymbolFile } from "../core/symbol-store.js";
+import type { SymbolRef } from "../core/symbol-refs.js";
 import type { PathAliasConfig } from "../core/tsconfig-paths.js";
 import type { AgentProvider } from "../ports/agent-provider.js";
 
@@ -110,11 +112,14 @@ function getIndexableFileInfo(
 function extractAndStoreSymbols(
   fileInfo: FileInfo,
   updatedSymbols: SymbolFileMap,
-): SymbolFileMap {
+): { symbols: SymbolFileMap; refs: SymbolRef[] } {
   const { spans, refs } = extractSymbolsAndRefsFromFile(fileInfo);
   return {
-    ...updatedSymbols,
-    [fileInfo.path]: toStoredSymbolFile(fileInfo.path, fileInfo.content, spans, refs),
+    symbols: {
+      ...updatedSymbols,
+      [fileInfo.path]: toStoredSymbolFile(fileInfo.path, fileInfo.content, spans, refs),
+    },
+    refs,
   };
 }
 
@@ -138,10 +143,14 @@ async function reindexChangedFile(params: {
   chunkingStrategy: ChunkingStrategy;
 }): Promise<void> {
   // Extract symbols once (same tree-sitter parse the chunker would redo).
-  params.maps.symbols = extractAndStoreSymbols(params.fileInfo, params.maps.symbols);
+  const { symbols, refs } = extractAndStoreSymbols(params.fileInfo, params.maps.symbols);
+  params.maps.symbols = symbols;
   params.maps.symbolsDirty = true;
 
-  const chunks = params.chunkingStrategy(params.fileInfo);
+  // Enrich each chunk with the file's own import/export context before
+  // embedding so a symbol retrieved in isolation still carries its file's
+  // domain signal. File-local only, so the content-hash reindex cache holds.
+  const chunks = enrichChunks(params.chunkingStrategy(params.fileInfo), refs);
   const passageIds = await storeFileChunks(params.provider, params.agentId, chunks, params.limit);
   params.stalePassageIds.push(...getOldPassageIds(params.agentPassages, params.filePath));
   params.maps.passages[params.filePath] = passageIds;

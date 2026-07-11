@@ -250,6 +250,39 @@ describe("syncRepo", () => {
     );
   });
 
+  it("enriches embedded chunks with the file's own import/export context", async () => {
+    const provider = makeMockProvider();
+    const tsContent = [
+      "import { getSession } from './auth/session';",
+      "export function handler(): void {",
+      "  getSession();",
+      "}",
+    ].join("\n");
+
+    await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: ["src/a.ts"],
+      collectFile: (path) => Promise.resolve({ path, content: tsContent, sizeKb: 0.1 }),
+      headCommit: "def456",
+      chunking: "tree-sitter",
+    });
+
+    const storedTexts = (provider.storePassage as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call) => call[1] as string,
+    );
+    // Every passage carries the file-local context line, and the FILE header
+    // stays first so downstream path extraction still works.
+    expect(storedTexts.length).toBeGreaterThan(0);
+    expect(storedTexts.every((text) => text.startsWith("FILE: src/a.ts"))).toBe(true);
+    expect(storedTexts.some((text) => text.includes("imports:") && text.includes("session"))).toBe(
+      true,
+    );
+    expect(storedTexts.some((text) => text.includes("exports:") && text.includes("handler"))).toBe(
+      true,
+    );
+  });
+
   it("returns unchanged state for empty changed files", async () => {
     const provider = makeMockProvider();
     const result = await syncRepo({
