@@ -1693,7 +1693,10 @@ program
     const rows: Array<{
       repoName: string;
       agentId: string;
-      files: number;
+      // Distinct from setup's "Found N files": this counts files that produced
+      // at least one indexed passage, which can be lower (empty files, files
+      // skipped for size, files whose only content was filtered out).
+      filesWithPassages: number;
       passages: number;
       bootstrapped: boolean;
       serverPassages?: number;
@@ -1701,7 +1704,7 @@ program
     }> = entries.map(([repoName, agent]) => ({
       repoName,
       agentId: agent.agentId,
-      files: Object.keys(agent.passages).length,
+      filesWithPassages: Object.keys(agent.passages).length,
       passages: Object.values(agent.passages).flat().length,
       bootstrapped: Boolean(agent.lastBootstrap),
     }));
@@ -1726,10 +1729,10 @@ program
       if (opts.live) {
         const driftTag = row.drift ? " [drift]" : "";
         console.log(
-          `  ${row.repoName}: agent=${row.agentId} files=${String(row.files)} passages=${String(row.passages)} server=${String(row.serverPassages)}${driftTag} bootstrapped=${bootstrap}`,
+          `  ${row.repoName}: agent=${row.agentId} files_with_passages=${String(row.filesWithPassages)} passages=${String(row.passages)} server=${String(row.serverPassages)}${driftTag} bootstrapped=${bootstrap}`,
         );
       } else {
-        console.log(`  ${row.repoName}: agent=${row.agentId} files=${String(row.files)} passages=${String(row.passages)} bootstrapped=${bootstrap}`);
+        console.log(`  ${row.repoName}: agent=${row.agentId} files_with_passages=${String(row.filesWithPassages)} passages=${String(row.passages)} bootstrapped=${bootstrap}`);
       }
     }
   });

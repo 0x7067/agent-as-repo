@@ -409,7 +409,7 @@ describe("cli contract", () => {
     const data = JSON.parse(result.stdout) as Array<{
       repoName: string;
       agentId: string;
-      files: number;
+      filesWithPassages: number;
       passages: number;
       bootstrapped: boolean;
       lastSyncAt: string | null;
@@ -418,11 +418,38 @@ describe("cli contract", () => {
       {
         repoName: "my-app",
         agentId: "agent-1",
-        files: 1,
+        filesWithPassages: 1,
         passages: 1,
         bootstrapped: false,
       },
     ]);
+  });
+
+  it("labels the list metric as files-with-passages, distinct from setup's file count", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-list-label-");
+    const state = {
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          // 2 files found by setup, but only 1 produced a passage (e.g. an
+          // empty file, or one skipped for size) — "files" alone would
+          // conflate the two counts (finding 11).
+          passages: { "src/a.ts": ["p-1"] },
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["list"], cwd);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("files_with_passages=1");
+    expect(result.stdout).not.toMatch(/[^_]files=/);
   });
 
   it("fails fast with --no-input for destructive commands unless --force is provided", async () => {
