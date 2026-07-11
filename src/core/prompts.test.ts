@@ -49,6 +49,16 @@ describe("buildPersona", () => {
     expect(persona).toContain("archival_memory_search");
     expect(persona).toContain("path_prefix");
   });
+
+  it("includes the negative-space grounding rule even with a custom persona", () => {
+    const withDefault = buildPersona(REPO_NAME, "desc");
+    const withCustom = buildPersona(REPO_NAME, "desc", "I am the ultimate expert.");
+    for (const persona of [withDefault, withCustom]) {
+      expect(persona).toContain("does not appear to exist in this repository");
+      expect(persona.toLowerCase()).toContain("no supporting evidence");
+      expect(persona).toContain("Never describe");
+    }
+  });
 });
 
 describe("agenticSearchGuidance", () => {
@@ -59,6 +69,12 @@ describe("agenticSearchGuidance", () => {
     expect(guidance).toContain("read_file");
     expect(guidance).toContain("find_symbol");
     expect(guidance).toContain(ARCHIVAL_MEMORY);
+  });
+
+  it("carries the negative-space grounding rule (guards --fast/agentic asks too)", () => {
+    const guidance = agenticSearchGuidance();
+    expect(guidance).toContain("does not appear to exist in this repository");
+    expect(guidance).toContain("Never describe");
   });
 });
 
@@ -88,6 +104,11 @@ describe("bootstrap prompts", () => {
   it("architecture prompt joins with newlines", () => {
     const prompt = architectureBootstrapPrompt();
     expect(prompt).toContain("\n");
+  });
+
+  it("architecture prompt warns against inventing unverified directories/files", () => {
+    const prompt = architectureBootstrapPrompt();
+    expect(prompt.toLowerCase()).toContain("do not invent");
   });
 
   it("conventions prompt mentions archival memory search", () => {
