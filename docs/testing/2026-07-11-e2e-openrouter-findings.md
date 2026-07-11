@@ -202,7 +202,9 @@ testing, beyond the original list:
   (e.g. dimension mismatch) — looks convincingly grounded on well-known OSS
   repos. Added a persona rule requiring disclosure of failed tool calls.
 
-Residual nuance (not a regression, candidate for a future prompt tweak):
-after scoping an index down (e.g. `base_path: lib`), questions about
-now-excluded subprojects are answered from legitimately in-scope references
-without explicitly noting the subproject itself is not indexed.
+Residual nuance, since fixed in the same session: after scoping an index
+down (e.g. `base_path: lib`), questions about now-excluded subprojects were
+answered from legitimately in-scope references without noting the subproject
+isn't indexed. The persona now discloses the indexed subtree (`base_path`)
+and instructs saying out-of-scope parts are not indexed — verified live
+(lib-scoped sinatra asked about rack-protection now answers "not indexed").
