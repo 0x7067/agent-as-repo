@@ -1511,7 +1511,10 @@ program
       if (changedFiles.length === 0) {
         log(`  No changes to sync.`);
         if (!opts.dryRun) {
-          state = updateAgentField(state, repoName, { lastSyncCommit: headCommit });
+          state = updateAgentField(state, repoName, {
+            lastSyncCommit: headCommit,
+            lastSyncAt: new Date().toISOString(),
+          });
           await saveState(STATE_FILE, state);
         }
         syncResults.push({ repoName, status: "ok", dryRun: Boolean(opts.dryRun), changedFiles: 0 });
@@ -1591,6 +1594,7 @@ program
         symbolFiles: result.symbolFiles,
         symbolRanks: result.symbolRanks,
         lastSyncCommit: result.lastSyncCommit,
+        lastSyncAt: result.lastSyncAt,
       });
       await saveState(STATE_FILE, state);
 

@@ -680,16 +680,59 @@ describe("cli contract", () => {
     };
     await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
 
+    const before = Date.now();
     const result = runCli(["sync", "--config", "config.yaml"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+    const after = Date.now();
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("1 changed files since");
     expect(result.stderr).toBe("");
 
     const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
-      agents: Record<string, { lastSyncCommit: string }>;
+      agents: Record<string, { lastSyncCommit: string; lastSyncAt: string | null }>;
     };
     expect(savedState.agents["my-app"].lastSyncCommit).toBe(headSha);
+    // Finding 6: `sync` must stamp lastSyncAt just like `watch` does, or
+    // `status` permanently shows "last sync at: never".
+    expect(savedState.agents["my-app"].lastSyncAt).not.toBeNull();
+    const stampedMs = new Date(savedState.agents["my-app"].lastSyncAt ?? "").getTime();
+    expect(stampedMs).toBeGreaterThanOrEqual(before);
+    expect(stampedMs).toBeLessThanOrEqual(after);
+  });
+
+  it("stamps lastSyncAt even when there are no changes to sync (finding 6)", { timeout: 30_000 }, async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-sync-no-changes-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    const headSha = await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: headSha,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["sync", "--config", "config.yaml"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("No changes to sync.");
+
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastSyncAt: string | null }>;
+    };
+    expect(savedState.agents["my-app"].lastSyncAt).not.toBeNull();
   });
 
   it("indexes a changed file well above the old 50 KB gate during sync (regression: sinatra base.rb)", { timeout: 30_000 }, async () => {
