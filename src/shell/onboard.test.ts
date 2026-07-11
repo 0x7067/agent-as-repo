@@ -41,4 +41,27 @@ describe("onboardAgent", () => {
     const call = (provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
     expect(call).toHaveLength(2);
   });
+
+  it("strips path/to/ template artifacts and drops recommendations for unindexed files", async () => {
+    const walkthrough = [
+      "## Top 10 files to read first",
+      "- `path/to/src/core/onboard.ts` — builds the onboarding prompt",
+      "- `lib/router/index.js` — internal router dispatch (doesn't exist)",
+      "- `src/cli.ts` — CLI entry point",
+    ].join("\n");
+    const provider = makeMockProvider({
+      sendMessage: vi.fn().mockResolvedValue(walkthrough),
+      listPassages: vi.fn().mockResolvedValue([
+        { id: "1", text: "FILE: src/core/onboard.ts\n\nexport function buildOnboardPrompt() {}" },
+        { id: "2", text: "FILE: src/cli.ts\n\n#!/usr/bin/env node" },
+      ]),
+    });
+
+    const result = await onboardAgent(provider, "my-app", "agent-abc");
+
+    expect(result).toContain("`src/core/onboard.ts`");
+    expect(result).not.toContain("path/to/");
+    expect(result).toContain("`src/cli.ts`");
+    expect(result).not.toContain("lib/router/index.js");
+  });
 });
