@@ -44,13 +44,15 @@ function truncateText(text: string, maxChars: number): {
 
 /**
  * Stable partition that sinks test/spec passages below implementation
- * passages while preserving relative order within each group. Applied before
- * budgeting so test files can't consume the per-file cap ahead of the real
- * implementation that answers most queries.
+ * passages while preserving relative order within each group.
  *
- * Demotes, never drops: "how is X tested?" still surfaces the tests, just
- * beneath the implementation. Passages with no `FILE:` header (unknown path)
- * are treated as non-test so manually inserted passages are never demoted.
+ * Apply this AFTER `budgetSearchResults`, not before: budgeting selects the
+ * result set by relevance (score + per-file diversity), then this reorders that
+ * selected set to present implementation first. Ordering here is presentation
+ * only — it never changes membership, so a highly relevant test is never
+ * evicted in favour of a less relevant implementation file (demotes, never
+ * drops). Passages with no `FILE:` header (unknown path) are treated as
+ * non-test so manually inserted passages are never demoted.
  */
 export function demoteTestResults<T extends SearchResult>(results: T[]): T[] {
   const implementation: T[] = [];

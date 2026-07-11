@@ -14,6 +14,21 @@ describe("isTestPath", () => {
     expect(isTestPath("app/models/user_test.rb")).toBe(true);
     expect(isTestPath("mymod/test_parser.py")).toBe(true);
     expect(isTestPath("mymod/parser_test.py")).toBe(true);
+    expect(isTestPath("mymod/conftest.py")).toBe(true);
+  });
+
+  it("recognizes JVM/.NET PascalCase test-class conventions (case-sensitive)", () => {
+    expect(isTestPath("src/main/java/com/x/UserServiceTest.java")).toBe(true);
+    expect(isTestPath("src/main/java/com/x/UserServiceTests.java")).toBe(true);
+    expect(isTestPath("Api/UserControllerTests.cs")).toBe(true);
+    expect(isTestPath("app/PaymentSpec.kt")).toBe(true);
+    // Lowercase "latest.java" must NOT match the PascalCase Test suffix.
+    expect(isTestPath("src/Latest.java")).toBe(false);
+    expect(isTestPath("src/manifest.cs")).toBe(false);
+  });
+
+  it("recognizes e2e naming", () => {
+    expect(isTestPath("e2e/checkout.e2e.ts")).toBe(true);
   });
 
   it("recognizes test/spec directory conventions", () => {

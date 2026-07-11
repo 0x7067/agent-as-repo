@@ -269,13 +269,17 @@ export function buildAskTools(params: BuildAskToolsParams): {
       Math.min(MAX_SEARCH_RESULTS * 2, topK * 2),
       pathPrefix === undefined || pathPrefix === "" ? undefined : { pathPrefix },
     );
-    // Demote test/spec passages below implementation before budgeting so tests
-    // can't consume the per-file cap ahead of the code that answers the query.
-    return JSON.stringify(budgetSearchResults(demoteTestResults(results), {
+    // Budget by relevance first (score + per-file diversity), THEN demote test
+    // passages to the tail of the selected set. Demoting after selection keeps
+    // membership relevance-driven — a highly relevant test is never evicted for
+    // a less relevant implementation file — while still presenting
+    // implementation ahead of tests.
+    const budgeted = budgetSearchResults(results, {
       limit: topK,
       maxTextChars: SEARCH_RESULT_TEXT_CHARS,
       maxPerFile: MAX_RESULTS_PER_FILE,
-    }));
+    });
+    return JSON.stringify(demoteTestResults(budgeted));
   };
   toolHandlers["memory_replace"] = async (args) => {
     const label = args["label"];

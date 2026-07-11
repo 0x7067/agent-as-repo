@@ -38,6 +38,33 @@ describe("demoteTestResults", () => {
   });
 });
 
+describe("demoteTestResults composed after budgetSearchResults (the wired pipeline)", () => {
+  it("never drops the most relevant result even when it is a test (limit=1)", () => {
+    // The exact regression: a near-perfect test hit and a barely relevant impl
+    // hit, with room for only one result. Demote-after-budget keeps the test;
+    // demote-before-budget would have returned the unrelated implementation.
+    const results = [
+      mk("test-hit", "src/core/chunker.test.ts", 0.95),
+      mk("impl-hit", "src/core/unrelated.ts", 0.5),
+    ];
+    const out = demoteTestResults(
+      budgetSearchResults(results, { limit: 1, maxTextChars: 200, maxPerFile: 2 }),
+    );
+    expect(out.map((r) => r.id)).toEqual(["test-hit"]);
+  });
+
+  it("still presents implementation ahead of a test that was also selected", () => {
+    const results = [
+      mk("test-hit", "src/a.test.ts", 0.95),
+      mk("impl-hit", "src/a.ts", 0.9),
+    ];
+    const out = demoteTestResults(
+      budgetSearchResults(results, { limit: 2, maxTextChars: 200, maxPerFile: 2 }),
+    );
+    expect(out.map((r) => r.id)).toEqual(["impl-hit", "test-hit"]);
+  });
+});
+
 describe("budgetSearchResults", () => {
   it("limits result count and truncates passage text", () => {
     const results = Array.from({ length: 8 }, (_, index) => ({
