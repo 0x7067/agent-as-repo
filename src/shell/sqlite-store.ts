@@ -11,7 +11,11 @@ import type {
 } from "../ports/passage-store.js";
 import { openVectorDatabase, type VectorDatabase } from "./sqlite-native.js";
 
-export type EmbedTexts = (texts: string[]) => Promise<number[][]>;
+/** Retrieval task an embedding is computed for; lets asymmetric models (e.g.
+ * nomic-embed) prefix documents and queries differently. */
+export type EmbedTask = "document" | "query";
+
+export type EmbedTexts = (texts: string[], task: EmbedTask) => Promise<number[][]>;
 
 export interface SqlitePassageStoreOptions {
   /** SQLite file location (parent directories are created as needed). */
@@ -165,7 +169,7 @@ export class SqlitePassageStore implements PassageStore {
   private async writeBatch(agentId: string, batch: PassageWriteEntry[]): Promise<void> {
     if (batch.length === 0) return;
 
-    const vectors = await this.embedTexts(batch.map((entry) => entry.text));
+    const vectors = await this.embedTexts(batch.map((entry) => entry.text), "document");
     const rows = batch.map((entry, index) => {
       const vector = vectors.at(index);
       if (vector === undefined) {
@@ -251,7 +255,7 @@ export class SqlitePassageStore implements PassageStore {
     const countRow = this.db.prepare(countSql).get(...countArgs) as { count: number };
     if (countRow.count === 0) return [];
 
-    const vectors = await this.embedTexts([query]);
+    const vectors = await this.embedTexts([query], "query");
     const vector = vectors.at(0);
     if (vector === undefined) {
       throw new Error("Embedding endpoint returned no vector for the search query");

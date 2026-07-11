@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { SqlitePassageStore, type EmbedTexts } from "./sqlite-store.js";
+import { SqlitePassageStore, type EmbedTexts, type EmbedTask } from "./sqlite-store.js";
 import { openVectorDatabase } from "./sqlite-native.js";
 
 const MANIFEST = {
@@ -13,7 +13,7 @@ const MANIFEST = {
   createdAt: "2026-07-04T00:00:00.000Z",
 };
 
-function constantEmbed(dimension: number): (texts: string[]) => Promise<number[][]> {
+function constantEmbed(dimension: number): EmbedTexts {
   return (texts) =>
     Promise.resolve(texts.map((text) => {
       const vector = Array.from({ length: dimension }, () => 0);
@@ -29,7 +29,7 @@ function fakeVector(seed: number): number[] {
 }
 
 function embedByIndex() {
-  return vi.fn((texts: string[]) => Promise.resolve(texts.map((_, i) => fakeVector(i))));
+  return vi.fn((texts: string[], _task: EmbedTask) => Promise.resolve(texts.map((_, i) => fakeVector(i))));
 }
 
 async function makeBatchStore(dir: string, name: string, embed: EmbedTexts): Promise<SqlitePassageStore> {
@@ -106,6 +106,19 @@ describe("SqlitePassageStore", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("embeds passages as documents and the search query as a query", async () => {
+    const embedSpy = embedByIndex();
+    const taskStore = await makeBatchStore(dir, "task.db", embedSpy);
+    await taskStore.writePassage("repo-a", "p-1", "some text");
+    await taskStore.semanticSearch("repo-a", "some text", 5);
+
+    const tasks = embedSpy.mock.calls.map((call) => call[1]);
+    expect(tasks).toContain("document");
+    expect(tasks).toContain("query");
+    expect(tasks.at(-1)).toBe("query");
+    taskStore.close();
   });
 
   it("scopes semanticSearch to the requested agent", async () => {
@@ -301,6 +314,7 @@ describe("SqlitePassageStore", () => {
 
       expect(embedSpy).toHaveBeenCalledTimes(1);
       expect(embedSpy.mock.calls[0][0]).toHaveLength(5);
+      expect(embedSpy.mock.calls[0][1]).toBe("document");
       expect(await batchStore.listPassages("repo-a")).toHaveLength(5);
       batchStore.close();
     });
