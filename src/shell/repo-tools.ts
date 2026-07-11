@@ -4,7 +4,7 @@ import { buildRipgrepArgs } from "../core/ripgrep-args.js";
 import { resolveSafeRepoPath } from "../core/repo-path.js";
 import { windowText } from "../core/text-window.js";
 import { repoFilterOptions, shouldIncludeFile } from "../core/filter.js";
-import { MAX_FILE_SIZE_KB, type RepoConfig } from "../core/types.js";
+import { MAX_INDEXABLE_FILE_SIZE_KB, type RepoConfig } from "../core/types.js";
 import type { GrepRunnerResult, RepoAccessPort } from "../ports/repo-access.js";
 import type { FileSystemPort } from "../ports/filesystem.js";
 import { nodeFileSystem } from "./adapters/node-filesystem.js";
@@ -227,9 +227,10 @@ export async function handleReadFile(
   try {
     const stat = await access.fs.stat(absPath);
     const sizeKb = stat.size / 1024;
-    if (sizeKb > MAX_FILE_SIZE_KB) {
+    if (sizeKb > MAX_INDEXABLE_FILE_SIZE_KB) {
       return toolError(
-        `file exceeds ${String(MAX_FILE_SIZE_KB)} KB size limit (${sizeKb.toFixed(1)} KB)`,
+        `file is too large to read directly (${sizeKb.toFixed(1)} KB, hard cap ${String(MAX_INDEXABLE_FILE_SIZE_KB)} KB). ` +
+        `Use grep_repo or archival_memory_search to locate the relevant section, then re-read with a narrower start_line/end_line range.`,
       );
     }
     const content = await access.fs.readFile(absPath, "utf8");

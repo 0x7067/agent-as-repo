@@ -62,7 +62,7 @@ import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
 import { generateMcpEntry, checkMcpEntry, resolveMcpLaunchSpec, type McpLaunchSpec, type McpProviderConfig } from "./core/mcp-config.js";
 import { buildPostSetupNextSteps, getSetupMode, resolveEffectiveSetupMode } from "./core/setup.js";
-import { MAX_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Chunk, type ChunkingStrategy, type Config, type FileInfo, type RepoConfig, type SymbolFileMap } from "./core/types.js";
+import { MAX_INDEXABLE_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Chunk, type ChunkingStrategy, type Config, type FileInfo, type RepoConfig, type SkippedFile, type SymbolFileMap } from "./core/types.js";
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
 import type { LocalRuntimeOptions } from "./shell/local-provider.js";
 import type { SymbolLookupPort } from "./shell/agent-tools.js";
@@ -1208,6 +1208,7 @@ program
       let indexMs = 0;
       let bootstrapMs = 0;
       let filesFound = 0;
+      let filesSkipped = 0;
       let chunksLoaded = 0;
       let chunksFailed = 0;
 
@@ -1244,9 +1245,14 @@ program
           }
           await provider.purgePassages?.(agentId);
           log(`  Collecting files from ${repoConfig.path}...`);
-          const files = await collectFiles(repoConfig);
+          const skippedFiles: SkippedFile[] = [];
+          const files = await collectFiles(repoConfig, undefined, undefined, (skip) => skippedFiles.push(skip));
           filesFound = files.length;
+          filesSkipped = skippedFiles.length;
           log(`  Found ${String(files.length)} files`);
+          if (skippedFiles.length > 0) {
+            warn(`  ${String(skippedFiles.length)} files skipped (> ${String(MAX_INDEXABLE_FILE_SIZE_KB)} KB): ${skippedFiles.map((f) => `${f.path} (${f.sizeKb.toFixed(1)} KB)`).join(", ")}`);
+          }
 
           const { chunks, symbolFiles } = buildBulkIndexArtifacts(files, chunkingStrategy);
           log(`  Loading ${String(chunks.length)} passages...`);
@@ -1317,6 +1323,7 @@ program
           mode,
           agentId,
           filesFound,
+          filesSkipped,
           chunksLoaded,
           chunksFailed,
           createMs,
@@ -1557,7 +1564,7 @@ program
           }
         },
         headCommit,
-        maxFileSizeKb: MAX_FILE_SIZE_KB,
+        maxFileSizeKb: MAX_INDEXABLE_FILE_SIZE_KB,
         ...(pathAliases === undefined ? {} : { pathAliases }),
         ...(isTTY ? {
           onProgress: (completed: number, total: number, filePath: string) => {

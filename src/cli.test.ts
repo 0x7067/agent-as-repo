@@ -692,6 +692,46 @@ describe("cli contract", () => {
     expect(savedState.agents["my-app"].lastSyncCommit).toBe(headSha);
   });
 
+  it("indexes a changed file well above the old 50 KB gate during sync (regression: sinatra base.rb)", { timeout: 30_000 }, async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-sync-large-file-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    const checkpointSha = await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    // 60 KB: over the old 50 KB gate, well under the new 1024 KB hard cap.
+    const largeContent = `export const big = "${"x".repeat(60 * 1024)}";\n`;
+    await commitFile(repoDir, "big.ts", largeContent, "add big.ts");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          fileHashes: {},
+          lastBootstrap: null,
+          lastSyncCommit: checkpointSha,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["sync", "--config", "config.yaml"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { fileHashes?: Record<string, string>; passages?: Record<string, string[]> }>;
+    };
+    // Previously the 50 KB gate dropped this file's passages/hash entirely.
+    expect(savedState.agents["my-app"].fileHashes).toHaveProperty("big.ts");
+    expect(savedState.agents["my-app"].passages?.["big.ts"]?.length).toBeGreaterThan(0);
+  });
+
   it("scopes incremental sync paths to a configured monorepo base_path", { timeout: 30_000 }, async () => {
     const cwd = await makeWorkspace("repo-expert-cli-sync-base-path-");
     const repoDir = path.join(cwd, "repo");
@@ -1836,5 +1876,48 @@ describe("cli contract", () => {
     expect(textResult.status).toBe(1);
     expect(textResult.stdout).toContain("drift detected");
     expect(textResult.stdout.toLowerCase()).toContain("missing from store registry");
+  });
+
+  it("indexes a file above the old 50 KB gate and reports files skipped over the new hard cap (--json)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-large-file-json-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    // 60 KB: over the old 50 KB gate, under the new 1024 KB hard cap — must be indexed.
+    await writeWorkspaceFile(path.join(repoDir, "big.ts"), `export const big = "${"x".repeat(60 * 1024)}";\n`, "utf8");
+    // 1100 KB: over the new hard cap — must be skipped, but visibly so.
+    await writeWorkspaceFile(path.join(repoDir, "huge.ts"), `export const huge = "${"x".repeat(1100 * 1024)}";\n`, "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(
+      ["setup", "--config", "config.yaml", "--json", "--no-bootstrap"],
+      cwd,
+      { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" },
+    );
+
+    expect(result.status).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      results: Array<{ filesFound: number; filesSkipped: number }>;
+    };
+    expect(payload.results[0].filesFound).toBe(1);
+    expect(payload.results[0].filesSkipped).toBe(1);
+  });
+
+  it("prints a visible warning naming files skipped over the new hard cap (non-JSON)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-large-file-warn-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    await writeWorkspaceFile(path.join(repoDir, "huge.ts"), `export const huge = "${"x".repeat(1100 * 1024)}";\n`, "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(
+      ["setup", "--config", "config.yaml", "--no-bootstrap"],
+      cwd,
+      { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("huge.ts");
+    expect(result.stderr.toLowerCase()).toContain("skipped");
   });
 });

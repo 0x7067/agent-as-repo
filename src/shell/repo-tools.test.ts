@@ -134,15 +134,38 @@ describe("repo-tools handlers", () => {
     expect(result.truncated).toBe(true);
   });
 
-  it("read_file rejects oversized files", async () => {
+  it("read_file reads a file well above the old 50 KB gate (regression: sinatra base.rb)", async () => {
+    // 67 KB, like lib/sinatra/base.rb — previously refused outright.
+    const content = "x".repeat(67 * 1024);
     const fs = makeFakeFs({
-      stat: vi.fn().mockResolvedValue({ size: 100_000, isDirectory: () => false }),
+      readFile: vi.fn().mockResolvedValue(content),
+      stat: vi.fn().mockResolvedValue({ size: content.length, isDirectory: () => false }),
+    });
+    const access = createRepoAccess({ myrepo: REPO }, { fs, grep: vi.fn() });
+    const result = JSON.parse(await handleReadFile(access, "myrepo", { path: "lib/sinatra/base.rb" })) as {
+      content: string;
+      truncated: boolean;
+      error?: string;
+    };
+    expect(result.error).toBeUndefined();
+    // Still bounded by the per-response char/line budget, windowed with a
+    // truncation marker rather than refused outright.
+    expect(result.content.length).toBeGreaterThan(0);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("read_file rejects files over the new hard cap with actionable guidance", async () => {
+    const fs = makeFakeFs({
+      // Well above MAX_INDEXABLE_FILE_SIZE_KB (1024 KB)
+      stat: vi.fn().mockResolvedValue({ size: 2_000_000, isDirectory: () => false }),
     });
     const access = createRepoAccess({ myrepo: REPO }, { fs, grep: vi.fn() });
     const result = JSON.parse(await handleReadFile(access, "myrepo", { path: "big.ts" })) as {
       error: string;
     };
-    expect(result.error).toMatch(/size limit/i);
+    expect(result.error).toMatch(/too large/i);
+    expect(result.error).toMatch(/grep_repo/i);
+    expect(result.error).toMatch(/start_line/i);
   });
 
   it("returns a clear error when the agent has no repo config", () => {

@@ -180,13 +180,12 @@ describe("collectFiles", () => {
     );
   });
 
-  it("includes files exactly at maxFileSizeKb limit", async () => {
-    // 1 byte = ~0.001 KB; we want a file exactly at boundary
+  it("includes files exactly at the hard size cap (MAX_INDEXABLE_FILE_SIZE_KB)", async () => {
     const mockFs: FileSystemPort = {
       readFile: () => Promise.resolve("content"),
       writeFile: () => Promise.resolve(),
-      // File size exactly at maxFileSizeKb (50 KB)
-      stat: () => Promise.resolve({ size: 50 * 1024, isDirectory: () => false }),
+      // File size exactly at MAX_INDEXABLE_FILE_SIZE_KB (1024 KB)
+      stat: () => Promise.resolve({ size: 1024 * 1024, isDirectory: () => false }),
       access: () => Promise.resolve(),
       rename: () => Promise.resolve(),
       copyFile: () => Promise.resolve(),
@@ -195,17 +194,17 @@ describe("collectFiles", () => {
 
     const config = makeConfig(FAKE_REPO_PATH);
     const files = await collectFiles(config, mockFs);
-    // sizeKb === maxFileSizeKb (50 <= 50) → should be included
+    // sizeKb === cap (1024 <= 1024) → should be included
     expect(files).toHaveLength(1);
     expect(files[0].path).toBe("src/boundary.ts");
   });
 
-  it("excludes files just above maxFileSizeKb limit", async () => {
+  it("excludes files just above the hard size cap and reports them via onSkip", async () => {
     const mockFs: FileSystemPort = {
       readFile: () => Promise.resolve("content"),
       writeFile: () => Promise.resolve(),
-      // File size just over 50 KB
-      stat: () => Promise.resolve({ size: 50 * 1024 + 1, isDirectory: () => false }),
+      // File size just over 1024 KB
+      stat: () => Promise.resolve({ size: 1024 * 1024 + 1024, isDirectory: () => false }),
       access: () => Promise.resolve(),
       rename: () => Promise.resolve(),
       copyFile: () => Promise.resolve(),
@@ -213,9 +212,34 @@ describe("collectFiles", () => {
     };
 
     const config = makeConfig(FAKE_REPO_PATH);
-    const files = await collectFiles(config, mockFs);
-    // sizeKb > maxFileSizeKb → should be excluded
+    const skipped: { path: string; sizeKb: number }[] = [];
+    const files = await collectFiles(config, mockFs, undefined, (skip) => skipped.push(skip));
+    // sizeKb > cap → should be excluded from the indexable file list...
     expect(files).toHaveLength(0);
+    // ...but still reported so callers can surface "N files skipped (size)".
+    expect(skipped).toEqual([{ path: "src/too-big.ts", sizeKb: 1025 }]);
+  });
+
+  it("indexes a file well above the old 50 KB gate but under the new hard cap (regression: sinatra base.rb)", async () => {
+    // The bug this guards against: a 67 KB file (like lib/sinatra/base.rb)
+    // used to get silently excluded by a whole-file pre-gate at 50 KB, even
+    // though chunking already splits files into ~2 KB pieces.
+    const mockFs: FileSystemPort = {
+      readFile: () => Promise.resolve("x".repeat(67 * 1024)),
+      writeFile: () => Promise.resolve(),
+      stat: () => Promise.resolve({ size: 67 * 1024, isDirectory: () => false }),
+      access: () => Promise.resolve(),
+      rename: () => Promise.resolve(),
+      copyFile: () => Promise.resolve(),
+      glob: () => Promise.resolve(["lib/sinatra/base.rb"]),
+    };
+
+    const config = makeConfig(FAKE_REPO_PATH, { extensions: [".rb"] });
+    const skipped: { path: string; sizeKb: number }[] = [];
+    const files = await collectFiles(config, mockFs, undefined, (skip) => skipped.push(skip));
+    expect(files).toHaveLength(1);
+    expect(files[0].path).toBe("lib/sinatra/base.rb");
+    expect(skipped).toEqual([]);
   });
 
   it("skips a broken symlink instead of aborting collection for the whole repo", async () => {

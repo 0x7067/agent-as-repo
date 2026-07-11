@@ -1,4 +1,4 @@
-import { MAX_FILE_SIZE_KB, type RepoConfig } from "./types.js";
+import { MAX_INDEXABLE_FILE_SIZE_KB, type RepoConfig } from "./types.js";
 
 export interface FilterOptions {
   extensions: string[];
@@ -11,7 +11,7 @@ export function repoFilterOptions(repo: Pick<RepoConfig, "extensions" | "ignoreD
   return {
     extensions: repo.extensions,
     ignoreDirs: repo.ignoreDirs,
-    maxFileSizeKb: MAX_FILE_SIZE_KB,
+    maxFileSizeKb: MAX_INDEXABLE_FILE_SIZE_KB,
   };
 }
 
