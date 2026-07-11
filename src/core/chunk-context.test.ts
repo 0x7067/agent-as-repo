@@ -111,4 +111,38 @@ describe("enrichChunks", () => {
     );
     expect(enriched.every((c) => c.text.includes("syncRepo"))).toBe(true);
   });
+
+  it("skips enrichment when the context would push the chunk past the size budget", () => {
+    const refs = [importRef("react", [{ local: "useState", imported: "useState" }])];
+    const body = "x".repeat(1995);
+    const original = `FILE: src/foo.ts\n\n${body}`; // ~2013 chars, already near the cap
+    const [enriched] = enrichChunks([chunk(original)], refs, 2000);
+    // No room for the context line: chunk returned unchanged, never ballooned.
+    expect(enriched.text).toBe(original);
+  });
+
+  it("keeps every enriched chunk within the size budget", () => {
+    const refs = Array.from({ length: 40 }, (_, i) =>
+      importRef(`./m${String(i)}`, [{ local: `longSymbolName${String(i)}`, imported: `longSymbolName${String(i)}` }]),
+    );
+    const chunks = [chunk(`FILE: src/foo.ts\n\n${"y".repeat(1850)}`)];
+    const [enriched] = enrichChunks(chunks, refs, 2000);
+    expect(enriched.text.length).toBeLessThanOrEqual(2000);
+  });
+
+  it("leaves a passage without a FILE header untouched (self-enforced contract)", () => {
+    const refs = [importRef("react", [{ local: "useState", imported: "useState" }])];
+    expect(enrichChunks([chunk("")], refs)[0]?.text).toBe("");
+    expect(enrichChunks([chunk("no header here\n\nbody")], refs)[0]?.text).toBe(
+      "no header here\n\nbody",
+    );
+  });
+
+  it("normalizes backslash module specifiers to a clean basename", () => {
+    const context = buildFileContext([
+      importRef(String.raw`..\utils\helpers.js`, [{ local: "help", imported: "help" }]),
+    ]);
+    expect(context).toContain("helpers");
+    expect(context).not.toContain("\\");
+  });
 });

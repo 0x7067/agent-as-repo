@@ -29,6 +29,7 @@ import { SqliteBlockStorage } from "./shell/sqlite-block-storage.js";
 import { resolveStoreDbPath } from "./shell/repo-expert-paths.js";
 import { createEmbedder } from "./shell/embedder-factory.js";
 import { selectChunkingStrategy } from "./core/chunker.js";
+import { enrichChunks } from "./core/chunk-context.js";
 import { hashFileContent } from "./core/content-hash.js";
 import {
   extractSymbolsAndRefsFromFile,
@@ -60,7 +61,7 @@ import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
 import { generateMcpEntry, checkMcpEntry, resolveMcpLaunchSpec, type McpLaunchSpec, type McpProviderConfig } from "./core/mcp-config.js";
 import { buildPostSetupNextSteps, getSetupMode } from "./core/setup.js";
-import { MAX_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Config, type FileInfo, type RepoConfig, type SymbolFileMap } from "./core/types.js";
+import { MAX_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Chunk, type ChunkingStrategy, type Config, type FileInfo, type RepoConfig, type SymbolFileMap } from "./core/types.js";
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
 import type { LocalRuntimeOptions } from "./shell/local-provider.js";
 import type { SymbolLookupPort } from "./shell/agent-tools.js";
@@ -248,14 +249,25 @@ function createProvider(config: Config, symbolLookup?: SymbolLookupPort): AgentP
   );
 }
 
-function buildSymbolFilesFromCollected(files: FileInfo[]): SymbolFileMap {
+/**
+ * Bulk-index artifacts for a fresh setup / full reindex, built from a single
+ * parse per file: enriched chunks (same file-local import/export context the
+ * incremental sync path applies, so setup produces a fully enriched index) plus
+ * the symbol files for the repo map.
+ */
+export function buildBulkIndexArtifacts(
+  files: FileInfo[],
+  chunkingStrategy: ChunkingStrategy,
+): { chunks: Chunk[]; symbolFiles: SymbolFileMap } {
+  const chunks: Chunk[] = [];
   const symbolFiles: SymbolFileMap = {};
   for (const file of files) {
     const { spans, refs } = extractSymbolsAndRefsFromFile(file);
+    chunks.push(...enrichChunks(chunkingStrategy(file), refs));
     if (spans.length === 0 && refs.length === 0) continue;
     symbolFiles[file.path] = toStoredSymbolFile(file.path, file.content, spans, refs);
   }
-  return symbolFiles;
+  return { chunks, symbolFiles };
 }
 
 class FakeProvider implements AgentProvider {
@@ -1151,7 +1163,7 @@ program
           filesFound = files.length;
           log(`  Found ${String(files.length)} files`);
 
-          const chunks = files.flatMap((f) => chunkingStrategy(f));
+          const { chunks, symbolFiles } = buildBulkIndexArtifacts(files, chunkingStrategy);
           chunksLoaded = chunks.length;
           log(`  Loading ${String(chunks.length)} passages...`);
           const loadResult = await withRetry(
@@ -1171,7 +1183,6 @@ program
           const fileHashes = Object.fromEntries(
             files.map((file) => [file.path, hashFileContent(file.content)]),
           );
-          const symbolFiles = buildSymbolFilesFromCollected(files);
           const pathAliases = loadPathAliasesFromRepo(repoConfig.path, {
             ...(repoConfig.basePath === undefined ? {} : { basePath: repoConfig.basePath }),
           });

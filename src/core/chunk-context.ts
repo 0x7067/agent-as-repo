@@ -1,4 +1,4 @@
-import type { Chunk } from "./types.js";
+import { FILE_PREFIX, type Chunk } from "./types.js";
 import { filterRefsByKind, type SymbolRef } from "./symbol-refs.js";
 
 /**
@@ -18,14 +18,16 @@ import { filterRefsByKind, type SymbolRef } from "./symbol-refs.js";
  */
 
 const CONTEXT_LABEL = "CONTEXT | ";
-/** Hard cap so enrichment never balloons a chunk past the passage size target. */
+/** Upper bound on the context line's own length (not the enriched total). */
 const MAX_CONTEXT_CHARS = 300;
+/** Default per-chunk size budget; enrichment stays within it (see `enrichChunks`). */
+const DEFAULT_MAX_CHUNK_CHARS = 2000;
 /** Cap names per group to keep import-heavy files from dominating the summary. */
 const MAX_NAMES_PER_GROUP = 24;
 
 /** Bare module name for topical signal: "./auth/session" → "session", "react" → "react". */
 function moduleBasename(moduleSpecifier: string): string {
-  const unquoted = moduleSpecifier.replaceAll(/^['"]|['"]$/g, "");
+  const unquoted = moduleSpecifier.replaceAll(/^['"]|['"]$/g, "").replaceAll("\\", "/");
   const afterSlash = unquoted.slice(unquoted.lastIndexOf("/") + 1);
   return afterSlash.replace(/\.[a-z0-9]+$/i, "");
 }
@@ -84,8 +86,12 @@ export function buildFileContext(refs: readonly SymbolRef[]): string | null {
  * Insert `context` as the second line of a chunk, keeping the `FILE:` header as
  * the strict first line. Downstream path extraction (`extractSourcePath`,
  * `passageFilePath`) only reads line one, so the header contract is preserved.
+ * Self-enforces that contract: a chunk whose first line is not a `FILE:` header
+ * (empty/degenerate input) is returned untouched rather than gaining a
+ * non-header first line.
  */
 function insertContextLine(text: string, context: string): string {
+  if (!text.startsWith(FILE_PREFIX)) return text;
   const newlineIndex = text.indexOf("\n");
   if (newlineIndex === -1) return `${text}\n${context}`;
   const header = text.slice(0, newlineIndex);
@@ -97,12 +103,21 @@ function insertContextLine(text: string, context: string): string {
  * Prepend the file-local context summary to every chunk of a file. Returns the
  * chunks unchanged when there is nothing to summarize (non-JS/TS/Py/Go files, or
  * files with no imports/exports).
+ *
+ * Enrichment is additive on top of already-packed chunks, so a chunk that has
+ * no room for the context line within `maxChunkChars` is left unenriched rather
+ * than pushed past the size budget — the passage size invariant always holds.
  */
-export function enrichChunks(chunks: Chunk[], refs: readonly SymbolRef[]): Chunk[] {
+export function enrichChunks(
+  chunks: Chunk[],
+  refs: readonly SymbolRef[],
+  maxChunkChars = DEFAULT_MAX_CHUNK_CHARS,
+): Chunk[] {
   const context = buildFileContext(refs);
   if (context === null) return chunks;
-  return chunks.map((chunk) => ({
-    ...chunk,
-    text: insertContextLine(chunk.text, context),
-  }));
+  return chunks.map((chunk) => {
+    // +1 for the newline `insertContextLine` adds between header and context.
+    if (chunk.text.length + context.length + 1 > maxChunkChars) return chunk;
+    return { ...chunk, text: insertContextLine(chunk.text, context) };
+  });
 }
