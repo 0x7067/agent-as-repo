@@ -1,6 +1,6 @@
 import type { PassageStore } from "../ports/passage-store.js";
 import type { RepoAccessPort } from "../ports/repo-access.js";
-import { budgetSearchResults } from "../core/search-result-budget.js";
+import { budgetSearchResults, demoteTestResults } from "../core/search-result-budget.js";
 import type { FindDefinitionsOptions } from "../core/symbol-index.js";
 import type { RankedSymbolHit } from "../core/symbol-store.js";
 import type { SymbolKind } from "../core/tree-sitter-symbols.js";
@@ -269,7 +269,9 @@ export function buildAskTools(params: BuildAskToolsParams): {
       Math.min(MAX_SEARCH_RESULTS * 2, topK * 2),
       pathPrefix === undefined || pathPrefix === "" ? undefined : { pathPrefix },
     );
-    return JSON.stringify(budgetSearchResults(results, {
+    // Demote test/spec passages below implementation before budgeting so tests
+    // can't consume the per-file cap ahead of the code that answers the query.
+    return JSON.stringify(budgetSearchResults(demoteTestResults(results), {
       limit: topK,
       maxTextChars: SEARCH_RESULT_TEXT_CHARS,
       maxPerFile: MAX_RESULTS_PER_FILE,
