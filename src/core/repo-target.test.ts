@@ -3,11 +3,11 @@ import { resolveRepoTarget } from "./repo-target.js";
 
 describe("resolveRepoTarget", () => {
   it("returns no repo when neither positional nor flag are given", () => {
-    expect(resolveRepoTarget(undefined, undefined)).toEqual({});
+    expect(resolveRepoTarget()).toEqual({});
   });
 
   it("uses the positional argument when only it is given", () => {
-    expect(resolveRepoTarget("sinatra", undefined)).toEqual({ repo: "sinatra" });
+    expect(resolveRepoTarget("sinatra")).toEqual({ repo: "sinatra" });
   });
 
   it("uses the --repo flag when only it is given", () => {

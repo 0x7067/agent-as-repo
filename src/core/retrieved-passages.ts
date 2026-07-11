@@ -32,11 +32,13 @@ export function formatRetrievedPassages(passages: RetrievedPassageView[]): strin
   if (passages.length === 0) return "Retrieved passages: none.";
 
   const lines = [`Retrieved passages (${String(passages.length)}):`];
-  passages.forEach((passage, index) => {
+  for (const [index, passage] of passages.entries()) {
     const filePath = extractPassagePath(passage.text) ?? "(unknown file)";
     const scoreSuffix = passage.score === undefined ? "" : ` score=${passage.score.toFixed(3)}`;
-    lines.push(`  ${String(index + 1)}. ${filePath}${scoreSuffix}`);
-    lines.push(`     ${extractPassageSnippet(passage.text)}`);
-  });
+    lines.push(
+      `  ${String(index + 1)}. ${filePath}${scoreSuffix}`,
+      `     ${extractPassageSnippet(passage.text)}`,
+    );
+  }
   return lines.join("\n");
 }

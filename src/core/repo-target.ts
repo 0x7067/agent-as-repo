@@ -12,7 +12,7 @@ export interface RepoTargetResult {
  * disagreeing values are a user error worth failing on rather than silently
  * preferring one.
  */
-export function resolveRepoTarget(positional: string | undefined, flag: string | undefined): RepoTargetResult {
+export function resolveRepoTarget(positional?: string, flag?: string): RepoTargetResult {
   if (positional !== undefined && flag !== undefined && positional !== flag) {
     return {
       error: `Conflicting repo targets: positional "${positional}" and --repo "${flag}" — pass only one.`,
