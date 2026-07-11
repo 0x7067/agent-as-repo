@@ -34,10 +34,6 @@ function makeConfig(repoPath: string, overrides?: Partial<RepoConfig>): RepoConf
     description: "test repo",
     extensions: [".ts", ".js"],
     ignoreDirs: ["node_modules", ".git"],
-    tags: [],
-    maxFileSizeKb: 50,
-    memoryBlockLimit: 5000,
-    bootstrapOnCreate: true,
     ...overrides,
   };
 }
@@ -197,7 +193,7 @@ describe("collectFiles", () => {
       glob: () => Promise.resolve(["src/boundary.ts"]),
     };
 
-    const config = makeConfig(FAKE_REPO_PATH, { maxFileSizeKb: 50 });
+    const config = makeConfig(FAKE_REPO_PATH);
     const files = await collectFiles(config, mockFs);
     // sizeKb === maxFileSizeKb (50 <= 50) → should be included
     expect(files).toHaveLength(1);
@@ -216,7 +212,7 @@ describe("collectFiles", () => {
       glob: () => Promise.resolve(["src/too-big.ts"]),
     };
 
-    const config = makeConfig(FAKE_REPO_PATH, { maxFileSizeKb: 50 });
+    const config = makeConfig(FAKE_REPO_PATH);
     const files = await collectFiles(config, mockFs);
     // sizeKb > maxFileSizeKb → should be excluded
     expect(files).toHaveLength(0);

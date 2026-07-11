@@ -239,7 +239,7 @@ describe("parseConfig", () => {
   });
 
   it("rejects unknown top-level keys (typo protection)", () => {
-    const configErr = parseConfigError({ ...validRaw, defaults: { chunking: "raw" } });
+    const configErr = parseConfigError({ ...validRaw, defaults: {} });
     expect(configErr.issues.some((i) => i.includes("defaults"))).toBe(true);
   });
 
