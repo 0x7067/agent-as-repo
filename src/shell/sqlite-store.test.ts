@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { SqlitePassageStore, type EmbedTexts, type EmbedTask } from "./sqlite-store.js";
 import { openVectorDatabase } from "./sqlite-native.js";
+import { stubEmbed } from "./__test__/stub-embedder.js";
 
 const MANIFEST = {
   agentId: "repo-a",
@@ -119,6 +120,45 @@ describe("SqlitePassageStore", () => {
     expect(tasks).toContain("query");
     expect(tasks.at(-1)).toBe("query");
     taskStore.close();
+  });
+
+  describe("searchLegs (leg-isolated diagnostic)", () => {
+    let legStore: SqlitePassageStore;
+
+    beforeEach(async () => {
+      legStore = new SqlitePassageStore({ dbPath: path.join(dir, "legs.db"), embed: stubEmbed });
+      await legStore.initAgent("repo-a", MANIFEST);
+      await legStore.writePassage("repo-a", "p-auth", "authentication login session token verification");
+      await legStore.writePassage("repo-a", "p-db", "database schema migration table index");
+      await legStore.writePassage("repo-a", "p-ui", "button component render layout style");
+    });
+
+    afterEach(() => {
+      legStore.close();
+    });
+
+    it("fused leg ranking equals semanticSearch ranking (no drift)", async () => {
+      const query = "authentication login session token verification";
+      const { fused } = await legStore.searchLegs("repo-a", query, 3);
+      const production = await legStore.semanticSearch("repo-a", query, 3);
+
+      expect(fused.slice(0, 3).map((r) => r.id)).toEqual(production.map((r) => r.id));
+    });
+
+    it("returns the vector and lexical legs separately for a term query", async () => {
+      const { vector, lexical } = await legStore.searchLegs("repo-a", "database schema", 5);
+
+      expect(vector.length).toBeGreaterThan(0);
+      expect(lexical.map((r) => r.id)).toContain("p-db");
+    });
+
+    it("leaves the lexical leg empty for a no-term (punctuation) query", async () => {
+      const { vector, lexical } = await legStore.searchLegs("repo-a", "!!! ??? ---", 5);
+
+      expect(lexical).toEqual([]);
+      // Vector leg still answers a no-term query, matching semanticSearch.
+      expect(vector.length).toBeGreaterThan(0);
+    });
   });
 
   it("scopes semanticSearch to the requested agent", async () => {

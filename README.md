@@ -135,6 +135,7 @@ Key points:
 ```bash
 pnpm install              # install dependencies
 pnpm test                 # run all tests (vitest)
+pnpm bench                # retrieval-quality benchmark (deterministic tier + gates)
 pnpm repo-expert --help   # CLI entry point
 pnpm mcp-server           # start MCP server (stdio)
 ```

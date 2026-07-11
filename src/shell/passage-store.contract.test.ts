@@ -4,11 +4,13 @@ import path from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { PassageStore } from "../ports/passage-store.js";
 import { SqlitePassageStore } from "./sqlite-store.js";
+import { stubEmbed } from "./__test__/stub-embedder.js";
 
 /**
  * Contract tests: every PassageStore implementation must satisfy these.
- * The sqlite implementation runs against a real temp-file DB with a
- * deterministic fake embedder; new implementations join IMPLEMENTATIONS.
+ * The sqlite implementation runs against a real temp-file DB with the shared
+ * deterministic stub embedder (`stubEmbed`); new implementations join
+ * IMPLEMENTATIONS.
  */
 
 const MANIFEST = {
@@ -18,33 +20,6 @@ const MANIFEST = {
   tags: ["repo-expert"],
   createdAt: "2026-07-04T00:00:00.000Z",
 };
-
-function tokenize(text: string): string[] {
-  // Truncating to 4 chars makes the embedder lossy on rare identifiers
-  // (e.g. "handleAuthCallback" ≈ "handles"), like small embedding models —
-  // the failure mode the lexical leg of hybrid search must compensate for.
-  return text
-    .toLowerCase()
-    .split(/\W+/)
-    .filter(Boolean)
-    .map((word) => word.slice(0, 4));
-}
-
-/** Deterministic bag-of-words embedding: same text → same unit vector. */
-function fakeEmbed(texts: string[]): Promise<number[][]> {
-  const vectors = texts.map((text) => {
-    const vector = Array.from({ length: 64 }, () => 0);
-    for (const word of tokenize(text)) {
-      let hash = 0;
-      for (const ch of word) hash = (hash * 31 + (ch.codePointAt(0) ?? 0)) >>> 0;
-      const slot = hash % vector.length;
-      vector[slot] = (vector[slot] ?? 0) + 1;
-    }
-    const norm = Math.hypot(...vector) || 1;
-    return vector.map((component) => component / norm);
-  });
-  return Promise.resolve(vectors);
-}
 
 interface StoreContext {
   store: PassageStore;
@@ -58,7 +33,7 @@ const IMPLEMENTATIONS: Array<{ name: string; create: () => StoreContext }> = [
       const dir = mkdtempSync(path.join(tmpdir(), "repo-expert-store-"));
       const store = new SqlitePassageStore({
         dbPath: path.join(dir, "store.db"),
-        embed: fakeEmbed,
+        embed: stubEmbed,
       });
       return {
         store,

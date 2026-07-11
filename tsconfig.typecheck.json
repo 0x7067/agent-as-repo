@@ -18,6 +18,7 @@
   "include": [
     "src/**/*.ts",
     "scripts/**/*.ts",
+    "eval/**/*.ts",
     "vitest.config.ts",
     "vitest.stryker.config.ts",
     "vitest.stryker.shell.config.ts"
@@ -26,6 +27,7 @@
     "src/**/*.test.ts",
     "src/**/*.spec.ts",
     "src/**/__test__/**",
+    "eval/**/*.test.ts",
     "spikes",
     "node_modules",
     "dist"

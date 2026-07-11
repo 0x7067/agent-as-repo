@@ -1,0 +1,139 @@
+{
+  "queries": [
+    {
+      "id": "id-ts-reconcile",
+      "kind": "identifier",
+      "query": "reconcileLedgerBatch",
+      "expect_files": ["src/ledger/reconcile.ts"],
+      "expect_rank": 1
+    },
+    {
+      "id": "id-py-drift",
+      "kind": "identifier",
+      "query": "compute_ledger_drift",
+      "expect_files": ["services/ledger/drift.py"],
+      "expect_rank": 1
+    },
+    {
+      "id": "id-ts-session",
+      "kind": "identifier",
+      "query": "refreshSessionToken",
+      "expect_files": ["src/auth/session-guard.ts"],
+      "expect_rank": 1
+    },
+    {
+      "id": "id-ts-retry",
+      "kind": "identifier",
+      "query": "retryWithBackoff",
+      "expect_files": ["src/util/retry.ts"],
+      "expect_rank": 1
+    },
+    {
+      "id": "id-go-settle",
+      "kind": "identifier",
+      "query": "SettleOutstandingBalance",
+      "expect_files": ["pkg/ledger/ledger.go"],
+      "expect_rank": 1
+    },
+    {
+      "id": "id-java-escalate",
+      "kind": "identifier",
+      "query": "escalateDriftAlert",
+      "expect_files": ["src/main/java/com/acme/ledger/DriftMonitor.java"],
+      "expect_rank": 1
+    },
+    {
+      "id": "id-rb-settle",
+      "kind": "identifier",
+      "query": "settle_pending_entries",
+      "expect_files": ["lib/ledger/reconciler.rb"],
+      "expect_rank": 1
+    },
+    {
+      "id": "id-ts-refund",
+      "kind": "identifier",
+      "query": "dispatchRefundWebhook",
+      "expect_files": ["src/api/webhook-retry.ts"],
+      "expect_rank": 1
+    },
+    {
+      "id": "id-py-invoice",
+      "kind": "identifier",
+      "query": "generate_invoice_number",
+      "expect_files": ["services/billing/invoice.py"],
+      "expect_rank": 1
+    },
+    {
+      "id": "err-drift",
+      "kind": "error-string",
+      "query": "reconciliation ledger drift exceeded",
+      "expect_files": ["src/ledger/reconcile.ts"]
+    },
+    {
+      "id": "err-vault",
+      "kind": "error-string",
+      "query": "session token vault is sealed",
+      "expect_files": ["src/main/java/com/acme/auth/TokenVault.java"]
+    },
+    {
+      "id": "err-invoice",
+      "kind": "error-string",
+      "query": "invoice number sequence overflow",
+      "expect_files": ["services/billing/invoice.py"]
+    },
+    {
+      "id": "cfg-drift",
+      "kind": "config-key",
+      "query": "max_drift_tolerance",
+      "expect_files": ["config/app.yaml", "src/config/settings.ts"]
+    },
+    {
+      "id": "cfg-batch",
+      "kind": "config-key",
+      "query": "queue_batch_size",
+      "expect_files": ["config/app.yaml", "pkg/queue/worker.go"]
+    },
+    {
+      "id": "para-runbook",
+      "kind": "paraphrase",
+      "query": "response procedure once an overnight settlement uncovers an imbalance",
+      "expect_files": ["docs/runbook.md"]
+    },
+    {
+      "id": "para-thresholds",
+      "kind": "paraphrase",
+      "query": "picking an urgency label for books gap by dollar span",
+      "expect_files": ["services/ledger/thresholds.py"]
+    },
+    {
+      "id": "para-emailer",
+      "kind": "paraphrase",
+      "query": "buffering periodic bulletins bound toward accounting personnel",
+      "expect_files": ["services/notify/emailer.py"]
+    },
+    {
+      "id": "para-notes",
+      "kind": "paraphrase",
+      "query": "why core arithmetic stays walled off behind boundary seams",
+      "expect_files": ["docs/architecture-notes.md"]
+    },
+    {
+      "id": "para-slack",
+      "kind": "paraphrase",
+      "query": "broadcasting a warning into a team chat workspace",
+      "expect_files": ["lib/notify/slack.rb"]
+    },
+    {
+      "id": "noterm-punct",
+      "kind": "no-term",
+      "query": "!!! ??? ---",
+      "expect_files": ["src/ledger/reconcile.ts"]
+    },
+    {
+      "id": "noterm-symbols",
+      "kind": "no-term",
+      "query": "@@@ %%% ^^^ ***",
+      "expect_files": ["config/app.yaml"]
+    }
+  ]
+}

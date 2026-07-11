@@ -13,6 +13,7 @@
     "src",
     "spikes",
     "scripts",
+    "eval",
     "vitest.config.ts",
     "vitest.stryker.config.ts",
     "vitest.stryker.shell.config.ts"

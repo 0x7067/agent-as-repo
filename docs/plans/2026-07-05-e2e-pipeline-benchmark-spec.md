@@ -1,8 +1,21 @@
 # End-to-End Pipeline Test + Benchmark Spec
 
 Date: 2026-07-05
-Status: proposed
+Status: benchmark tier landed (this change set); Tier-1 e2e lifecycle test + scripted LLM server + setup/ask-runner extraction remain proposed
 Depends on: hybrid BM25+vector search (`docs/plans/2026-07-05-hybrid-search-spec.md`, landed)
+
+> **Implementation note (benchmark tier).** The retrieval-quality benchmark
+> (`pnpm bench`, `eval/bench.ts`) landed with the pure metrics
+> (`src/core/eval-metrics.ts`), the fixture corpus + gold set
+> (`eval/fixtures/mini-corpus/`, `eval/retrieval-gold.json`), the
+> leg-isolated `SqlitePassageStore.searchLegs` diagnostic, the shared
+> deterministic stub embedder (`src/shell/__test__/stub-embedder.ts`), and the
+> committed baseline (`eval/baselines/deterministic.json`). It indexes through
+> the existing collect → chunk → store pipeline pieces directly rather than the
+> not-yet-extracted setup/ask runners, and the `--tasks`/`--live` answer-quality
+> modes are omitted. The Tier-1 e2e lifecycle test, the scripted
+> chat-completions server, and the setup-runner/ask-runner extraction from
+> `cli.ts` are not implemented here.
 
 ## Why
 

@@ -7,5 +7,6 @@ dist/
 config.yaml
 .claude.local.md
 reports/
+eval/reports/
 .stryker-tmp/
 .worktrees/

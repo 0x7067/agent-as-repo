@@ -353,6 +353,8 @@ export default tseslint.config(
 			"scripts/sea-cli-entry.ts",
 			"scripts/sea-mcp-entry.ts",
 			"src/mcp-server.ts",
+			// tsx runs eval/bench.ts as CJS, where top-level await is unavailable.
+			"eval/bench.ts",
 		],
 		rules: {
 			"unicorn/prefer-top-level-await": "off",

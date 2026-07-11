@@ -244,8 +244,42 @@ export class SqlitePassageStore implements PassageStore {
     limit: number,
     options?: SemanticSearchOptions,
   ): Promise<PassageSearchResult[]> {
-    if (limit <= 0 || !this.vectorTableReady) return [];
-    const pathPrefix = options?.pathPrefix;
+    // Production ranking is exactly the fused leg, truncated to the limit — so
+    // the searchLegs diagnostic can never drift from what users actually see.
+    const { fused } = await this.computeLegs(agentId, query, limit, options?.pathPrefix);
+    return fused.slice(0, limit);
+  }
+
+  /**
+   * Diagnostic (benchmark/tests only, not on the PassageStore port): the vector
+   * leg, lexical leg, and their RRF fusion returned separately over the same
+   * over-fetch `semanticSearch` uses, so the benchmark can quantify hybrid
+   * uplift by scoring each leg against the gold set.
+   */
+  async searchLegs(
+    agentId: string,
+    query: string,
+    limit: number,
+  ): Promise<{
+    vector: PassageSearchResult[];
+    lexical: PassageSearchResult[];
+    fused: PassageSearchResult[];
+  }> {
+    return this.computeLegs(agentId, query, limit);
+  }
+
+  private async computeLegs(
+    agentId: string,
+    query: string,
+    limit: number,
+    pathPrefix?: string,
+  ): Promise<{
+    vector: PassageSearchResult[];
+    lexical: PassageSearchResult[];
+    fused: PassageSearchResult[];
+  }> {
+    const empty = { vector: [], lexical: [], fused: [] };
+    if (limit <= 0 || !this.vectorTableReady) return empty;
     const countSql =
       pathPrefix === undefined
         ? "SELECT COUNT(*) AS count FROM passages WHERE agent_id = ?"
@@ -253,7 +287,7 @@ export class SqlitePassageStore implements PassageStore {
     const countArgs =
       pathPrefix === undefined ? [agentId] : [agentId, `${pathPrefix}%`];
     const countRow = this.db.prepare(countSql).get(...countArgs) as { count: number };
-    if (countRow.count === 0) return [];
+    if (countRow.count === 0) return empty;
 
     const vectors = await this.embedTexts([query], "query");
     const vector = vectors.at(0);
@@ -293,10 +327,14 @@ export class SqlitePassageStore implements PassageStore {
     const vectorIds = toIds(vectorHits.map((hit) => hit.rowid));
     const lexicalIds = toIds(lexicalRowids);
 
-    const fused = rrfFuse([vectorIds, lexicalIds]);
-    return fused
-      .slice(0, limit)
-      .map(({ id, score }) => ({ id, text: textById.get(id) ?? "", score }));
+    const toResults = (ranked: Array<{ id: string; score: number }>): PassageSearchResult[] =>
+      ranked.map(({ id, score }) => ({ id, text: textById.get(id) ?? "", score }));
+
+    return {
+      vector: toResults(rrfFuse([vectorIds])),
+      lexical: toResults(rrfFuse([lexicalIds])),
+      fused: toResults(rrfFuse([vectorIds, lexicalIds])),
+    };
   }
 
   /**

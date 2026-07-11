@@ -105,6 +105,35 @@ pnpm test   # architecture.test.ts catches violations at the file content level
 
 ---
 
+## Verification
+
+Beyond unit tests, a **retrieval-quality benchmark** (`pnpm bench`,
+`eval/bench.ts`) exercises the real indexing + hybrid-search path end to end.
+It copies the checked-in fixture corpus (`eval/fixtures/mini-corpus/`) into a
+temp git repo, indexes it through the actual collect → chunk → enrich → store
+pipeline, then runs every gold query (`eval/retrieval-gold.json`) through the
+leg-isolated `SqlitePassageStore.searchLegs` diagnostic and scores the vector,
+lexical, and fused legs with the pure metrics in `src/core/eval-metrics.ts`
+(Recall@1, Recall@5, MRR — overall and per query kind).
+
+The default **deterministic tier** uses a shared hash bag-of-words stub
+embedder (no network, no model), so two runs produce identical reports
+(excluding timing). It enforces three quality gates:
+
+- identifier-kind Recall@1 = 1.0 (the hybrid exact-identifier guarantee),
+- hybrid Recall@5 ≥ vector-only Recall@5 (fusion never hurts recall),
+- hybrid MRR ≥ max(vector, lexical) MRR − 0.05 (fusion never badly hurts rank).
+
+`--engine transformersjs` swaps in real in-process embeddings (report-only,
+needs a model download — not run in CI). Performance numbers (index wall time,
+chunks/sec, search p50/p95, DB size) are always report-only. `--baseline
+eval/baselines/deterministic.json` compares against the committed reference and
+exits non-zero on a gated regression; the corpus, gold set, and baseline must
+change together in one PR. A vitest smoke test (`eval/bench.test.ts`) runs a
+small slice on every push so the script can't rot.
+
+---
+
 ## Key Files
 
 | Concept | File |

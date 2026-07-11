@@ -1,0 +1,16 @@
+# Application configuration for the reconciliation service.
+# Consumed by src/config/settings.ts and pkg/queue/worker.go.
+
+ledger:
+  # Largest debit/credit gap tolerated before reconcileLedgerBatch throws.
+  max_drift_tolerance: 100
+  currency: USD
+
+queue:
+  # Upper bound on jobs pulled per DrainQueue pass.
+  queue_batch_size: 32
+  visibility_timeout_seconds: 30
+
+notify:
+  slack_channel: "#finance-ops"
+  digest_hour_utc: 6

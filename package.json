@@ -34,6 +34,7 @@
     "typecheck:unused": "pnpm run typecheck",
     "sanity": "pnpm run lint && pnpm run typecheck && pnpm test -- --runInBand",
     "test": "vitest run",
+    "bench": "tsx eval/bench.ts",
     "repo-expert": "tsx src/cli.ts",
     "mcp-server": "tsx src/mcp-server.ts",
     "test:mutation": "stryker run"
