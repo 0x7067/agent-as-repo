@@ -1,5 +1,4 @@
 import { FILE_PREFIX, type Chunk, type ChunkingStrategy, type FileInfo } from "./types.js";
-import { treeSitterStrategy } from "./tree-sitter-chunker.js";
 
 export function chunkWithHeader(
   header: string,
@@ -83,10 +82,10 @@ export function chunkFile(
   return chunkWithHeader(`${FILE_PREFIX}${filePath}`, content, filePath, maxChars);
 }
 
-/** Default chunking strategy: delegates to chunkFile. */
+/**
+ * Raw-text fallback strategy: splits on blank lines with a `FILE:` header.
+ * Used as the internal parse-failure fallback inside `treeSitterStrategy` and
+ * injected directly by tests; production always chunks with tree-sitter.
+ */
 export const rawTextStrategy: ChunkingStrategy = (file: FileInfo): Chunk[] =>
   chunkFile(file.path, file.content);
-
-export function selectChunkingStrategy(chunking: "raw" | "tree-sitter"): ChunkingStrategy {
-  return chunking === "tree-sitter" ? treeSitterStrategy : rawTextStrategy;
-}

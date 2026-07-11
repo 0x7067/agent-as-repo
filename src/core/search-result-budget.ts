@@ -1,3 +1,5 @@
+import { isTestPath } from "./test-path.js";
+
 export interface SearchResult {
   id: string;
   text: string;
@@ -38,6 +40,32 @@ function truncateText(text: string, maxChars: number): {
   if (text.length <= maxChars) return { text, truncated: false };
   if (maxChars <= 1) return { text: "…".slice(0, maxChars), truncated: true };
   return { text: `${text.slice(0, maxChars - 1)}…`, truncated: true };
+}
+
+/**
+ * Stable partition that sinks test/spec passages below implementation
+ * passages while preserving relative order within each group.
+ *
+ * Apply this AFTER `budgetSearchResults`, not before: budgeting selects the
+ * result set by relevance (score + per-file diversity), then this reorders that
+ * selected set to present implementation first. Ordering here is presentation
+ * only — it never changes membership, so a highly relevant test is never
+ * evicted in favour of a less relevant implementation file (demotes, never
+ * drops). Passages with no `FILE:` header (unknown path) are treated as
+ * non-test so manually inserted passages are never demoted.
+ */
+export function demoteTestResults<T extends SearchResult>(results: T[]): T[] {
+  const implementation: T[] = [];
+  const tests: T[] = [];
+  for (const result of results) {
+    const filePath = passageFilePath(result.text);
+    if (filePath !== null && isTestPath(filePath)) {
+      tests.push(result);
+    } else {
+      implementation.push(result);
+    }
+  }
+  return [...implementation, ...tests];
 }
 
 /** Select high-ranked, file-diverse passages within a strict output budget. */

@@ -76,18 +76,14 @@ function makeFakeFs(overrides: Partial<FileSystemPort> = {}): FileSystemPort {
 }
 
 const testConfig: Config = {
-  provider: { model: "qwen3-coder:30b", baseUrl: "http://localhost:11434/v1", fallbackModels: [], embeddingModel: "nomic-embed-text" },
-  defaults: { maxFileSizeKb: 50, memoryBlockLimit: 5000, bootstrapOnCreate: false, chunking: "raw" },
+  provider: { model: "qwen3-coder:30b", baseUrl: "http://localhost:11434/v1", fallbackModels: [], embeddingEngine: "http", embeddingModel: "nomic-embed-text" },
+  consolidateOnSync: false,
   repos: {
     [WATCH_REPO_NAME]: {
       path: WATCH_REPO_PATH,
       description: "Test",
       extensions: [".ts"],
       ignoreDirs: ["node_modules"],
-      tags: ["test"],
-      maxFileSizeKb: 50,
-      memoryBlockLimit: 5000,
-      bootstrapOnCreate: false,
     },
   },
 };

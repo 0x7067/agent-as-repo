@@ -6,6 +6,7 @@ import {
   resetTreeSitterChunkerForTests,
 } from "../core/tree-sitter-chunker.js";
 import { GRAMMAR_WASM_BY_LABEL, WEB_TREE_SITTER_WASM } from "../core/tree-sitter-test-paths.js";
+import { rawTextStrategy } from "../core/chunker.js";
 import { makeMockProvider as makeBase } from "./__test__/mock-provider.js";
 
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
@@ -208,7 +209,7 @@ describe("syncRepo", () => {
     expect(provider.storePassage).toHaveBeenCalledWith("agent-abc", "custom chunk");
   });
 
-  it("defaults to rawTextStrategy when chunking is raw", async () => {
+  it("uses the injected chunking strategy (raw) when provided", async () => {
     const provider = makeMockProvider();
     const result = await syncRepo({
       provider,
@@ -216,7 +217,7 @@ describe("syncRepo", () => {
       changedFiles: ["src/a.ts"],
       collectFile: (path) => Promise.resolve({ path, content: "const x = 1;", sizeKb: 0.01 }),
       headCommit: "def456",
-      chunking: "raw",
+      chunkingStrategy: rawTextStrategy,
     });
 
     // rawTextStrategy produces a chunk with FILE: prefix
@@ -227,7 +228,7 @@ describe("syncRepo", () => {
     expect(result.passages["src/a.ts"]).toBeDefined();
   });
 
-  it("selects treeSitterStrategy when chunking is tree-sitter", async () => {
+  it("chunks by symbol via the default tree-sitter strategy", async () => {
     const provider = makeMockProvider();
     const tsContent = [
       "export function foo(): void {",
@@ -241,12 +242,43 @@ describe("syncRepo", () => {
       changedFiles: ["src/a.ts"],
       collectFile: (path) => Promise.resolve({ path, content: tsContent, sizeKb: 0.1 }),
       headCommit: "def456",
-      chunking: "tree-sitter",
     });
 
     expect(provider.storePassage).toHaveBeenCalledWith(
       "agent-abc",
       expect.stringContaining("FUNCTION: foo"),
+    );
+  });
+
+  it("enriches embedded chunks with the file's own import/export context", async () => {
+    const provider = makeMockProvider();
+    const tsContent = [
+      "import { getSession } from './auth/session';",
+      "export function handler(): void {",
+      "  getSession();",
+      "}",
+    ].join("\n");
+
+    await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: ["src/a.ts"],
+      collectFile: (path) => Promise.resolve({ path, content: tsContent, sizeKb: 0.1 }),
+      headCommit: "def456",
+    });
+
+    const storedTexts = (provider.storePassage as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call) => call[1] as string,
+    );
+    // Every passage carries the file-local context line, and the FILE header
+    // stays first so downstream path extraction still works.
+    expect(storedTexts.length).toBeGreaterThan(0);
+    expect(storedTexts.every((text) => text.startsWith("FILE: src/a.ts"))).toBe(true);
+    expect(storedTexts.some((text) => text.includes("imports:") && text.includes("session"))).toBe(
+      true,
+    );
+    expect(storedTexts.some((text) => text.includes("exports:") && text.includes("handler"))).toBe(
+      true,
     );
   });
 
@@ -465,7 +497,7 @@ describe("syncRepo", () => {
         changedFiles: ["src/a.ts"],
         collectFile: (path) => Promise.resolve({ path, content: "const x = 1;", sizeKb: 0.01 }),
         headCommit: "def456",
-        chunking: "raw",
+        chunkingStrategy: rawTextStrategy,
       });
 
       const [agentId, texts] = (provider.storePassages as ReturnType<typeof vi.fn>).mock.calls[0] as [

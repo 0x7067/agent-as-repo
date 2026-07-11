@@ -1,6 +1,6 @@
 import type { PassageStore } from "../ports/passage-store.js";
 import type { RepoAccessPort } from "../ports/repo-access.js";
-import { budgetSearchResults } from "../core/search-result-budget.js";
+import { budgetSearchResults, demoteTestResults } from "../core/search-result-budget.js";
 import type { FindDefinitionsOptions } from "../core/symbol-index.js";
 import type { RankedSymbolHit } from "../core/symbol-store.js";
 import type { SymbolKind } from "../core/tree-sitter-symbols.js";
@@ -269,11 +269,17 @@ export function buildAskTools(params: BuildAskToolsParams): {
       Math.min(MAX_SEARCH_RESULTS * 2, topK * 2),
       pathPrefix === undefined || pathPrefix === "" ? undefined : { pathPrefix },
     );
-    return JSON.stringify(budgetSearchResults(results, {
+    // Budget by relevance first (score + per-file diversity), THEN demote test
+    // passages to the tail of the selected set. Demoting after selection keeps
+    // membership relevance-driven — a highly relevant test is never evicted for
+    // a less relevant implementation file — while still presenting
+    // implementation ahead of tests.
+    const budgeted = budgetSearchResults(results, {
       limit: topK,
       maxTextChars: SEARCH_RESULT_TEXT_CHARS,
       maxPerFile: MAX_RESULTS_PER_FILE,
-    }));
+    });
+    return JSON.stringify(demoteTestResults(budgeted));
   };
   toolHandlers["memory_replace"] = async (args) => {
     const label = args["label"];

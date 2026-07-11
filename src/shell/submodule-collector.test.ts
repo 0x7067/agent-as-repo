@@ -17,10 +17,6 @@ function makeRepoConfig(overrides?: Partial<RepoConfig>): RepoConfig {
     description: "test",
     extensions: [".ts"],
     ignoreDirs: ["node_modules"],
-    tags: [],
-    maxFileSizeKb: 50,
-    memoryBlockLimit: 5000,
-    bootstrapOnCreate: false,
     ...overrides,
   };
 }
