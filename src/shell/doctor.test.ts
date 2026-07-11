@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   checkApiKey,
   checkConfigFile,
+  checkEmbeddingModelAvailable,
   checkGit,
   checkLlmEndpoint,
   checkModelAvailable,
@@ -13,6 +14,7 @@ import {
   runAllChecks,
   runDoctorFixes,
 } from "./doctor.js";
+import type { embed } from "./llm-client.js";
 import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
 import type { GitPort } from "../ports/git.js";
 import type { AgentProvider } from "../ports/agent-provider.js";
@@ -41,6 +43,35 @@ function modelsResponse(ids: string[]): Response {
     status: 200,
     json: () => Promise.resolve({ data: ids.map((id) => ({ id })) }),
   } as unknown as Response;
+}
+
+/** Fake `embed()` (llm-client.ts signature) that resolves to one fixed-length vector per input text. */
+function fakeEmbedOk(dimensions = 3): typeof embed {
+  return (texts: string[]) => Promise.resolve(texts.map(() => Array.from({ length: dimensions }, () => 0.1)));
+}
+
+function fakeEmbedRejecting(message: string): typeof embed {
+  return () => Promise.reject(new Error(message));
+}
+
+/**
+ * Combined global-`fetch` stub for `runAllChecks`: `GET {base}/models` answers with
+ * `chatModelIds` (used by the LLM-model check); `POST {base}/embeddings` answers with a
+ * well-formed embedding so the real `checkEmbeddingModelAvailable` probe (which goes through
+ * llm-client's `embed()`, itself hard-wired to the global `fetch`) passes.
+ */
+function stubFetchModelsAndEmbeddings(chatModelIds: string[]): void {
+  const fetchImpl = vi.fn((url: unknown) => {
+    if (typeof url === "string" && url.endsWith("/embeddings")) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ data: [{ index: 0, embedding: [0.1, 0.2, 0.3] }] }),
+      } as unknown as Response);
+    }
+    return Promise.resolve(modelsResponse(chatModelIds));
+  });
+  vi.stubGlobal("fetch", fetchImpl);
 }
 
 const providerYaml = (repoDir: string, repoName = "my-app"): string =>
@@ -130,6 +161,71 @@ describe("doctor shell checks", () => {
     expect(result.status).toBe("warn");
   });
 
+  it("checkModelAvailable gives a neutral (non-Ollama) hint when the model is missing on a remote endpoint", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(modelsResponse(["some-other-model"]));
+    const result = await checkModelAvailable(REMOTE_BASE_URL, "openai/gpt-4o-mini", "LLM model", fetchImpl as unknown as typeof fetch);
+    expect(result.status).toBe("fail");
+    expect(result.message).not.toContain("ollama pull");
+  });
+
+  describe("checkEmbeddingModelAvailable", () => {
+    it("passes when a real POST /embeddings probe returns a well-formed embedding", async () => {
+      const result = await checkEmbeddingModelAvailable(
+        LOCAL_BASE_URL,
+        "nomic-embed-text",
+        undefined,
+        "Embedding model",
+        fakeEmbedOk(),
+      );
+      expect(result.status).toBe("pass");
+      expect(result.name).toBe("Embedding model");
+      expect(result.message).toContain("nomic-embed-text");
+    });
+
+    it("does not consult GET /models at all — it is a pure POST /embeddings probe", async () => {
+      const embedImpl = vi.fn(fakeEmbedOk()) as unknown as typeof embed;
+      await checkEmbeddingModelAvailable(REMOTE_BASE_URL, "openai/text-embedding-3-small", "sk-test", "Embedding model", embedImpl);
+      expect(embedImpl).toHaveBeenCalledWith(
+        ["ping"],
+        "openai/text-embedding-3-small",
+        REMOTE_BASE_URL,
+        "sk-test",
+        expect.anything(),
+      );
+    });
+
+    it("fails with an ollama-pull hint when the probe fails against a local endpoint", async () => {
+      const result = await checkEmbeddingModelAvailable(
+        LOCAL_BASE_URL,
+        "nomic-embed-text",
+        undefined,
+        "Embedding model",
+        fakeEmbedRejecting("HTTP 404 from http://localhost:11434/v1/embeddings"),
+      );
+      expect(result.status).toBe("fail");
+      expect(result.message).toContain("ollama pull nomic-embed-text");
+    });
+
+    it("fails with a neutral (non-Ollama) hint when the probe fails against a remote endpoint", async () => {
+      const result = await checkEmbeddingModelAvailable(
+        REMOTE_BASE_URL,
+        "openai/text-embedding-3-small",
+        "sk-test",
+        "Embedding model",
+        fakeEmbedRejecting("HTTP 400 from https://openrouter.ai/api/v1/embeddings"),
+      );
+      expect(result.status).toBe("fail");
+      expect(result.message).not.toContain("ollama pull");
+      expect(result.message).toContain("openai/text-embedding-3-small");
+    });
+
+    it("fails when the probe resolves but returns a malformed/empty embedding", async () => {
+      const emptyEmbed: typeof embed = () => Promise.resolve([[]]);
+      const result = await checkEmbeddingModelAvailable(LOCAL_BASE_URL, "nomic-embed-text", undefined, "Embedding model", emptyEmbed);
+      expect(result.status).toBe("fail");
+    });
+  });
+
   it("checkConfigFile reports missing config", async () => {
     const missingPath = path.join(await makeTempDir("doctor-"), "missing.yaml");
     const result = await checkConfigFile(missingPath);
@@ -138,7 +234,7 @@ describe("doctor shell checks", () => {
   });
 
   it("runAllChecks includes config and git checks when config exists", async () => {
-    stubFetchOkWithModels(["qwen3-coder:30b", "nomic-embed-text"]);
+    stubFetchModelsAndEmbeddings(["qwen3-coder:30b", "nomic-embed-text"]);
     const tempDir = await makeTempDir("doctor-");
     const repoDir = path.join(tempDir, "repo");
     // eslint-disable-next-line security/detect-non-literal-fs-filename
@@ -158,10 +254,12 @@ describe("doctor shell checks", () => {
     expect(names).toContain("Embedding model");
     const modelCheck = results.find((r) => r.name === "LLM model");
     expect(modelCheck?.status).toBe("pass");
+    const embeddingCheck = results.find((r) => r.name === "Embedding model");
+    expect(embeddingCheck?.status).toBe("pass");
   });
 
   it("runAllChecks reports a failing LLM model check when the configured model is missing from the endpoint", async () => {
-    stubFetchOkWithModels(["some-other-model"]);
+    stubFetchModelsAndEmbeddings(["some-other-model"]);
     const tempDir = await makeTempDir("doctor-");
     const repoDir = path.join(tempDir, "repo");
     // eslint-disable-next-line security/detect-non-literal-fs-filename
@@ -174,6 +272,65 @@ describe("doctor shell checks", () => {
     const modelCheck = results.find((r) => r.name === "LLM model");
     expect(modelCheck?.status).toBe("fail");
     expect(modelCheck?.message).toContain("qwen3-coder:30b");
+  });
+
+  it("runAllChecks reports a passing Embedding model check via a real /embeddings probe even when the model is absent from /models (OpenRouter shape)", async () => {
+    // OpenRouter never lists embedding models under GET /models, only chat models — the
+    // regression this guards: a models-list-based embedding check would previously
+    // false-fail here even though the endpoint can actually serve the embedding model.
+    stubFetchModelsAndEmbeddings(["openai/gpt-4o-mini"]);
+    const tempDir = await makeTempDir("doctor-");
+    const repoDir = path.join(tempDir, "repo");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.mkdir(repoDir, { recursive: true });
+    const configPath = path.join(tempDir, "config.yaml");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.writeFile(
+      configPath,
+      [
+        "provider:",
+        "  model: openai/gpt-4o-mini",
+        "  base_url: https://openrouter.ai/api/v1",
+        "  embedding_model: openai/text-embedding-3-small",
+        "repos:",
+        "  my-app:",
+        `    path: ${repoDir}`,
+        "    description: test repo",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const results = await runAllChecks(null, configPath);
+    const embeddingCheck = results.find((r) => r.name === "Embedding model");
+    expect(embeddingCheck?.status).toBe("pass");
+  });
+
+  it("runAllChecks skips the HTTP embedding probe for the transformersjs engine (local, no endpoint)", async () => {
+    stubFetchModelsAndEmbeddings(["qwen3-coder:30b"]);
+    const tempDir = await makeTempDir("doctor-");
+    const repoDir = path.join(tempDir, "repo");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.mkdir(repoDir, { recursive: true });
+    const configPath = path.join(tempDir, "config.yaml");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    await fs.writeFile(
+      configPath,
+      [
+        "provider:",
+        "  model: qwen3-coder:30b",
+        "  embedding_engine: transformersjs",
+        "repos:",
+        "  my-app:",
+        `    path: ${repoDir}`,
+        "    description: test repo",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const results = await runAllChecks(null, configPath);
+    const embeddingCheck = results.find((r) => r.name === "Embedding model");
+    expect(embeddingCheck?.status).toBe("pass");
+    expect(embeddingCheck?.message.toLowerCase()).toContain("transformers.js");
   });
 
   it("runDoctorFixes creates missing config, env, and state", async () => {

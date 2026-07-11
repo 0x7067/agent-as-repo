@@ -8,6 +8,7 @@ import type { FileSystemPort } from "../ports/filesystem.js";
 import type { GitPort } from "../ports/git.js";
 import { nodeFileSystem } from "./adapters/node-filesystem.js";
 import { nodeGit } from "./adapters/node-git.js";
+import { embed } from "./llm-client.js";
 
 const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
 const LLM_ENDPOINT_TIMEOUT_MS = 3000;
@@ -27,6 +28,27 @@ function isPlaceholderRepoPath(name: string, resolvedPath: string): boolean {
 
 function isLocalUrl(url: string): boolean {
   return /localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]/.test(url);
+}
+
+const OLLAMA_DEFAULT_PORT = "11434";
+
+/**
+ * Ollama-specific remediation hints (`ollama pull ...`, `ollama serve`) only make sense
+ * against a local Ollama endpoint. `isLocalUrl` covers localhost/127.0.0.1/etc.; this also
+ * catches a LAN-reachable Ollama on its default port (e.g. `http://192.168.1.5:11434/v1`).
+ * Exported so cli.ts's setup preflight can make its own endpoint-unreachable hint
+ * endpoint-aware too, instead of always suggesting `ollama serve`.
+ */
+export function isLocalOllamaEndpoint(baseUrl: string): boolean {
+  return isLocalUrl(baseUrl) || baseUrl.includes(`:${OLLAMA_DEFAULT_PORT}`);
+}
+
+/** Endpoint-aware "model not found" remediation: Ollama gets `ollama pull`, anything else gets a neutral hint. */
+function modelNotFoundHint(baseUrl: string, model: string): string {
+  if (isLocalOllamaEndpoint(baseUrl)) {
+    return `Try: ollama pull ${model}`;
+  }
+  return `Check that "${model}" is the correct model id for ${baseUrl} and that your API key has access to it.`;
 }
 
 interface ProviderModelInfo {
@@ -144,7 +166,64 @@ export async function checkModelAvailable(
   if (ids.includes(model)) {
     return { name: label, status: "pass", message: `Model "${model}" is available at ${baseUrl}` };
   }
-  return { name: label, status: "fail", message: `Model "${model}" not found at ${baseUrl}. Try: ollama pull ${model}` };
+  return { name: label, status: "fail", message: `Model "${model}" not found at ${baseUrl}. ${modelNotFoundHint(baseUrl, model)}` };
+}
+
+/**
+ * Verify an embedding model actually works by making a real embedding call, rather than
+ * checking `GET /models` — remote endpoints like OpenRouter never list embedding models
+ * there (only chat models), so a models-list-based check false-fails against a perfectly
+ * healthy embedding endpoint. Success is a well-formed embedding vector for a tiny probe
+ * input; any failure (network, auth, unknown model, malformed response) fails the check
+ * with an endpoint-aware remediation hint.
+ *
+ * Reuses `embed()` from llm-client.ts (shared fetch/auth/timeout conventions) rather than
+ * an ad hoc HTTP call.
+ */
+export async function checkEmbeddingModelAvailable(
+  baseUrl: string,
+  model: string,
+  apiKey: string | undefined,
+  label = "Embedding model",
+  embedImpl: typeof embed = embed,
+): Promise<CheckResult> {
+  try {
+    const vectors = await embedImpl(["ping"], model, baseUrl, apiKey, { timeoutMs: LLM_ENDPOINT_TIMEOUT_MS });
+    const vector = vectors.at(0);
+    const isWellFormed = vectors.length === 1 && Array.isArray(vector) && vector.length > 0
+      && vector.every((n) => typeof n === "number" && Number.isFinite(n));
+    if (!isWellFormed) {
+      return {
+        name: label,
+        status: "fail",
+        message: `${baseUrl}/embeddings returned a malformed embedding for model "${model}".`,
+      };
+    }
+    return {
+      name: label,
+      status: "pass",
+      message: `Model "${model}" produced a ${String(vector.length)}-dimensional embedding at ${baseUrl}`,
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    // `postJson` (llm-client.ts) throws "HTTP <status> from <url>" for a non-OK response —
+    // that's an authoritative negative result (bad model id, bad auth, etc.) worth failing
+    // on. Anything else (connection refused, DNS failure, timeout) means the endpoint isn't
+    // reachable at all, which — same as checkLlmEndpoint/checkModelAvailable — degrades to a
+    // warning rather than blocking setup/doctor outright.
+    if (!/^HTTP \d+ /.test(msg)) {
+      return {
+        name: label,
+        status: "warn",
+        message: `Could not verify embedding model "${model}" at ${baseUrl}/embeddings: ${msg}`,
+      };
+    }
+    return {
+      name: label,
+      status: "fail",
+      message: `Embeddings probe failed for model "${model}" at ${baseUrl}/embeddings: ${msg}. ${modelNotFoundHint(baseUrl, model)}`,
+    };
+  }
 }
 
 export async function checkConfigFile(configPath: string, fs: FileSystemPort = nodeFileSystem): Promise<CheckResult> {
@@ -269,6 +348,7 @@ export async function runAllChecks(
   provider: AgentProvider | null,
   configPath: string,
   fetchImpl: typeof fetch = fetch,
+  embedImpl: typeof embed = embed,
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   const providerInfo = await loadProviderModelInfo(configPath);
@@ -279,8 +359,17 @@ export async function runAllChecks(
   if (providerInfo.model !== null) {
     results.push(await checkModelAvailable(baseUrl, providerInfo.model, "LLM model", fetchImpl));
   }
-  if (providerInfo.embeddingEngine === "http" && providerInfo.embeddingModel !== null) {
-    results.push(await checkModelAvailable(baseUrl, providerInfo.embeddingModel, "Embedding model", fetchImpl));
+  if (providerInfo.embeddingEngine === "transformersjs") {
+    // Local, in-process engine — there's no remote endpoint to probe. `embeddingModel`
+    // still names which model transformers.js will load (and cache) on first use.
+    results.push({
+      name: "Embedding model",
+      status: "pass",
+      message: `Using local transformers.js engine (model "${providerInfo.embeddingModel ?? "default"}"); no endpoint probe needed.`,
+    });
+  } else if (providerInfo.embeddingEngine === "http" && providerInfo.embeddingModel !== null) {
+    const apiKey = process.env["LLM_API_KEY"];
+    results.push(await checkEmbeddingModelAvailable(baseUrl, providerInfo.embeddingModel, apiKey, "Embedding model", embedImpl));
   }
 
   if (provider) {

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { loadConfig } from "./shell/config-loader.js";
 import { runInit } from "./shell/init.js";
-import { checkLlmEndpoint, checkModelAvailable, runAllChecks, runDoctorFixes } from "./shell/doctor.js";
+import { checkEmbeddingModelAvailable, checkLlmEndpoint, checkModelAvailable, isLocalOllamaEndpoint, runAllChecks, runDoctorFixes } from "./shell/doctor.js";
 import { formatSelfChecks, runSelfChecks } from "./shell/self-check.js";
 import { completionFileName, generateCompletionScript, type CompletionShell } from "./core/completion.js";
 import { nonInteractiveInitError } from "./core/init.js";
@@ -438,22 +438,29 @@ async function runSetupPreflight(config: Config): Promise<SetupPreflightResult> 
 
   const endpointResult = await checkLlmEndpoint(baseUrl);
   if (endpointResult.status !== "pass") {
-    errors.push(`LLM endpoint unreachable at ${baseUrl} — is Ollama running? Try: ollama serve`);
+    const hint = isLocalOllamaEndpoint(baseUrl)
+      ? "is Ollama running? Try: ollama serve"
+      : "check the endpoint URL, network connectivity, and API key.";
+    errors.push(`LLM endpoint unreachable at ${baseUrl} — ${hint}`);
     return { ok: false, errors, warnings };
   }
 
   const modelResult = await checkModelAvailable(baseUrl, config.provider.model, "LLM model");
   if (modelResult.status === "fail") {
-    errors.push(`Model "${config.provider.model}" not found at ${baseUrl} — try: ollama pull ${config.provider.model}`);
+    errors.push(modelResult.message);
   } else if (modelResult.status === "warn") {
     warnings.push(modelResult.message);
   }
 
+  // Embedding models are checked with a real POST /embeddings probe rather than GET /models:
+  // remote endpoints like OpenRouter never list embedding models under /models (only chat
+  // models), so a models-list-based check false-fails there even when the embedding model
+  // works fine. transformersjs is a local, in-process engine with no endpoint to probe.
   if (config.provider.embeddingEngine === "http") {
     const embeddingModel = config.provider.embeddingModel;
-    const embeddingResult = await checkModelAvailable(baseUrl, embeddingModel, "Embedding model");
+    const embeddingResult = await checkEmbeddingModelAvailable(baseUrl, embeddingModel, process.env["LLM_API_KEY"], "Embedding model");
     if (embeddingResult.status === "fail") {
-      errors.push(`Embedding model "${embeddingModel}" not found at ${baseUrl} — try: ollama pull ${embeddingModel}`);
+      errors.push(embeddingResult.message);
     } else if (embeddingResult.status === "warn") {
       warnings.push(embeddingResult.message);
     }

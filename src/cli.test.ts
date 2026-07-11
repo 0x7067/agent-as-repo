@@ -2,6 +2,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import * as http from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
 interface CliResult {
@@ -184,6 +186,47 @@ async function writeUnreachableSetupWorkspace(cwd: string): Promise<void> {
     "    description: test repo",
   ].join("\n");
   await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
+}
+
+interface FakeOpenRouterServer {
+  baseUrl: string;
+  close: () => Promise<void>;
+}
+
+/**
+ * Minimal stand-in for OpenRouter's shape: `GET /models` lists only chat models (embedding
+ * models never appear there), while `POST /embeddings` actually serves embeddings. Used to
+ * verify the setup preflight no longer false-fails on the embedding model check (finding 5).
+ */
+async function startFakeOpenRouterServer(chatModelIds: string[]): Promise<FakeOpenRouterServer> {
+  const server = http.createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", () => {
+      if (req.url?.endsWith("/models") && req.method === "GET") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ data: chatModelIds.map((id) => ({ id })) }));
+        return;
+      }
+      if (req.url?.endsWith("/embeddings") && req.method === "POST") {
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { input: string[] };
+        const data = body.input.map((_, index) => ({ index, embedding: [0.1, 0.2, 0.3] }));
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ data }));
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    baseUrl: `http://127.0.0.1:${String(port)}/v1`,
+    close: () => new Promise((resolve, reject) => {
+      server.close((error) => { if (error) reject(error); else resolve(); });
+    }),
+  };
 }
 
 async function writeAskWorkspace(cwd: string, providerLines: string[]): Promise<void> {
@@ -1816,6 +1859,51 @@ describe("cli contract", () => {
     expect(payload.results[0].status).toBe("ok");
     expect(payload.results[0].chunksLoaded).toBe(1);
     expect(payload.results[0].chunksFailed).toBe(1);
+  });
+
+  it("setup preflight no longer false-fails on the embedding model against an OpenRouter-shaped endpoint (embedding model absent from /models)", async () => {
+    const fakeServer = await startFakeOpenRouterServer(["openai/gpt-4o-mini"]);
+    try {
+      const cwd = await makeWorkspace("repo-expert-cli-setup-preflight-openrouter-");
+      const repoDir = path.join(cwd, "repo");
+      await mkdirWorkspaceDir(repoDir, { recursive: true });
+      await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+      const config = [
+        "provider:",
+        "  model: openai/gpt-4o-mini",
+        `  base_url: ${fakeServer.baseUrl}`,
+        "  embedding_model: openai/text-embedding-3-small",
+        "repos:",
+        "  my-app:",
+        `    path: ${repoDir}`,
+        "    description: test repo",
+      ].join("\n");
+      await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
+
+      // No --skip-preflight and no REPO_EXPERT_TEST_FAKE_PROVIDER: this exercises the real
+      // preflight (GET /models + POST /embeddings) and the real indexing embedder against
+      // the fake local endpoint. Uses async `spawn` (not the `runCli` spawnSync helper):
+      // spawnSync would block this test process's event loop, starving the in-process fake
+      // HTTP server of the chance to accept/answer the child's requests.
+      const child = spawn(tsxBinPath(), [cliEntryPath, "setup", "--config", "config.yaml", "--no-bootstrap"], {
+        cwd,
+        env: { ...process.env, LLM_API_KEY: "sk-test" },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+      child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+      const code = await new Promise<number | null>((resolve) => {
+        child.on("exit", (exitCode) => { resolve(exitCode); });
+      });
+
+      expect(code).toBe(0);
+      expect(stdout).toContain("Setup complete.");
+      expect(stderr).not.toContain("Embedding model");
+    } finally {
+      await fakeServer.close();
+    }
   });
 
   it("supports setup --reindex and emits JSON timings", async () => {
