@@ -66,6 +66,7 @@ import { isPathIgnoredByGitignore } from "./core/gitignore.js";
 import { buildPostSetupNextSteps, getSetupMode, resolveEffectiveSetupMode } from "./core/setup.js";
 import { MAX_INDEXABLE_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Chunk, type ChunkingStrategy, type Config, type FileInfo, type RepoConfig, type SkippedFile, type SymbolFileMap } from "./core/types.js";
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
+import { resolveRepoTarget } from "./core/repo-target.js";
 import type { LocalRuntimeOptions } from "./shell/local-provider.js";
 import type { SymbolLookupPort } from "./shell/agent-tools.js";
 import type { BlockStorage } from "./shell/block-storage.js";
@@ -689,6 +690,26 @@ function requireAgent(state: AppState, repoName: string): AgentState | null {
 
 function getOwnRecordValue<T>(record: Record<string, T>, key: string): T | undefined {
   return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+/**
+ * Reconcile a command's optional positional repo argument against its
+ * `--repo` flag (kept for back-compat). Prints and sets a non-zero exit code
+ * on a conflict. Returns `{ ok: false }` in that case so callers can bail
+ * without confusing a real conflict with the legitimate "no repo given, use
+ * all agents" case (both would otherwise be `undefined`).
+ */
+function resolveRepoArgOrExit(
+  positional: string | undefined,
+  flag: string | undefined,
+): { ok: true; repo: string | undefined } | { ok: false } {
+  const target = resolveRepoTarget(positional, flag);
+  if (target.error) {
+    console.error(target.error);
+    process.exitCode = 1;
+    return { ok: false };
+  }
+  return { ok: true, repo: target.repo };
 }
 
 async function confirmDestroy(existing: string[]): Promise<boolean> {
@@ -1762,14 +1783,17 @@ program
   });
 
 program
-  .command("export")
+  .command("export [repo]")
   .description("Export agent memory to markdown")
   .option("--repo <name>", "Export a single repo agent")
-  .action(async (opts: RepoOpts) => {
+  .action(async (repoArg: string | undefined, opts: RepoOpts) => {
+    const target = resolveRepoArgOrExit(repoArg, opts.repo);
+    if (!target.ok) return;
+
     const state = await loadState(STATE_FILE);
     const exportConfig = await loadConfigSafe(path.resolve("config.yaml"));
     const provider = createProvider(exportConfig);
-    const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
+    const repoNames = target.repo ? [target.repo] : Object.keys(state.agents);
 
     for (const repoName of repoNames) {
       const agentInfo = requireAgent(state, repoName);
@@ -1802,14 +1826,17 @@ program
   });
 
 program
-  .command("destroy")
+  .command("destroy [repo]")
   .description("Delete agents")
   .option("--repo <name>", "Destroy a single repo agent")
   .option("--force", "Skip confirmation prompt")
   .option("--dry-run", "Preview agents that would be deleted")
-  .action(async (opts: DestroyOpts) => {
+  .action(async (repoArg: string | undefined, opts: DestroyOpts) => {
+    const target = resolveRepoArgOrExit(repoArg, opts.repo);
+    if (!target.ok) return;
+
     const state = await loadState(STATE_FILE);
-    const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
+    const repoNames = target.repo ? [target.repo] : Object.keys(state.agents);
     const existing = repoNames.filter((n) => Object.hasOwn(state.agents, n));
 
     if (existing.length === 0) {

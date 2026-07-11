@@ -292,9 +292,9 @@ describe("cli contract", () => {
       list [options] List all agents
       status [options] Show agent memory stats and health
       consolidate [options] Consolidate architecture/conventions memory blocks via the LLM
-      export [options] Export agent memory to markdown
+      export [options] [repo] Export agent memory to markdown
       onboard [options] <repo> Guided codebase walkthrough for new developers
-      destroy [options] Delete agents
+      destroy [options] [repo] Delete agents
       reconcile [options] Compare local passage state against the provider's actual state and report drift
       watch [options] Watch repos and auto-sync on repo changes
       install-daemon [options] Install launchd daemon for auto-sync on macOS
@@ -783,6 +783,83 @@ describe("cli contract", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Dry-run: would delete 1 agent");
+  });
+
+  it("supports destroy <repo> --dry-run with a positional repo argument", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-destroy-positional-");
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    // Previously a commander arity error: destroy had no positional arg defined.
+    const result = runCli(["destroy", "my-app", "--dry-run"], cwd);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("Dry-run: would delete 1 agent");
+  });
+
+  it("rejects destroy when the positional repo and --repo flag disagree", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-destroy-conflict-");
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["destroy", "my-app", "--repo", "other-app", "--dry-run"], cwd);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("my-app");
+    expect(result.stderr).toContain("other-app");
+  });
+
+  it("supports export <repo> with a positional repo argument", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-export-positional-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+
+    const result = runCli(["export", "my-app"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("my-app");
+  });
+
+  it("rejects export when the positional repo and --repo flag disagree", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-export-conflict-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+
+    const result = runCli(["export", "my-app", "--repo", "other-app"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("my-app");
+    expect(result.stderr).toContain("other-app");
   });
 
   it("supports sync --dry-run --json", { timeout: 30_000 }, async () => {
