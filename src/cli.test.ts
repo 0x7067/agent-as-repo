@@ -436,6 +436,123 @@ describe("cli contract", () => {
     expect(entry?.args).toEqual(["tsx", path.join(path.dirname(cliEntryPath), "mcp-server.ts")]);
   });
 
+  it("warns that mcp-install writes LLM_API_KEY in plaintext (finding 8)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-install-key-warn-");
+    const home = await makeWorkspace("repo-expert-cli-home-key-warn-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(["mcp-install", "--local"], cwd, {
+      HOME: home,
+      LLM_API_KEY: "sk-test-key",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("plaintext");
+    expect(result.stdout).toContain("LLM_API_KEY");
+  });
+
+  it("does not warn about plaintext keys when no LLM_API_KEY is configured", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-install-no-key-");
+    const home = await makeWorkspace("repo-expert-cli-home-no-key-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+    await writeWorkspaceFile(path.join(cwd, ".gitignore"), ".claude.json\n", "utf8");
+
+    const result = runCli(["mcp-install", "--local"], cwd, { HOME: home });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("plaintext");
+  });
+
+  it("warns on mcp-install --local when .claude.json is not covered by .gitignore (finding 8)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-install-gitignore-warn-");
+    const home = await makeWorkspace("repo-expert-cli-home-gitignore-warn-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+    // No .gitignore at all — .claude.json is definitely not covered.
+
+    const result = runCli(["mcp-install", "--local"], cwd, { HOME: home });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(".gitignore");
+    expect(result.stdout).toContain(".claude.json");
+  });
+
+  it("does not warn about gitignore coverage when .claude.json is already ignored", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-install-gitignore-ok-");
+    const home = await makeWorkspace("repo-expert-cli-home-gitignore-ok-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+    await writeWorkspaceFile(path.join(cwd, ".gitignore"), ".claude.json\n", "utf8");
+
+    const result = runCli(["mcp-install", "--local"], cwd, { HOME: home });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("not covered by .gitignore");
+  });
+
+  it("does not warn about gitignore coverage for a --global install (no local file written)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-install-global-");
+    const home = await makeWorkspace("repo-expert-cli-home-global-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(["mcp-install", "--global"], cwd, { HOME: home });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain(".gitignore");
+  });
+
+  it("mcp-check auto-detects a local ./.claude.json when no global config exists (finding 8)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-check-local-auto-");
+    const home = await makeWorkspace("repo-expert-cli-home-check-local-auto-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const install = runCli(["mcp-install", "--local"], cwd, { HOME: home });
+    expect(install.status).toBe(0);
+    await expect(fs.access(path.join(home, ".claude.json"))).rejects.toThrow();
+
+    const result = runCli(["mcp-check"], cwd, { HOME: home });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("MCP config looks good.");
+  });
+
+  it("mcp-check --local reports a clear error when the local file is missing", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-check-local-missing-");
+    const home = await makeWorkspace("repo-expert-cli-home-check-local-missing-");
+
+    const result = runCli(["mcp-check", "--local"], cwd, { HOME: home });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(path.join(cwd, ".claude.json"));
+  });
+
+  it("mcp-check still finds ~/.claude.json when no local override exists", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-check-global-fallback-");
+    const home = await makeWorkspace("repo-expert-cli-home-check-global-fallback-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const install = runCli(["mcp-install"], cwd, { HOME: home });
+    expect(install.status).toBe(0);
+
+    const result = runCli(["mcp-check"], cwd, { HOME: home });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("MCP config looks good.");
+  });
+
   it("writes LLM MCP env from environment variables when no config is present", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-local-llm-");
     const home = await makeWorkspace("repo-expert-cli-home-llm-");

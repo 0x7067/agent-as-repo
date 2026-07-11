@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { checkMcpEntry, generateMcpEntry, resolveMcpLaunchSpec, type McpLaunchSpec } from "./mcp-config.js";
+import {
+  checkMcpEntry,
+  generateMcpEntry,
+  resolveMcpLaunchSpec,
+  selectMcpConfigFile,
+  type McpLaunchSpec,
+} from "./mcp-config.js";
 
 const DEV_SERVER_PATH = "/abs/path/mcp-server.ts";
 const DEV_LAUNCH: McpLaunchSpec = { kind: "dev", serverPath: DEV_SERVER_PATH };
@@ -165,5 +171,44 @@ describe("checkMcpEntry", () => {
     const config = { model: MODEL, baseUrl: BASE_URL, embeddingModel: EMBEDDING_MODEL } as const;
     const entry = generateMcpEntry(launch, config);
     expect(checkMcpEntry(entry, launch, config).ok).toBe(true);
+  });
+});
+
+describe("selectMcpConfigFile (finding 8: mcp-check must also see ./.claude.json)", () => {
+  const paths = { localPath: "/repo/.claude.json", globalPath: "/home/user/.claude.json" };
+
+  it("uses the local file when --local is passed and it exists", () => {
+    const result = selectMcpConfigFile({ local: true }, paths, { localExists: true, globalExists: true });
+    expect(result).toEqual({ location: "local", configPath: paths.localPath });
+  });
+
+  it("returns null when --local is passed but the local file is missing", () => {
+    const result = selectMcpConfigFile({ local: true }, paths, { localExists: false, globalExists: true });
+    expect(result).toBeNull();
+  });
+
+  it("uses the global file when --global is passed and it exists", () => {
+    const result = selectMcpConfigFile({ global: true }, paths, { localExists: true, globalExists: true });
+    expect(result).toEqual({ location: "global", configPath: paths.globalPath });
+  });
+
+  it("returns null when --global is passed but the global file is missing", () => {
+    const result = selectMcpConfigFile({ global: true }, paths, { localExists: false, globalExists: false });
+    expect(result).toBeNull();
+  });
+
+  it("auto-detects the local file over global when neither flag is given and both exist", () => {
+    const result = selectMcpConfigFile({}, paths, { localExists: true, globalExists: true });
+    expect(result).toEqual({ location: "local", configPath: paths.localPath });
+  });
+
+  it("falls back to the global file when neither flag is given and only global exists", () => {
+    const result = selectMcpConfigFile({}, paths, { localExists: false, globalExists: true });
+    expect(result).toEqual({ location: "global", configPath: paths.globalPath });
+  });
+
+  it("returns null when neither flag is given and neither file exists", () => {
+    const result = selectMcpConfigFile({}, paths, { localExists: false, globalExists: false });
+    expect(result).toBeNull();
   });
 });

@@ -3,6 +3,7 @@
 import "dotenv/config";
 import { Command } from "commander";
 import path from "node:path";
+import type * as NodeFsPromises from "node:fs/promises";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -60,7 +61,8 @@ import { readPackageVersion } from "./shell/package-version.js";
 import { isMainModule } from "./shell/is-main-module.js";
 import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
-import { generateMcpEntry, checkMcpEntry, resolveMcpLaunchSpec, type McpLaunchSpec, type McpProviderConfig } from "./core/mcp-config.js";
+import { generateMcpEntry, checkMcpEntry, resolveMcpLaunchSpec, selectMcpConfigFile, type McpCheckResult, type McpConfigLocation, type McpLaunchSpec, type McpProviderConfig, type McpServerEntry } from "./core/mcp-config.js";
+import { isPathIgnoredByGitignore } from "./core/gitignore.js";
 import { buildPostSetupNextSteps, getSetupMode, resolveEffectiveSetupMode } from "./core/setup.js";
 import { MAX_INDEXABLE_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Chunk, type ChunkingStrategy, type Config, type FileInfo, type RepoConfig, type SkippedFile, type SymbolFileMap } from "./core/types.js";
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
@@ -2094,6 +2096,8 @@ interface McpInstallOpts {
 }
 
 interface McpCheckOpts {
+  global?: boolean;
+  local?: boolean;
   json?: boolean;
   config: string;
 }
@@ -2174,6 +2178,39 @@ program
     }
   });
 
+/**
+ * Finding 8: the config `mcp-install` writes carries LLM_API_KEY in
+ * plaintext, and a local install (`./.claude.json`) is easy to commit by
+ * accident — warn on both, on top of whatever provider-config warnings
+ * `resolveMcpProviderConfig` already produced.
+ */
+async function buildMcpInstallWarnings(params: {
+  local: boolean | undefined;
+  entry: McpServerEntry;
+  configFile: string;
+  baseWarnings: string[];
+  fs: typeof NodeFsPromises;
+}): Promise<string[]> {
+  const { local, entry, configFile, baseWarnings, fs } = params;
+  const warnings = [...baseWarnings];
+
+  const apiKey = entry.env["LLM_API_KEY"];
+  if (typeof apiKey === "string" && apiKey.length > 0) {
+    warnings.push(`${configFile} now contains your LLM_API_KEY in plaintext — treat it like a secret.`);
+  }
+
+  if (local) {
+    const gitignoreContent = await fs.readFile(path.resolve(".gitignore"), "utf8").catch(() => "");
+    if (!isPathIgnoredByGitignore(gitignoreContent, ".claude.json")) {
+      warnings.push(
+        '.claude.json is not covered by .gitignore — add it (e.g. "echo .claude.json >> .gitignore") to avoid committing your LLM API key.',
+      );
+    }
+  }
+
+  return warnings;
+}
+
 program
   .command("mcp-install")
   .description("Add the repo-expert MCP server entry to Claude Code config")
@@ -2220,9 +2257,17 @@ program
 
     await fs.writeFile(configFile, JSON.stringify(config, null, 2) + "\n", "utf8");
     console.log(`MCP entry written to ${configFile}`);
-    if (warnings.length > 0) {
+
+    const installWarnings = await buildMcpInstallWarnings({
+      local: opts.local,
+      entry,
+      configFile,
+      baseWarnings: warnings,
+      fs,
+    });
+    if (installWarnings.length > 0) {
       console.log("Warnings:");
-      for (const warning of warnings) {
+      for (const warning of installWarnings) {
         console.log(`  - ${warning}`);
       }
     }
@@ -2230,31 +2275,120 @@ program
     console.log('Tip: run "repo-expert install-instructions" to point Claude Code at these tools from CLAUDE.md/AGENTS.md.');
   });
 
+/**
+ * Finding 8: `mcp-install --local` writes `./.claude.json`, but `mcp-check`
+ * used to only ever read `~/.claude.json`, so a local install could never
+ * validate. Auto-detect which one to use (mirroring --local/--global on
+ * `mcp-install`) and report which was found; prints its own "not found"
+ * error (mirroring the pre-existing ENOENT message) since every caller
+ * needs the same message shape.
+ */
+async function resolveMcpCheckConfigFile(
+  opts: { local?: boolean; global?: boolean },
+  fs: typeof NodeFsPromises,
+  home: string,
+): Promise<{ configFile: string; location: McpConfigLocation } | null> {
+  const localPath = path.resolve(".claude.json");
+  const globalPath = path.join(home, ".claude.json");
+  const fileExists = async (candidate: string): Promise<boolean> =>
+    fs.access(candidate).then(() => true, () => false);
+
+  const selection = selectMcpConfigFile(
+    opts,
+    { localPath, globalPath },
+    { localExists: await fileExists(localPath), globalExists: await fileExists(globalPath) },
+  );
+  if (selection !== null) return { configFile: selection.configPath, location: selection.location };
+
+  if (opts.local) {
+    console.error(`Config file not found: ${localPath}`);
+  } else if (opts.global) {
+    console.error(`Config file not found: ${globalPath}`);
+  } else {
+    console.error(`Config file not found. Checked ${localPath} and ${globalPath}.`);
+  }
+  return null;
+}
+
+/** Reads and parses a Claude Code config file, logging the same actionable errors `mcp-check` always has (missing / invalid JSON). */
+async function readMcpConfigFile(
+  fs: typeof NodeFsPromises,
+  configFile: string,
+): Promise<Record<string, unknown> | null> {
+  const rawConfig = await fs.readFile(configFile, "utf8").catch((error: unknown) => {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+      console.error(`Config file not found: ${configFile}`);
+      return;
+    }
+    throw error;
+  });
+  if (rawConfig === undefined) return null;
+
+  try {
+    return JSON.parse(rawConfig) as Record<string, unknown>;
+  } catch {
+    console.error(`Failed to parse ${configFile}: invalid JSON.`);
+    return null;
+  }
+}
+
+/** Prints the human-readable (non-`--json`) `mcp-check` report; sets `process.exitCode = 1` on issues. */
+function printMcpCheckTextReport(params: {
+  location: McpConfigLocation;
+  configFile: string;
+  warnings: string[];
+  result: McpCheckResult;
+}): void {
+  const { location, configFile, warnings, result } = params;
+  console.log(`Checking ${location} config: ${configFile}`);
+
+  if (warnings.length > 0) {
+    console.log("Warnings:");
+    for (const warning of warnings) {
+      console.log(`  - ${warning}`);
+    }
+  }
+
+  if (result.ok) {
+    console.log("MCP config looks good.");
+    return;
+  }
+
+  console.error("Issues found:");
+  for (const issue of result.issues) {
+    console.error(`  - ${issue}`);
+  }
+  console.error('\nRun "repo-expert mcp-install" to fix.');
+  process.exitCode = 1;
+}
+
 program
   .command("mcp-check")
   .description("Validate existing MCP server entry in Claude Code config")
+  .option("--global", "Check global ~/.claude.json only")
+  .option("--local", "Check local ./.claude.json only")
   .option("--json", "Output check result as JSON")
   .option("--config <path>", "Config file path", "config.yaml")
   .action(async (opts: McpCheckOpts) => {
+    if (opts.global && opts.local) {
+      console.error("Choose either --global or --local, not both.");
+      process.exitCode = 1;
+      return;
+    }
+
     const fs = await import("node:fs/promises");
     const os = await import("node:os");
     const home = os.default.homedir();
-    const configFile = path.join(home, ".claude.json");
 
-    const rawConfig = await fs.readFile(configFile, "utf8").catch((error: unknown) => {
-      if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
-        console.error(`Config file not found: ${configFile}`);
-        process.exitCode = 1;
-        return;
-      }
-      throw error;
-    });
-    if (rawConfig === undefined) return;
-    let config: Record<string, unknown>;
-    try {
-      config = JSON.parse(rawConfig) as Record<string, unknown>;
-    } catch {
-      console.error(`Failed to parse ${configFile}: invalid JSON.`);
+    const resolved = await resolveMcpCheckConfigFile(opts, fs, home);
+    if (resolved === null) {
+      process.exitCode = 1;
+      return;
+    }
+    const { configFile, location } = resolved;
+
+    const config = await readMcpConfigFile(fs, configFile);
+    if (config === null) {
       process.exitCode = 1;
       return;
     }
@@ -2267,29 +2401,13 @@ program
     const result = checkMcpEntry(entry, launch, providerConfig);
 
     if (opts.json) {
-      const payload = warnings.length > 0 ? { ...result, warnings } : result;
+      const payload = { ...result, location, configPath: configFile, ...(warnings.length > 0 ? { warnings } : {}) };
       console.log(JSON.stringify(payload, null, 2));
       if (!result.ok) process.exitCode = 1;
       return;
     }
 
-    if (warnings.length > 0) {
-      console.log("Warnings:");
-      for (const warning of warnings) {
-        console.log(`  - ${warning}`);
-      }
-    }
-
-    if (result.ok) {
-      console.log("MCP config looks good.");
-    } else {
-      console.error("Issues found:");
-      for (const issue of result.issues) {
-        console.error(`  - ${issue}`);
-      }
-      console.error('\nRun "repo-expert mcp-install" to fix.');
-      process.exitCode = 1;
-    }
+    printMcpCheckTextReport({ location, configFile, warnings, result });
   });
 
 program
