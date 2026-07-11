@@ -113,3 +113,62 @@ Red-green per item: 3 (data integrity + trust), 2, 1, 5, 6, 4 (prompt +
 grounding), 7, 8, then the low tier. Items 1–3 have direct sqlite-verifiable
 assertions and existing repro workspaces under `/home/user/test-workspaces/`
 (ephemeral — recreate from the repro commands above if the container is gone).
+
+## Results (follow-up session, same day)
+
+### A. transformers.js — all 7 matrix items exercised
+
+HF egress was still blocked at session start (proxy CONNECT 403 to
+huggingface.co and CDN hosts) but opened mid-session. One environment
+gotcha to know: Node's built-in `fetch` (used by `@huggingface/transformers`)
+does **not** honor `HTTPS_PROXY` unless `NODE_USE_ENV_PROXY=1` is set
+(Node ≥ 22.21) — without it the download fails even when the proxy allows
+HF, and (pre-fix) that network failure looked like a successful setup.
+
+1. **Cold start: PASS.** ~132 MB total (137 MB quantized ONNX + tokenizer),
+   cached under `node_modules/@huggingface/transformers/.cache/`. flask:
+   1014/1014 chunks loaded. Download itself ~4 s.
+2. **Warm cache: PASS with caveat.** No re-download, but indexing wall time
+   is unchanged (~265 s for ~1000 chunks): CPU-bound q8 ONNX inference
+   dominates; the download was never the bottleneck. For comparison, the
+   same corpus indexes in ~2.2 s via OpenRouter `text-embedding-3-small`
+   (~120x faster).
+3. **Offline after warm-up: PASS.** With all proxy env stripped, `sync`
+   (1 changed file, 2.2 s) and semantic search both work fully offline.
+4. **Nomic prefixes: VERIFIED** in code (`embedding-prefix.ts` →
+   `embedder-factory.ts` applies `search_document:` on writes at
+   `sqlite-store.ts` and `search_query:` on searches) and behaviorally
+   (paraphrase query with zero term overlap retrieved the canary as #1).
+5. **Retrieval A/B: parity.** flask + sinatra, 3 grounded + 1 adversarial +
+   5x commit-canary per engine: transformersjs 3/3, honest, 5/5 + 4/5;
+   http/text-embedding-3-small identical (4/5 on the same sinatra canary).
+   `eval/bench.ts --engine transformersjs` vs the deterministic-stub
+   baseline: fused Recall@1 0.619→0.714, paraphrase 0.0→0.2, no-term
+   0.0→0.5, fused MRR 0.698→0.810 (bench has no `--engine http` mode, so
+   stub-vs-transformersjs is the only tool-level comparison).
+6. **Engine-switch reindex: two new bugs found**, both fixed this session —
+   without `--reindex` the mismatch is a silent "skip" and every search
+   errors (and pre-fix, the model then answered from pretrained knowledge);
+   `--reindex` was a complete no-op (all writes failed the dimension guard
+   while setup reported success, invisibly in `--json`). Post-fix the purge
+   resets the stored dimension and the flow recovers; total failure exits 1.
+7. **MCP with `LLM_EMBEDDING_ENGINE=transformersjs`: 8/8 tools PASS**
+   including insert→search→delete round-trip and unknown-agent error path.
+
+### B. Fix list — all items fixed except 13 (deferred, data-informed)
+
+Every item landed TDD red-green on `claude/repo-experts-e2e-followup-n3y8yd`
+(see the Outcomes table appended to the findings doc for the per-item
+detail, commits, and live-repro verification verdicts — findings 1–8 were
+each re-verified against their original repro with OpenRouter, including
+13/13-honest repeated adversarial probes across gin/express/flask for
+item 4). Item 13 (paraphrase/no-term retrieval) is deferred: the A/B above
+gives the first real signal (real embeddings already move it materially);
+an algorithm change should be designed against those numbers.
+
+Final state: 1381 tests passed / 1 skipped, typecheck clean, bench gates
+pass. Note for future sessions: `.repo-expert-state.json` resolves relative
+to CWD (not `REPO_EXPERT_DATA_DIR`), so isolated experiments need their own
+CWD, and agent worktrees created from a session snapshot may base on the
+default branch — check `git merge-base` before assuming a worktree includes
+branch work.
