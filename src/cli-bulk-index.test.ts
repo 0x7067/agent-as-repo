@@ -1,9 +1,9 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { buildBulkIndexArtifacts } from "./cli.js";
-import { selectChunkingStrategy } from "./core/chunker.js";
 import {
   initTreeSitterChunker,
   resetTreeSitterChunkerForTests,
+  treeSitterStrategy,
 } from "./core/tree-sitter-chunker.js";
 import { GRAMMAR_WASM_BY_LABEL, WEB_TREE_SITTER_WASM } from "./core/tree-sitter-test-paths.js";
 import type { FileInfo } from "./core/types.js";
@@ -33,10 +33,7 @@ describe("buildBulkIndexArtifacts", () => {
       },
     ];
 
-    const { chunks, symbolFiles } = buildBulkIndexArtifacts(
-      files,
-      selectChunkingStrategy("tree-sitter"),
-    );
+    const { chunks, symbolFiles } = buildBulkIndexArtifacts(files, treeSitterStrategy);
 
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks.every((c) => c.text.startsWith("FILE: src/a.ts"))).toBe(true);

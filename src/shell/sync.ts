@@ -11,9 +11,8 @@ import type {
   SymbolRankMap,
 } from "../core/types.js";
 import { computeSyncPlan } from "../core/sync.js";
-import { selectChunkingStrategy } from "../core/chunker.js";
 import { enrichChunks } from "../core/chunk-context.js";
-import { extractSymbolsAndRefsFromFile } from "../core/tree-sitter-chunker.js";
+import { extractSymbolsAndRefsFromFile, treeSitterStrategy } from "../core/tree-sitter-chunker.js";
 import { computeSymbolRanks, toStoredSymbolFile } from "../core/symbol-store.js";
 import type { SymbolRef } from "../core/symbol-refs.js";
 import type { PathAliasConfig } from "../core/tsconfig-paths.js";
@@ -26,7 +25,7 @@ export interface SyncRepoParams {
   collectFile: (filePath: string) => Promise<FileInfo | null>;
   headCommit: string;
   maxFileSizeKb?: number;
-  chunking?: "raw" | "tree-sitter";
+  /** Override the chunking strategy (tests inject raw/custom). Defaults to tree-sitter. */
   chunkingStrategy?: ChunkingStrategy;
   concurrency?: number;
   fullReIndexThreshold?: number;
@@ -180,7 +179,6 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
     collectFile,
     headCommit,
     maxFileSizeKb,
-    chunking,
     chunkingStrategy,
     concurrency = 20,
     fullReIndexThreshold = 500,
@@ -189,7 +187,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
     onProgress,
   } = params;
 
-  const effectiveChunkingStrategy = chunkingStrategy ?? selectChunkingStrategy(chunking ?? "tree-sitter");
+  const effectiveChunkingStrategy = chunkingStrategy ?? treeSitterStrategy;
   const plan = computeSyncPlan(agent.passages, changedFiles, fullReIndexThreshold);
   const limit = pLimit(concurrency);
   const maps: MutableSyncMaps = {

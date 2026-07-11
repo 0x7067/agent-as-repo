@@ -28,12 +28,12 @@ import { SqlitePassageStore } from "./shell/sqlite-store.js";
 import { SqliteBlockStorage } from "./shell/sqlite-block-storage.js";
 import { resolveStoreDbPath } from "./shell/repo-expert-paths.js";
 import { createEmbedder } from "./shell/embedder-factory.js";
-import { selectChunkingStrategy } from "./core/chunker.js";
 import { enrichChunks } from "./core/chunk-context.js";
 import { hashFileContent } from "./core/content-hash.js";
 import {
   extractSymbolsAndRefsFromFile,
   initTreeSitterChunker,
+  treeSitterStrategy,
 } from "./core/tree-sitter-chunker.js";
 import { computeSymbolRanks, toStoredSymbolFile } from "./core/symbol-store.js";
 import { repoFilterOptions, shouldIncludeFile } from "./core/filter.js";
@@ -459,9 +459,9 @@ async function loadConfigSafe(configPath: string): Promise<Config> {
   }
 }
 
-async function prepareChunking(): Promise<ReturnType<typeof selectChunkingStrategy>> {
+async function prepareChunking(): Promise<ChunkingStrategy> {
   await initTreeSitterChunker(resolveTreeSitterWasmPaths());
-  return selectChunkingStrategy("tree-sitter");
+  return treeSitterStrategy;
 }
 
 function resolveMcpProviderConfig(config: Config | null): { providerConfig: McpProviderConfig; warnings: string[] } {

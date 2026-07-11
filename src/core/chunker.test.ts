@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { chunkFile, extractSourcePath, rawTextStrategy, selectChunkingStrategy } from "./chunker.js";
+import { chunkFile, extractSourcePath, rawTextStrategy } from "./chunker.js";
 
 const SMALL_FILE_PATH = "src/index.ts";
 const SMALL_FILE_CONTENT = "const x = 1;";
@@ -159,16 +159,6 @@ describe("rawTextStrategy", () => {
   it("returns empty array for empty content", () => {
     const file = { path: "empty.ts", content: "", sizeKb: 0 };
     expect(rawTextStrategy(file)).toEqual([]);
-  });
-});
-
-describe("selectChunkingStrategy", () => {
-  it("returns rawTextStrategy for raw chunking", () => {
-    expect(selectChunkingStrategy("raw")).toBe(rawTextStrategy);
-  });
-
-  it("returns a different strategy for tree-sitter chunking", () => {
-    expect(selectChunkingStrategy("tree-sitter")).not.toBe(rawTextStrategy);
   });
 });
 
