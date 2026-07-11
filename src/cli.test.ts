@@ -1652,6 +1652,53 @@ describe("cli contract", () => {
     expect(payload.results[0].totalMs).toBeGreaterThanOrEqual(0);
   });
 
+  it("purges existing passages before reloading during --reindex (no stale/duplicate content)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-reindex-purge-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: { "a.ts": ["p-1"] },
+          lastBootstrap: null,
+          lastSyncCommit: "abc123",
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const reindexResult = runCli(
+      ["setup", "--config", "config.yaml", "--reindex", "--no-bootstrap"],
+      cwd,
+      { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" },
+    );
+    expect(reindexResult.status).toBe(0);
+    expect(reindexResult.stdout.toLowerCase()).toContain("purging existing passages");
+  });
+
+  it("does not log a purge step on a brand-new create (nothing to purge)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-create-no-purge-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(
+      ["setup", "--config", "config.yaml", "--no-bootstrap"],
+      cwd,
+      { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" },
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout.toLowerCase()).not.toContain("purging existing passages");
+  });
+
   it("recovers setup after partial failure and resumes on next run", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-setup-resume-");
     const repoDir = path.join(cwd, "repo");

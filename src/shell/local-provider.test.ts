@@ -15,6 +15,7 @@ function makeMockStore() {
     initAgent: vi.fn().mockResolvedValue(),
     deleteAgent: vi.fn().mockResolvedValue(),
     listAgents: vi.fn().mockResolvedValue([]),
+    deletePassagesForAgent: vi.fn().mockResolvedValue(),
     writePassage: vi.fn().mockResolvedValue(),
     writePassages: vi.fn().mockResolvedValue(),
     readPassage: vi.fn().mockResolvedValue(""),
@@ -122,6 +123,14 @@ describe("LocalProvider", () => {
       mockStore.listAgents.mockResolvedValue(["other-repo"]);
 
       await expect(provider.agentExists("myrepo")).resolves.toBe(false);
+    });
+  });
+
+  describe("purgePassages", () => {
+    it("delegates to the store's deletePassagesForAgent", async () => {
+      await provider.purgePassages("myrepo");
+
+      expect(mockStore.deletePassagesForAgent).toHaveBeenCalledWith("myrepo");
     });
   });
 

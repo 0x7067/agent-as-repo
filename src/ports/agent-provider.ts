@@ -44,6 +44,13 @@ export interface AgentProvider {
    * same as before this existed.
    */
   agentExists?(this: void, agentId: string): Promise<boolean>;
+  /**
+   * Delete all of an agent's stored passages (and dependent index rows)
+   * without deleting the agent record itself. Used by `setup --reindex` to
+   * purge stale/duplicate content before reloading. Optional for the same
+   * backward-compatibility reason as `agentExists`.
+   */
+  purgePassages?(this: void, agentId: string): Promise<void>;
   storePassage(this: void, agentId: string, text: string): Promise<string>;
   /**
    * Batch write path: stores multiple passages together (fewer embedding

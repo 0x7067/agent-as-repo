@@ -231,4 +231,38 @@ describe.each(IMPLEMENTATIONS)("PassageStore contract: $name", ({ create }) => {
 
     expect(await store.semanticSearch("repo-a", "vanishingMarkerToken", 5)).toEqual([]);
   });
+
+  it("deletePassagesForAgent removes all passages but keeps the agent registered", async () => {
+    await store.initAgent("repo-a", MANIFEST);
+    await store.writePassage("repo-a", "p-1", "the reindexMarkerToken text");
+    await store.writePassage("repo-a", "p-2", "more content");
+
+    await store.deletePassagesForAgent("repo-a");
+
+    expect(await store.listAgents()).toContain("repo-a");
+    expect(await store.listPassages("repo-a")).toEqual([]);
+    expect(await store.semanticSearch("repo-a", "reindexMarkerToken", 5)).toEqual([]);
+  });
+
+  it("deletePassagesForAgent does not touch other agents' passages", async () => {
+    await store.initAgent("repo-a", MANIFEST);
+    await store.initAgent("repo-b", { ...MANIFEST, agentId: "repo-b" });
+    await store.writePassage("repo-a", "p-a", "alpha content");
+    await store.writePassage("repo-b", "p-b", "beta content");
+
+    await store.deletePassagesForAgent("repo-a");
+
+    expect(await store.listPassages("repo-a")).toEqual([]);
+    expect(await store.listPassages("repo-b")).toEqual([{ id: "p-b", text: "beta content" }]);
+  });
+
+  it("allows reinserting passages under the same id after a purge", async () => {
+    await store.initAgent("repo-a", MANIFEST);
+    await store.writePassage("repo-a", "p-1", "old text");
+    await store.deletePassagesForAgent("repo-a");
+
+    await store.writePassage("repo-a", "p-1", "new text");
+
+    expect(await store.listPassages("repo-a")).toEqual([{ id: "p-1", text: "new text" }]);
+  });
 });

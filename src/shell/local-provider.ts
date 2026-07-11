@@ -143,6 +143,11 @@ export class LocalProvider implements AgentProvider {
     return ids.includes(agentId);
   }
 
+  /** Purge an agent's passages before a full reload (`setup --reindex`) without touching the agent record. */
+  async purgePassages(agentId: string): Promise<void> {
+    await this.store.deletePassagesForAgent(agentId);
+  }
+
   async storePassage(agentId: string, text: string): Promise<string> {
     const uuid = randomUUID();
     await this.store.writePassage(agentId, uuid, text);

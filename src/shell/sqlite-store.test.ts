@@ -413,6 +413,89 @@ describe("SqlitePassageStore", () => {
     });
   });
 
+  describe("embedding dimension reset on purge (engine switch)", () => {
+    /** Embedder whose dimension can be flipped mid-test, simulating an embedding_engine switch. */
+    function makeSwitchableEmbed(): { embed: EmbedTexts; setDimension: (d: number) => void } {
+      let dimension = 8;
+      const embed: EmbedTexts = (texts) =>
+        Promise.resolve(
+          texts.map((text) => {
+            const vector = Array.from({ length: dimension }, () => 0);
+            vector[text.length % dimension] = 1;
+            return vector;
+          }),
+        );
+      return { embed, setDimension: (d: number) => { dimension = d; } };
+    }
+
+    it("re-derives the dimension after a purge empties the store, so a new engine's dimension loads", async () => {
+      const { embed, setDimension } = makeSwitchableEmbed();
+      const switchDbPath = path.join(dir, "switch.db");
+      const switchStore = new SqlitePassageStore({ dbPath: switchDbPath, embed });
+      await switchStore.initAgent("repo-a", MANIFEST);
+      await switchStore.writePassage("repo-a", "p-old", "old engine text");
+
+      setDimension(16); // engine switch: every write now fails the dimension guard
+      await expect(switchStore.writePassage("repo-a", "p-new", "pre-purge write")).rejects.toThrow(
+        /dimension mismatch/i,
+      );
+
+      await switchStore.deletePassagesForAgent("repo-a");
+      await switchStore.writePassage("repo-a", "p-new", "the newEngineMarkerToken text");
+
+      expect(await switchStore.listPassages("repo-a")).toEqual([
+        { id: "p-new", text: "the newEngineMarkerToken text" },
+      ]);
+      const results = await switchStore.semanticSearch("repo-a", "the newEngineMarkerToken text", 5);
+      expect(results[0]).toMatchObject({ id: "p-new" });
+      switchStore.close();
+
+      const db = openVectorDatabase(switchDbPath);
+      try {
+        const row = db.prepare("SELECT value FROM meta WHERE key = 'embedding_dimension'").get() as {
+          value: string;
+        };
+        expect(row.value).toBe("16");
+      } finally {
+        db.close();
+      }
+    });
+
+    it("keeps the stored dimension when other agents still have passages after a purge", async () => {
+      const { embed, setDimension } = makeSwitchableEmbed();
+      const sharedStore = new SqlitePassageStore({ dbPath: path.join(dir, "shared.db"), embed });
+      await sharedStore.initAgent("repo-a", MANIFEST);
+      await sharedStore.initAgent("repo-b", { ...MANIFEST, agentId: "repo-b" });
+      await sharedStore.writePassage("repo-a", "p-a", "alpha text");
+      await sharedStore.writePassage("repo-b", "p-b", "the survivorMarkerToken text");
+
+      await sharedStore.deletePassagesForAgent("repo-a");
+
+      setDimension(16);
+      await expect(sharedStore.writePassage("repo-a", "p-a2", "new engine text")).rejects.toThrow(
+        /dimension mismatch/i,
+      );
+      setDimension(8);
+      const results = await sharedStore.semanticSearch("repo-b", "the survivorMarkerToken text", 5);
+      expect(results[0]).toMatchObject({ id: "p-b" });
+      sharedStore.close();
+    });
+
+    it("re-derives the dimension after deleteAgent removes the last passages", async () => {
+      const { embed, setDimension } = makeSwitchableEmbed();
+      const soloStore = new SqlitePassageStore({ dbPath: path.join(dir, "solo.db"), embed });
+      await soloStore.initAgent("repo-a", MANIFEST);
+      await soloStore.writePassage("repo-a", "p-1", "old engine text");
+
+      await soloStore.deleteAgent("repo-a");
+
+      setDimension(16);
+      await soloStore.initAgent("repo-a", MANIFEST);
+      await expect(soloStore.writePassage("repo-a", "p-2", "new engine text")).resolves.toBeUndefined();
+      soloStore.close();
+    });
+  });
+
   it("creates the parent directory for the DB file when missing", async () => {
     const nestedPath = path.join(dir, "deep", "nested", "store.db");
 

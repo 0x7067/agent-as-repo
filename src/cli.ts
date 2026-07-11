@@ -313,6 +313,11 @@ class FakeProvider implements AgentProvider {
     return Promise.resolve(!missing.includes(agentId));
   }
 
+  purgePassages(agentId: string): Promise<void> {
+    this.passagesByAgent[agentId] = [];
+    return Promise.resolve();
+  }
+
   async storePassage(agentId: string, text: string): Promise<string> {
     const delayMs = Number.parseInt(process.env["REPO_EXPERT_TEST_DELAY_STORE_MS"] ?? "0", 10);
     if (!Number.isNaN(delayMs) && delayMs > 0) {
@@ -1231,6 +1236,13 @@ program
 
         if (mode === "create" || mode === "resume_full" || mode === "reindex_full") {
           const indexStart = Date.now();
+          // A full (re)load is about to write every chunk fresh — purge any passages already
+          // under this agentId first so a reindex (or a redo of an interrupted resume/self-heal)
+          // never leaves stale/duplicate rows behind. No-op when nothing exists yet.
+          if (mode !== "create") {
+            log(`  Purging existing passages before full ${mode === "reindex_full" ? "reindex" : "reload"}...`);
+          }
+          await provider.purgePassages?.(agentId);
           log(`  Collecting files from ${repoConfig.path}...`);
           const files = await collectFiles(repoConfig);
           filesFound = files.length;
