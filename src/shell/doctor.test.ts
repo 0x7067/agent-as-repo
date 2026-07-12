@@ -33,10 +33,6 @@ function stubFetchOk(): void {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okResponse()));
 }
 
-function stubFetchOkWithModels(ids: string[]): void {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(modelsResponse(ids)));
-}
-
 function modelsResponse(ids: string[]): Response {
   return {
     ok: true,
@@ -53,6 +49,9 @@ function fakeEmbedOk(dimensions = 3): typeof embed {
 function fakeEmbedRejecting(message: string): typeof embed {
   return () => Promise.reject(new Error(message));
 }
+
+/** Fake `embed()` that "succeeds" with a malformed (empty) embedding vector. */
+const emptyEmbed: typeof embed = () => Promise.resolve([[]]);
 
 /**
  * Combined global-`fetch` stub for `runAllChecks`: `GET {base}/models` answers with
@@ -220,7 +219,6 @@ describe("doctor shell checks", () => {
     });
 
     it("fails when the probe resolves but returns a malformed/empty embedding", async () => {
-      const emptyEmbed: typeof embed = () => Promise.resolve([[]]);
       const result = await checkEmbeddingModelAvailable(LOCAL_BASE_URL, "nomic-embed-text", undefined, "Embedding model", emptyEmbed);
       expect(result.status).toBe("fail");
     });

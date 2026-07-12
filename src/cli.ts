@@ -860,16 +860,25 @@ function printProgress(loaded: number, total: number): void {
   process.stdout.write(`\r  Loading passages: ${String(loaded)}/${String(total)}`);
 }
 
+// Warnings go to stderr in BOTH modes (json and plain): they never corrupt the JSON on
+// stdout, and silencing them in --json mode previously hid "N/N chunks failed to load" entirely.
+function warn(line: string): void {
+  console.warn(line);
+}
+
 function noInputEnabled(): boolean {
   return process.argv.includes("--no-input") || program.opts<ProgramOpts>().noInput === true;
 }
 
 function interactiveInputAvailable(): boolean {
-  // Explicit `=== true` (not a bare `&&`) so this always yields a real boolean:
-  // `isTTY` is `undefined` on piped/non-TTY streams, and an `undefined` value
-  // handed to a destructured option with a default (e.g. `allowPrompts = true`)
-  // silently falls back to that default instead of being treated as falsy.
-  return process.stdin.isTTY === true && process.stdout.isTTY === true;
+  // Node's tty typings declare `isTTY: boolean`, but at runtime it is
+  // `undefined` on piped/non-TTY streams — widen to the runtime shape so the
+  // `=== true` coercion stays type-honest. Without it, an `undefined` handed
+  // to a destructured option with a default (e.g. `allowPrompts = true` in
+  // init.ts) silently re-enables prompts on piped stdin.
+  const stdin: { isTTY?: boolean } = process.stdin;
+  const stdout: { isTTY?: boolean } = process.stdout;
+  return stdin.isTTY === true && stdout.isTTY === true;
 }
 
 function readDebugEnabled(argv: string[]): boolean {
@@ -1191,9 +1200,6 @@ program
     }
 
     const log = opts.json ? (_: string) => {} : (line: string) => { console.log(line); };
-    // Warnings go to stderr in BOTH modes: they never corrupt the JSON on stdout,
-    // and silencing them in --json mode previously hid "N/N chunks failed to load" entirely.
-    const warn = (line: string): void => { console.warn(line); };
     const loadRetries = parseNonNegativeInt(opts.loadRetries, 2);
     const bootstrapRetries = parseNonNegativeInt(opts.bootstrapRetries, 2);
     const loadTimeoutMs = parseNonNegativeInt(opts.loadTimeoutMs, 300_000);
@@ -1317,7 +1323,8 @@ program
           filesSkipped = skippedFiles.length;
           log(`  Found ${String(files.length)} files`);
           if (skippedFiles.length > 0) {
-            warn(`  ${String(skippedFiles.length)} files skipped (> ${String(MAX_INDEXABLE_FILE_SIZE_KB)} KB): ${skippedFiles.map((f) => `${f.path} (${f.sizeKb.toFixed(1)} KB)`).join(", ")}`);
+            const skippedList = skippedFiles.map((f) => `${f.path} (${f.sizeKb.toFixed(1)} KB)`).join(", ");
+            warn(`  ${String(skippedFiles.length)} files skipped (> ${String(MAX_INDEXABLE_FILE_SIZE_KB)} KB): ${skippedList}`);
           }
 
           const { chunks, symbolFiles } = buildBulkIndexArtifacts(files, chunkingStrategy);

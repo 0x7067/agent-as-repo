@@ -6,7 +6,7 @@ import { runInit } from "./init.js";
 import type { FileSystemPort, WatcherHandle } from "../ports/filesystem.js";
 
 interface MockRl {
-  question(prompt: string): Promise<string>;
+  question(this: void, prompt: string): Promise<string>;
 }
 
 function makeRl(answers: string[]): MockRl {

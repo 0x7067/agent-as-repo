@@ -10,8 +10,8 @@ import { extractSourcePath } from "./chunker.js";
 
 const TEMPLATE_PATH_PREFIX = "path/to/";
 const BACKTICK_TOKEN_RE = /`([^`\n]+)`/g;
-/** At least two path segments (so bare dir names like "/tests" don't match). */
-const PATH_LIKE_RE = /^[\w.-]+(?:\/[\w.-]+)+$/;
+/** A single path segment: word chars, dots, hyphens — no slashes. */
+const PATH_SEGMENT_RE = /^[\w.-]+$/;
 
 interface StoredPassageLike {
   text: string;
@@ -29,8 +29,17 @@ export function indexedPathsFromPassages(passages: StoredPassageLike[]): Set<str
   return paths;
 }
 
+/**
+ * At least two path segments (so bare dir names like "/tests" don't match).
+ * Split-then-test instead of a single `^segment(?:\/segment)+$` regex: the
+ * repeated group nested inside a `+` quantifier reads as a catastrophic-
+ * backtracking shape to static analysis, even though `/` disambiguates each
+ * repetition here. Splitting on `/` and testing each segment matches exactly
+ * the same set of strings without any regex repetition at all.
+ */
 function isPathLike(candidate: string): boolean {
-  return PATH_LIKE_RE.test(candidate);
+  const segments = candidate.split("/");
+  return segments.length > 1 && segments.every((segment) => PATH_SEGMENT_RE.test(segment));
 }
 
 /** Strips a literal `path/to/` template artifact so the remainder can be
@@ -54,7 +63,7 @@ function groundLine(line: string, indexedPaths: Set<string>): LineGroundingResul
   let keep = true;
   const dropped: string[] = [];
 
-  const groundedLine = line.replace(BACKTICK_TOKEN_RE, (match: string, raw: string) => {
+  const groundedLine = line.replaceAll(BACKTICK_TOKEN_RE, (match: string, raw: string) => {
     if (!isPathLike(raw)) return match;
     const { candidate, strippedPrefix } = stripTemplatePrefix(raw);
     if (!indexedPaths.has(candidate)) {
