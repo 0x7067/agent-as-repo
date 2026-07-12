@@ -28,7 +28,7 @@ import {
 } from "../src/core/tree-sitter-chunker.js";
 import type { Chunk, ChunkingStrategy, FileInfo, RepoConfig } from "../src/core/types.js";
 import { collectFiles } from "../src/shell/file-collector.js";
-import { createEmbedder } from "../src/shell/embedder-factory.js";
+import { createEmbedder, type EmbedderDeps } from "../src/shell/embedder-factory.js";
 import { resolveTreeSitterWasmPaths } from "../src/shell/tree-sitter-paths.js";
 import { SqlitePassageStore, type EmbedTexts } from "../src/shell/sqlite-store.js";
 import { stubEmbed } from "../src/shell/__test__/stub-embedder.js";
@@ -42,7 +42,19 @@ export const AGENT_ID = "bench";
 export const SEARCH_LIMIT = 10;
 export const LEG_NAMES = ["vector", "lexical", "fused"] as const;
 export type LegName = (typeof LEG_NAMES)[number];
-export type Engine = "deterministic" | "transformersjs";
+export type Engine = "deterministic" | "transformersjs" | "http";
+
+/** Overrides needed to build the `--engine http` embedder; apiKey is required in practice (checked by the bench entry point, not here). */
+export interface HttpEngineParams {
+  model: string;
+  baseUrl: string;
+  apiKey?: string;
+}
+
+/** Default embedding model for `--engine http` when `--model` is not given. */
+export const DEFAULT_HTTP_EMBEDDING_MODEL = "openai/text-embedding-3-small";
+/** Default base URL for `--engine http` when `--base-url` and `LLM_BASE_URL` are both unset. */
+export const DEFAULT_HTTP_BASE_URL = "https://openrouter.ai/api/v1";
 
 /**
  * Source file path a passage came from: the FILE: header, stripped of the
@@ -74,10 +86,25 @@ export async function prepareChunking(): Promise<{ strategy: ChunkingStrategy; t
   }
 }
 
-export function makeEmbedder(engine: Engine): EmbedTexts {
+/**
+ * Build the embedder for a given engine. `http` (report-only, like
+ * transformersjs) requires `httpParams` and routes through the shared
+ * `createEmbedder` factory — the same wiring the CLI/MCP provider path uses —
+ * so nomic-style task prefixes and llm-client conventions are reused rather
+ * than reimplemented here. `deps` lets tests inject a fake HTTP embed
+ * function without hitting the network.
+ */
+export function makeEmbedder(engine: Engine, httpParams?: HttpEngineParams, deps?: EmbedderDeps): EmbedTexts {
   if (engine === "transformersjs") {
     // Report-only tier: real in-process embeddings (needs a model download).
-    return createEmbedder({ engine: "transformersjs", model: DEFAULT_TRANSFORMERSJS_EMBEDDING_MODEL, baseUrl: "" });
+    return createEmbedder({ engine: "transformersjs", model: DEFAULT_TRANSFORMERSJS_EMBEDDING_MODEL, baseUrl: "" }, deps);
+  }
+  if (engine === "http") {
+    // Report-only tier: real OpenAI-compatible remote embeddings (e.g. OpenRouter).
+    if (httpParams === undefined) {
+      throw new Error('makeEmbedder("http", ...) requires model/baseUrl params');
+    }
+    return createEmbedder({ engine: "http", ...httpParams }, deps);
   }
   // Deterministic tier: the stub is constructed directly (no createEmbedder),
   // so per-task prefixes never pollute the bag-of-words vectors.
