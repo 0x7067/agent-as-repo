@@ -1,6 +1,12 @@
 /* eslint-disable max-lines -- passage store + hybrid search intentionally stay in one module. */
 import { extractSourcePath } from "../core/chunker.js";
-import { rrfFuse, toFtsMatchQuery } from "../core/hybrid-rank.js";
+import {
+  FUSED_LEXICAL_WEIGHT,
+  FUSED_RRF_K,
+  FUSED_VECTOR_WEIGHT,
+  rrfFuse,
+  toFtsMatchQuery,
+} from "../core/hybrid-rank.js";
 import type {
   AgentManifest,
   PassageSearchResult,
@@ -377,7 +383,9 @@ export class SqlitePassageStore implements PassageStore {
     return {
       vector: toResults(rrfFuse([vectorIds])),
       lexical: toResults(rrfFuse([lexicalIds])),
-      fused: toResults(rrfFuse([vectorIds, lexicalIds])),
+      fused: toResults(
+        rrfFuse([vectorIds, lexicalIds], FUSED_RRF_K, [FUSED_VECTOR_WEIGHT, FUSED_LEXICAL_WEIGHT]),
+      ),
     };
   }
 
