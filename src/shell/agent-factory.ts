@@ -18,6 +18,7 @@ export async function createRepoAgent(
     description: repoConfig.description,
     model: modelOptions.model,
     ...(repoConfig.persona === undefined ? {} : { persona: repoConfig.persona }),
+    ...(repoConfig.basePath === undefined ? {} : { basePath: repoConfig.basePath }),
   };
   const { agentId } = await provider.createAgent(createAgentParams);
 

@@ -9,6 +9,7 @@ const EXCLUDED_EXTENSIONS = new Set([
   ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mkv",
   ".pdf", ".doc", ".docx", ".xls", ".xlsx",
   ".lock", ".map",
+  ".pbxproj", ".xcworkspacedata", ".resolved", ".sample",
 ]);
 
 /** Directories commonly ignored in code indexing. */
@@ -59,6 +60,33 @@ export function suggestIgnoreDirs(files: string[]): string[] {
  */
 export function detectRepoName(repoPath: string): string {
   return path.basename(repoPath);
+}
+
+export interface NonInteractiveGuardInput {
+  /** True when interactive prompting is currently possible (a TTY session, no --no-input). */
+  allowPrompts: boolean;
+  /** True when a repo path was already supplied via --repo-path. */
+  repoPathProvided: boolean;
+  /** True when the user explicitly passed --no-input (vs. stdin simply not being a TTY). */
+  noInputFlagSet: boolean;
+}
+
+/**
+ * Decide whether `init` can proceed without prompting. Returns an error
+ * message when interactive prompts would be required but aren't available
+ * (e.g. piped/non-TTY stdin with no --repo-path flag), or null when init
+ * can proceed — either prompts are allowed, or all required input was
+ * already supplied via flags.
+ *
+ * Fixes finding 7: piped (non-TTY) stdin with no flags used to silently
+ * consume buffered lines, then exit 0 having written nothing once stdin
+ * hit EOF mid-prompt.
+ */
+export function nonInteractiveInitError(input: NonInteractiveGuardInput): string | null {
+  if (input.allowPrompts || input.repoPathProvided) return null;
+  return input.noInputFlagSet
+    ? "Repository path is required. Pass --repo-path in non-interactive mode."
+    : "stdin is not a TTY — use --yes --repo-path <path> (and --model/--base-url as needed) for non-interactive init.";
 }
 
 export interface InitConfig {

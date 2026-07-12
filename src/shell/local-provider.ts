@@ -6,6 +6,7 @@ import type {
   CreateAgentResult,
   Passage,
   MemoryBlock,
+  RetrievedPassage,
   SendMessageOptions,
   ConsolidateMemoryOptions,
 } from "../ports/agent-provider.js";
@@ -113,7 +114,12 @@ export class LocalProvider implements AgentProvider {
 
   async createAgent(params: CreateAgentParams): Promise<CreateAgentResult> {
     const { repoName } = params;
-    const persona = buildPersona(repoName, params.description, params.persona);
+    const persona = buildPersona(
+      repoName,
+      params.description,
+      params.persona,
+      params.basePath === undefined ? {} : { indexedScope: params.basePath },
+    );
 
     await this.store.initAgent(repoName, {
       agentId: repoName,
@@ -135,6 +141,17 @@ export class LocalProvider implements AgentProvider {
   async deleteAgent(agentId: string): Promise<void> {
     await this.store.deleteAgent(agentId);
     this.blockStorage.delete(agentId);
+  }
+
+  /** Ground truth for "does this agent actually exist" — the store's agent registry, not local state. */
+  async agentExists(agentId: string): Promise<boolean> {
+    const ids = await this.store.listAgents();
+    return ids.includes(agentId);
+  }
+
+  /** Purge an agent's passages before a full reload (`setup --reindex`) without touching the agent record. */
+  async purgePassages(agentId: string): Promise<void> {
+    await this.store.deletePassagesForAgent(agentId);
   }
 
   async storePassage(agentId: string, text: string): Promise<string> {
@@ -166,6 +183,11 @@ export class LocalProvider implements AgentProvider {
 
   async listPassages(agentId: string): Promise<Passage[]> {
     return this.store.listPassages(agentId);
+  }
+
+  async searchPassages(agentId: string, query: string, topK: number): Promise<RetrievedPassage[]> {
+    const results = await this.store.semanticSearch(agentId, query, topK);
+    return results.map((result) => ({ id: result.id, text: result.text, score: result.score }));
   }
 
   getBlock(agentId: string, label: string): Promise<MemoryBlock> {

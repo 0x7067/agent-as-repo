@@ -298,6 +298,38 @@ describe("syncRepo", () => {
     expect(result.lastSyncCommit).toBe("def456");
   });
 
+  it("stamps lastSyncAt with the current time on every sync (finding 6)", async () => {
+    const provider = makeMockProvider();
+    const before = Date.now();
+    const result = await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: ["src/a.ts"],
+      collectFile: (path) => Promise.resolve({ path, content: NEW_CONTENT, sizeKb: 1 }),
+      headCommit: "def456",
+    });
+    const after = Date.now();
+
+    expect(result.lastSyncAt).not.toBeNull();
+    const stampedMs = new Date(result.lastSyncAt).getTime();
+    expect(stampedMs).toBeGreaterThanOrEqual(before);
+    expect(stampedMs).toBeLessThanOrEqual(after);
+  });
+
+  it("stamps lastSyncAt even when there are no changed files", async () => {
+    const provider = makeMockProvider();
+    const result = await syncRepo({
+      provider,
+      agent: testAgent,
+      changedFiles: [],
+      collectFile: () => Promise.resolve(null),
+      headCommit: "def456",
+    });
+
+    expect(result.lastSyncAt).not.toBeNull();
+    expect(() => new Date(result.lastSyncAt).toISOString()).not.toThrow();
+  });
+
   it("skips oversized files when maxFileSizeKb is set", async () => {
     const provider = makeMockProvider();
     const result = await syncRepo({

@@ -1,5 +1,4 @@
-import { buildConsolidationPrompt } from "../core/consolidate.js";
-import { fingerprintBlocks } from "../core/fingerprint.js";
+import { buildConsolidationPrompt, diffConsolidationBlocks, type ConsolidationBlockChange } from "../core/consolidate.js";
 import type { AgentProvider } from "../ports/agent-provider.js";
 
 export interface ConsolidateAgentMemoryParams {
@@ -21,8 +20,10 @@ export interface ConsolidateAgentMemoryParams {
 
 export interface ConsolidateAgentMemoryResult {
   consolidated: boolean;
-  /** False when the post-consolidation blocks fingerprint identically to the pre-consolidation blocks (no-op). */
+  /** False when neither block differs before/after consolidation (no-op). */
   changed: boolean;
+  /** Per-block modified/unchanged verdict; present whenever consolidation actually ran. */
+  blockChanges?: ConsolidationBlockChange[];
   error?: string;
 }
 
@@ -68,15 +69,21 @@ export async function consolidateAgentMemory(
       provider.getBlock(agentId, "conventions"),
     ]);
 
-    const preHash = fingerprintBlocks({ architecture: architecture.value, conventions: conventions.value });
-    const postHash = fingerprintBlocks({ architecture: postArchitecture.value, conventions: postConventions.value });
-
-    if (preHash === postHash) {
-      log?.(`  consolidation: blocks unchanged`);
-      return { consolidated: true, changed: false };
+    const blockChanges = diffConsolidationBlocks(
+      { architecture: architecture.value, conventions: conventions.value },
+      { architecture: postArchitecture.value, conventions: postConventions.value },
+    );
+    for (const blockChange of blockChanges) {
+      log?.(`  ${blockChange.label}: ${blockChange.changed ? "modified" : "unchanged"}`);
     }
 
-    return { consolidated: true, changed: true };
+    const changed = blockChanges.some((blockChange) => blockChange.changed);
+    if (!changed) {
+      log?.(`  consolidation: blocks unchanged`);
+      return { consolidated: true, changed: false, blockChanges };
+    }
+
+    return { consolidated: true, changed: true, blockChanges };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log?.(`  Warning: memory consolidation failed: ${message}`);

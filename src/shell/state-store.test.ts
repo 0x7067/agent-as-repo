@@ -120,6 +120,7 @@ describe("state store", () => {
       expect(loaded.agents["my-app"].lastSyncCommit).toBeNull();
       expect(loaded.agents["my-app"].lastSyncAt).toBeNull();
       expect(loaded.agents["my-app"].lastConsolidatedCommit).toBeNull();
+      expect(loaded.agents["my-app"].lastConsolidatedAt).toBeNull();
     });
   });
 
@@ -143,6 +144,7 @@ describe("state store", () => {
       await writeStateTestFile(filePath, JSON.stringify(v2WithoutField));
       const loaded = await loadState(filePath);
       expect(loaded.agents["my-app"].lastConsolidatedCommit).toBeNull();
+      expect(loaded.agents["my-app"].lastConsolidatedAt).toBeNull();
     });
   });
 
@@ -154,6 +156,17 @@ describe("state store", () => {
       await saveState(filePath, state);
       const loaded = await loadState(filePath);
       expect(loaded.agents["my-app"].lastConsolidatedCommit).toBe("abc123");
+    });
+  });
+
+  it("round-trips a set lastConsolidatedAt through save and load", async () => {
+    await withTempDir(async (dir) => {
+      const filePath = path.join(dir, "state.json");
+      let state = addAgentToState(createEmptyState(), "my-app", "agent-123", "2026-01-01T00:00:00.000Z");
+      state = updateAgentField(state, "my-app", { lastConsolidatedAt: "2026-02-01T00:00:00.000Z" });
+      await saveState(filePath, state);
+      const loaded = await loadState(filePath);
+      expect(loaded.agents["my-app"].lastConsolidatedAt).toBe("2026-02-01T00:00:00.000Z");
     });
   });
 

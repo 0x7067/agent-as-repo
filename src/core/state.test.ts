@@ -28,6 +28,7 @@ describe("state operations", () => {
     expect(next.agents["my-app"].symbolFiles).toEqual({});
     expect(next.agents["my-app"].symbolRanks).toEqual({});
     expect(next.agents["my-app"].lastBootstrap).toBeNull();
+    expect(next.agents["my-app"].lastConsolidatedAt).toBeNull();
   });
 
   it("does not mutate original state", () => {

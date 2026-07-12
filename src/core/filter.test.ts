@@ -1,5 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { shouldIncludeFile } from "./filter.js";
+import { repoFilterOptions, shouldIncludeFile } from "./filter.js";
+import { MAX_INDEXABLE_FILE_SIZE_KB } from "./types.js";
+
+describe("repoFilterOptions", () => {
+  it("uses the large indexable-file hard cap, not the old 50 KB gate", () => {
+    // Regression: glob_files must stay consistent with indexing/read_file —
+    // a large-but-legitimate file (e.g. a 67 KB base.rb) should not be
+    // invisible to one tool while indexed/readable via the others.
+    const options = repoFilterOptions({ extensions: [".rb"], ignoreDirs: [] });
+    expect(options.maxFileSizeKb).toBe(MAX_INDEXABLE_FILE_SIZE_KB);
+  });
+});
 
 describe("shouldIncludeFile", () => {
   const defaults = {

@@ -42,6 +42,28 @@ describe("reconcileAgent", () => {
     expect(result.missingPassageIds).toEqual([]);
   });
 
+  it("assumes the agent is registered when the provider has no agentExists check", async () => {
+    const agent = makeAgent({ "a.ts": ["p1"] });
+    const provider = makeProvider([{ id: "p1", text: "..." }]);
+    expect(provider.agentExists).toBeUndefined();
+
+    const result = await reconcileAgent(provider, agent);
+
+    expect(result.agentMissingFromStore).toBe(false);
+    expect(result.inSync).toBe(true);
+  });
+
+  it("reports drift when the provider says the agent is missing from the store, even with matching passages", async () => {
+    const agent = makeAgent({ "a.ts": ["p1"] });
+    const provider = makeProvider([{ id: "p1", text: "..." }]);
+    provider.agentExists = vi.fn().mockResolvedValue(false);
+
+    const result = await reconcileAgent(provider, agent);
+
+    expect(result.agentMissingFromStore).toBe(true);
+    expect(result.inSync).toBe(false);
+  });
+
   it("reports orphan passages (on server, not in local map)", async () => {
     const agent = makeAgent({ "a.ts": ["p1"] });
     const provider = makeProvider([

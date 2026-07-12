@@ -15,6 +15,7 @@ describe("formatAgentStatus", () => {
       lastBootstrap: "2026-01-15T10:00:00.000Z",
       lastSyncCommit: "abc1234",
       lastSyncAt: "2026-01-15T10:05:00.000Z",
+      lastConsolidatedAt: "2026-01-15T10:10:00.000Z",
     };
 
     const output = formatAgentStatus(data);
@@ -28,6 +29,7 @@ describe("formatAgentStatus", () => {
     expect(output).toContain("last bootstrap: 2026-01-15T10:00:00.000Z");
     expect(output).toContain("last sync: abc1234");
     expect(output).toContain("last sync at: 2026-01-15T10:05:00.000Z");
+    expect(output).toContain("last consolidated at: 2026-01-15T10:10:00.000Z");
   });
 
   it("uses newline as line separator", () => {
@@ -39,6 +41,7 @@ describe("formatAgentStatus", () => {
       lastBootstrap: null,
       lastSyncCommit: null,
       lastSyncAt: null,
+      lastConsolidatedAt: null,
     };
     const output = formatAgentStatus(data);
     expect(output).toContain("\n");
@@ -55,6 +58,7 @@ describe("formatAgentStatus", () => {
       lastBootstrap: null,
       lastSyncCommit: null,
       lastSyncAt: null,
+      lastConsolidatedAt: null,
     };
 
     const output = formatAgentStatus(data);
@@ -70,6 +74,7 @@ describe("formatAgentStatus", () => {
       lastBootstrap: null,
       lastSyncCommit: null,
       lastSyncAt: null,
+      lastConsolidatedAt: null,
     };
 
     const output = formatAgentStatus(data);
@@ -77,6 +82,7 @@ describe("formatAgentStatus", () => {
     expect(output).toContain("last bootstrap: never");
     expect(output).toContain("last sync: never");
     expect(output).toContain("last sync at: never");
+    expect(output).toContain("last consolidated at: never");
   });
 
   it("shows actual values instead of 'never' when fields are set", () => {
@@ -88,6 +94,7 @@ describe("formatAgentStatus", () => {
       lastBootstrap: "2026-01-01",
       lastSyncCommit: "abc123",
       lastSyncAt: "2026-01-02",
+      lastConsolidatedAt: "2026-01-03",
     };
 
     const output = formatAgentStatus(data);
@@ -96,5 +103,7 @@ describe("formatAgentStatus", () => {
     expect(output).not.toContain("last bootstrap: never");
     expect(output).toContain("last sync: abc123");
     expect(output).toContain("last sync at: 2026-01-02");
+    expect(output).toContain("last consolidated at: 2026-01-03");
+    expect(output).not.toContain("last consolidated at: never");
   });
 });

@@ -11,8 +11,23 @@ export interface SubmoduleInfo {
   initialized: boolean;
 }
 
-/** Files larger than this are never indexed. */
-export const MAX_FILE_SIZE_KB = 50;
+/**
+ * Hard safety valve for indexing and reading individual files. Chunking
+ * already splits file content into ~2 KB pieces, so a whole-file gate this
+ * low mostly just hid large-but-important files (e.g. a 67 KB
+ * `lib/sinatra/base.rb`) from both the index and `read_file`, with no
+ * warning. This cap exists only to stop a truly pathological single file
+ * (a vendored bundle, a generated data dump) from blowing up indexing
+ * time/memory — files at or under it are indexed and readable normally;
+ * files over it are skipped/refused with a visible warning naming the path.
+ */
+export const MAX_INDEXABLE_FILE_SIZE_KB = 1024;
+
+/** A file skipped by `collectFiles` because it exceeds `MAX_INDEXABLE_FILE_SIZE_KB`. */
+export interface SkippedFile {
+  path: string;
+  sizeKb: number;
+}
 
 /** Max characters per core memory block. */
 export const MEMORY_BLOCK_LIMIT = 5000;
@@ -119,6 +134,13 @@ export interface AgentState {
   createdAt: string;
   /** Commit HEAD was at when a consolidation last actually changed the blocks (unset until then). */
   lastConsolidatedCommit?: string | null;
+  /**
+   * Timestamp of the last time consolidation actually ran (whether or not it
+   * changed anything). Optional for backward compatibility with older state
+   * files; missing means "never". Distinct from `lastConsolidatedCommit`,
+   * which only stamps when a run produced a real change.
+   */
+  lastConsolidatedAt?: string | null;
 }
 
 /** Top-level persisted state. */

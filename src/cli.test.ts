@@ -2,6 +2,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import * as http from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
 interface CliResult {
@@ -17,11 +19,12 @@ function tsxBinPath(): string {
 
 const cliEntryPath = path.resolve("src/cli.ts");
 
-function runCli(args: string[], cwd: string, extraEnv: NodeJS.ProcessEnv = {}): CliResult {
+function runCli(args: string[], cwd: string, extraEnv: NodeJS.ProcessEnv = {}, input?: string): CliResult {
   const result = spawnSync(tsxBinPath(), [cliEntryPath, ...args], {
     cwd,
     env: { ...process.env, COLUMNS: "160", ...extraEnv },
     encoding: "utf8",
+    ...(input === undefined ? {} : { input }),
   });
   return {
     status: result.status,
@@ -185,6 +188,47 @@ async function writeUnreachableSetupWorkspace(cwd: string): Promise<void> {
   await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
 }
 
+interface FakeOpenRouterServer {
+  baseUrl: string;
+  close: () => Promise<void>;
+}
+
+/**
+ * Minimal stand-in for OpenRouter's shape: `GET /models` lists only chat models (embedding
+ * models never appear there), while `POST /embeddings` actually serves embeddings. Used to
+ * verify the setup preflight no longer false-fails on the embedding model check (finding 5).
+ */
+async function startFakeOpenRouterServer(chatModelIds: string[]): Promise<FakeOpenRouterServer> {
+  const server = http.createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", () => {
+      if (req.url?.endsWith("/models") && req.method === "GET") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ data: chatModelIds.map((id) => ({ id })) }));
+        return;
+      }
+      if (req.url?.endsWith("/embeddings") && req.method === "POST") {
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { input: string[] };
+        const data = body.input.map((_, index) => ({ index, embedding: [0.1, 0.2, 0.3] }));
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ data }));
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    baseUrl: `http://127.0.0.1:${String(port)}/v1`,
+    close: () => new Promise((resolve, reject) => {
+      server.close((error) => { if (error) reject(error); else resolve(); });
+    }),
+  };
+}
+
 async function writeAskWorkspace(cwd: string, providerLines: string[]): Promise<void> {
   const repoDir = path.join(cwd, "repo");
   await mkdirWorkspaceDir(repoDir, { recursive: true });
@@ -248,9 +292,9 @@ describe("cli contract", () => {
       list [options] List all agents
       status [options] Show agent memory stats and health
       consolidate [options] Consolidate architecture/conventions memory blocks via the LLM
-      export [options] Export agent memory to markdown
+      export [options] [repo] Export agent memory to markdown
       onboard [options] <repo> Guided codebase walkthrough for new developers
-      destroy [options] Delete agents
+      destroy [options] [repo] Delete agents
       reconcile [options] Compare local passage state against the provider's actual state and report drift
       watch [options] Watch repos and auto-sync on repo changes
       install-daemon [options] Install launchd daemon for auto-sync on macOS
@@ -365,7 +409,7 @@ describe("cli contract", () => {
     const data = JSON.parse(result.stdout) as Array<{
       repoName: string;
       agentId: string;
-      files: number;
+      filesWithPassages: number;
       passages: number;
       bootstrapped: boolean;
       lastSyncAt: string | null;
@@ -374,11 +418,38 @@ describe("cli contract", () => {
       {
         repoName: "my-app",
         agentId: "agent-1",
-        files: 1,
+        filesWithPassages: 1,
         passages: 1,
         bootstrapped: false,
       },
     ]);
+  });
+
+  it("labels the list metric as files-with-passages, distinct from setup's file count", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-list-label-");
+    const state = {
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          // 2 files found by setup, but only 1 produced a passage (e.g. an
+          // empty file, or one skipped for size) — "files" alone would
+          // conflate the two counts (finding 11).
+          passages: { "src/a.ts": ["p-1"] },
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["list"], cwd);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("files_with_passages=1");
+    expect(result.stdout).not.toMatch(/[^_]files=/);
   });
 
   it("fails fast with --no-input for destructive commands unless --force is provided", async () => {
@@ -433,6 +504,123 @@ describe("cli contract", () => {
     // Dev checkout: server path is the sibling of the running cli.ts, not cwd-relative.
     expect(entry?.command).toBe("npx");
     expect(entry?.args).toEqual(["tsx", path.join(path.dirname(cliEntryPath), "mcp-server.ts")]);
+  });
+
+  it("warns that mcp-install writes LLM_API_KEY in plaintext (finding 8)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-install-key-warn-");
+    const home = await makeWorkspace("repo-expert-cli-home-key-warn-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(["mcp-install", "--local"], cwd, {
+      HOME: home,
+      LLM_API_KEY: "sk-test-key",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("plaintext");
+    expect(result.stdout).toContain("LLM_API_KEY");
+  });
+
+  it("does not warn about plaintext keys when no LLM_API_KEY is configured", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-install-no-key-");
+    const home = await makeWorkspace("repo-expert-cli-home-no-key-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+    await writeWorkspaceFile(path.join(cwd, ".gitignore"), ".claude.json\n", "utf8");
+
+    const result = runCli(["mcp-install", "--local"], cwd, { HOME: home });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("plaintext");
+  });
+
+  it("warns on mcp-install --local when .claude.json is not covered by .gitignore (finding 8)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-install-gitignore-warn-");
+    const home = await makeWorkspace("repo-expert-cli-home-gitignore-warn-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+    // No .gitignore at all — .claude.json is definitely not covered.
+
+    const result = runCli(["mcp-install", "--local"], cwd, { HOME: home });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(".gitignore");
+    expect(result.stdout).toContain(".claude.json");
+  });
+
+  it("does not warn about gitignore coverage when .claude.json is already ignored", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-install-gitignore-ok-");
+    const home = await makeWorkspace("repo-expert-cli-home-gitignore-ok-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+    await writeWorkspaceFile(path.join(cwd, ".gitignore"), ".claude.json\n", "utf8");
+
+    const result = runCli(["mcp-install", "--local"], cwd, { HOME: home });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("not covered by .gitignore");
+  });
+
+  it("does not warn about gitignore coverage for a --global install (no local file written)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-install-global-");
+    const home = await makeWorkspace("repo-expert-cli-home-global-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(["mcp-install", "--global"], cwd, { HOME: home });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain(".gitignore");
+  });
+
+  it("mcp-check auto-detects a local ./.claude.json when no global config exists (finding 8)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-check-local-auto-");
+    const home = await makeWorkspace("repo-expert-cli-home-check-local-auto-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const install = runCli(["mcp-install", "--local"], cwd, { HOME: home });
+    expect(install.status).toBe(0);
+    await expect(fs.access(path.join(home, ".claude.json"))).rejects.toThrow();
+
+    const result = runCli(["mcp-check"], cwd, { HOME: home });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("MCP config looks good.");
+  });
+
+  it("mcp-check --local reports a clear error when the local file is missing", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-check-local-missing-");
+    const home = await makeWorkspace("repo-expert-cli-home-check-local-missing-");
+
+    const result = runCli(["mcp-check", "--local"], cwd, { HOME: home });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(path.join(cwd, ".claude.json"));
+  });
+
+  it("mcp-check still finds ~/.claude.json when no local override exists", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-mcp-check-global-fallback-");
+    const home = await makeWorkspace("repo-expert-cli-home-check-global-fallback-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const install = runCli(["mcp-install"], cwd, { HOME: home });
+    expect(install.status).toBe(0);
+
+    const result = runCli(["mcp-check"], cwd, { HOME: home });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("MCP config looks good.");
   });
 
   it("writes LLM MCP env from environment variables when no config is present", async () => {
@@ -528,6 +716,29 @@ describe("cli contract", () => {
     expect(result.stderr).not.toContain("Unexpected error");
   });
 
+  it("fails fast with a clear error on piped (non-TTY) stdin instead of silently exiting 0 (finding 7)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-init-non-tty-");
+
+    // Reproduces the exact finding-7 repro: two buffered lines piped to `init`
+    // with no flags at all (no --no-input, no --repo-path, no --yes).
+    const result = runCli(["init"], cwd, {}, "some\nanswers\n");
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("stdin is not a TTY");
+    expect(result.stderr).toContain("--repo-path");
+    await expect(fs.access(path.join(cwd, "config.yaml"))).rejects.toThrow();
+  });
+
+  it("fails fast on piped stdin with zero bytes written (immediate EOF)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-init-non-tty-eof-");
+
+    const result = runCli(["init"], cwd, {}, "");
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("stdin is not a TTY");
+    await expect(fs.access(path.join(cwd, "config.yaml"))).rejects.toThrow();
+  });
+
   it("supports non-interactive init with flags", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-init-flags-");
     const repoDir = path.join(cwd, "repo");
@@ -601,6 +812,100 @@ describe("cli contract", () => {
     expect(result.stdout).toContain("Dry-run: would delete 1 agent");
   });
 
+  it("supports destroy <repo> --dry-run with a positional repo argument", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-destroy-positional-");
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    // Previously a commander arity error: destroy had no positional arg defined.
+    const result = runCli(["destroy", "my-app", "--dry-run"], cwd);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("Dry-run: would delete 1 agent");
+  });
+
+  it("rejects destroy when the positional repo and --repo flag disagree", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-destroy-conflict-");
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["destroy", "my-app", "--repo", "other-app", "--dry-run"], cwd);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("my-app");
+    expect(result.stderr).toContain("other-app");
+  });
+
+  it("supports export <repo> with a positional repo argument", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-export-positional-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+
+    const result = runCli(["export", "my-app"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("my-app");
+  });
+
+  it("rejects export when the positional repo and --repo flag disagree", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-export-conflict-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+
+    const result = runCli(["export", "my-app", "--repo", "other-app"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("my-app");
+    expect(result.stderr).toContain("other-app");
+  });
+
+  it("writes the export to a file with --output instead of stdout", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-export-output-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+    const outputPath = path.join(cwd, "export.md");
+
+    const result = runCli(["export", "my-app", "--output", outputPath], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(outputPath);
+    expect(result.stdout).not.toContain("# my-app");
+
+    const written = await readWorkspaceFile(outputPath, "utf8");
+    expect(written).toContain("my-app");
+  });
+
   it("supports sync --dry-run --json", { timeout: 30_000 }, async () => {
     const cwd = await makeWorkspace("repo-expert-cli-sync-dry-run-");
     const repoDir = path.join(cwd, "repo");
@@ -656,16 +961,99 @@ describe("cli contract", () => {
     };
     await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
 
+    const before = Date.now();
     const result = runCli(["sync", "--config", "config.yaml"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+    const after = Date.now();
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("1 changed files since");
     expect(result.stderr).toBe("");
 
     const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
-      agents: Record<string, { lastSyncCommit: string }>;
+      agents: Record<string, { lastSyncCommit: string; lastSyncAt: string | null }>;
     };
     expect(savedState.agents["my-app"].lastSyncCommit).toBe(headSha);
+    // Finding 6: `sync` must stamp lastSyncAt just like `watch` does, or
+    // `status` permanently shows "last sync at: never".
+    expect(savedState.agents["my-app"].lastSyncAt).not.toBeNull();
+    const stampedMs = new Date(savedState.agents["my-app"].lastSyncAt ?? "").getTime();
+    expect(stampedMs).toBeGreaterThanOrEqual(before);
+    expect(stampedMs).toBeLessThanOrEqual(after);
+  });
+
+  it("stamps lastSyncAt even when there are no changes to sync (finding 6)", { timeout: 30_000 }, async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-sync-no-changes-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    const headSha = await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: headSha,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["sync", "--config", "config.yaml"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("No changes to sync.");
+
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastSyncAt: string | null }>;
+    };
+    expect(savedState.agents["my-app"].lastSyncAt).not.toBeNull();
+  });
+
+  it("indexes a changed file well above the old 50 KB gate during sync (regression: sinatra base.rb)", { timeout: 30_000 }, async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-sync-large-file-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    const checkpointSha = await commitFile(repoDir, "a.ts", "export const a = 1;\n", "add a.ts");
+    // 60 KB: over the old 50 KB gate, well under the new 1024 KB hard cap.
+    const largeContent = `export const big = "${"x".repeat(60 * 1024)}";\n`;
+    await commitFile(repoDir, "big.ts", largeContent, "add big.ts");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          fileHashes: {},
+          lastBootstrap: null,
+          lastSyncCommit: checkpointSha,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["sync", "--config", "config.yaml"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { fileHashes?: Record<string, string>; passages?: Record<string, string[]> }>;
+    };
+    // Previously the 50 KB gate dropped this file's passages/hash entirely.
+    expect(savedState.agents["my-app"].fileHashes).toHaveProperty("big.ts");
+    expect(savedState.agents["my-app"].passages?.["big.ts"]?.length).toBeGreaterThan(0);
   });
 
   it("scopes incremental sync paths to a configured monorepo base_path", { timeout: 30_000 }, async () => {
@@ -1014,9 +1402,10 @@ describe("cli contract", () => {
     expect(result.stdout).not.toContain("Commit log since the last sync");
 
     const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
-      agents: Record<string, { lastConsolidatedCommit?: string | null }>;
+      agents: Record<string, { lastConsolidatedCommit?: string | null; lastConsolidatedAt?: string | null }>;
     };
     expect(savedState.agents["my-app"].lastConsolidatedCommit).toBe(headSha);
+    expect(savedState.agents["my-app"].lastConsolidatedAt).toEqual(expect.any(String));
   });
 
   it("supports status --json", async () => {
@@ -1071,6 +1460,109 @@ describe("cli contract", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Consolidating memory for "my-app"');
     expect(result.stdout).toContain("Done.");
+  });
+
+  it("consolidate reports per-block modified/unchanged status and stamps lastConsolidatedAt", { timeout: 30_000 }, async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-consolidate-blocks-");
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const before = Date.now();
+    const result = runCli(["consolidate", "--repo", "my-app"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+
+    expect(result.status).toBe(0);
+    // FakeProvider's consolidateMemory rewrites both blocks from empty, so
+    // both report as modified.
+    expect(result.stdout).toContain("architecture: modified");
+    expect(result.stdout).toContain("conventions: modified");
+
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastConsolidatedAt?: string | null }>;
+    };
+    const stamped = savedState.agents["my-app"].lastConsolidatedAt;
+    expect(stamped).toEqual(expect.any(String));
+    expect(new Date(stamped ?? "").getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it("stamps lastConsolidatedAt even when consolidation is a true no-op (blocks unchanged)", { timeout: 30_000 }, async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-consolidate-noop-");
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["consolidate", "--repo", "my-app"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_CONSOLIDATE_NOOP: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("architecture: unchanged");
+    expect(result.stdout).toContain("conventions: unchanged");
+    expect(result.stdout).not.toContain("  Done.");
+
+    const savedState = JSON.parse(await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"))) as {
+      agents: Record<string, { lastConsolidatedAt?: string | null; lastConsolidatedCommit?: string | null }>;
+    };
+    expect(savedState.agents["my-app"].lastConsolidatedAt).toEqual(expect.any(String));
+    expect(savedState.agents["my-app"].lastConsolidatedCommit ?? null).toBeNull();
+  });
+
+  it("status displays the lastConsolidatedAt timestamp stamped by consolidate", { timeout: 30_000 }, async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-consolidate-noop-at-");
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(["consolidate", "--repo", "my-app"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+    expect(result.status).toBe(0);
+
+    const statusResult = runCli(["status", "--repo", "my-app"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+    expect(statusResult.status).toBe(0);
+    expect(statusResult.stdout).toContain("last consolidated at:");
+    expect(statusResult.stdout).not.toContain("last consolidated at: never");
   });
 
   it("consolidate reports a skip when the provider fails, without erroring", { timeout: 30_000 }, async () => {
@@ -1318,6 +1810,48 @@ describe("cli contract", () => {
     expect(result.stdout).toContain("model=default");
   });
 
+  it("does not print a retrieval preview when --verbose is omitted", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-ask-no-verbose-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+
+    const result = runCli(["ask", "my-app", "q"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain("Retrieved passages");
+  });
+
+  it("prints a retrieval preview to stderr before the answer with --verbose", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-ask-verbose-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+
+    // This ask invocation's FakeProvider has no passages stored (setup never
+    // ran in this process), so the preview reports none — this test verifies
+    // the flag wires the preview above the answer, not retrieval quality.
+    const result = runCli(["ask", "my-app", "q", "--verbose"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("Retrieved passages: none.");
+    expect(result.stdout.trim()).toBe("ok");
+  });
+
+  it("prints a single static spinner line on stderr instead of animation frames in non-TTY output", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-ask-spinner-nontty-");
+    await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
+
+    // spawnSync's stdio is never a TTY, so this always exercises the non-TTY path.
+    const result = runCli(["ask", "my-app", "q"], cwd, { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("Asking my-app...\n");
+    // None of the braille spinner glyphs or carriage returns leaked through.
+    expect(result.stderr).not.toContain("\r");
+    for (const frame of ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]) {
+      expect(result.stderr).not.toContain(frame);
+    }
+  });
+
   it("prints a walkthrough for onboard", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-onboard-");
     await writeAskWorkspace(cwd, ["  model: qwen3-coder:30b"]);
@@ -1473,6 +2007,172 @@ describe("cli contract", () => {
     expect(result.stderr).not.toContain("ollama serve");
   });
 
+  it("self-heals when the state file claims an agent that is missing from the store, instead of skipping", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-selfheal-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "ghost-agent",
+          repoName: "my-app",
+          passages: { "a.ts": ["p-1"] },
+          lastBootstrap: "2026-01-01T00:00:00.000Z",
+          lastSyncCommit: "abc123",
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const result = runCli(
+      ["setup", "--config", "config.yaml", "--skip-preflight", "--no-bootstrap"],
+      cwd,
+      {
+        REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+        REPO_EXPERT_TEST_FAKE_PROVIDER_MISSING_AGENTS: "ghost-agent",
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("skipping");
+    expect(result.stderr.toLowerCase()).toContain("self-heal");
+
+    const stateRaw = await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), "utf8");
+    const updatedState = JSON.parse(stateRaw) as {
+      agents: Record<string, { passages: Record<string, string[]> }>;
+    };
+    expect(Object.keys(updatedState.agents["my-app"].passages)).toContain("a.ts");
+  });
+
+  it("fails setup (no 'Setup complete', bootstrap skipped) when every chunk fails to load", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-total-load-failure-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(
+      ["setup", "--config", "config.yaml", "--load-retries", "0"],
+      cwd,
+      {
+        REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+        REPO_EXPERT_TEST_FAIL_LOAD_ALWAYS: "1",
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).not.toContain("Setup complete");
+    expect(result.stderr.toLowerCase()).toContain("chunks failed to load");
+
+    const stateRaw = await readWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), "utf8");
+    const state = JSON.parse(stateRaw) as { agents: Record<string, { lastBootstrap: string | null }> };
+    expect(state.agents["my-app"].lastBootstrap).toBeNull();
+  });
+
+  it("reports real chunk counts, error status, and non-zero exit in --json mode on total load failure", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-total-load-failure-json-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(
+      ["setup", "--config", "config.yaml", "--json", "--no-bootstrap", "--load-retries", "0"],
+      cwd,
+      {
+        REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+        REPO_EXPERT_TEST_FAIL_LOAD_ALWAYS: "1",
+      },
+    );
+
+    expect(result.status).toBe(1);
+    const payload = JSON.parse(result.stdout) as {
+      results: Array<{ status: string; error?: string; chunksLoaded?: number; chunksFailed?: number }>;
+    };
+    expect(payload.results[0].status).toBe("error");
+    expect(payload.results[0].chunksLoaded).toBe(0);
+    expect(payload.results[0].chunksFailed).toBe(1);
+    expect(String(payload.results[0].error)).toContain("chunks failed to load");
+    // The "N/N chunks failed" warning must not be silenced in JSON mode (stderr, not stdout).
+    expect(result.stderr.toLowerCase()).toContain("chunks failed to load");
+  });
+
+  it("reports chunksLoaded as real successes (not attempted) plus chunksFailed in --json mode on partial failure", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-partial-load-failure-json-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+    await writeWorkspaceFile(path.join(repoDir, "b.ts"), "export const b = 2;\n", "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(
+      ["setup", "--config", "config.yaml", "--json", "--no-bootstrap", "--load-retries", "0"],
+      cwd,
+      {
+        REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+        REPO_EXPERT_TEST_FAIL_LOAD_ONCE: "1",
+      },
+    );
+
+    expect(result.status).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      results: Array<{ status: string; chunksLoaded: number; chunksFailed: number }>;
+    };
+    expect(payload.results[0].status).toBe("ok");
+    expect(payload.results[0].chunksLoaded).toBe(1);
+    expect(payload.results[0].chunksFailed).toBe(1);
+  });
+
+  it("setup preflight no longer false-fails on the embedding model against an OpenRouter-shaped endpoint (embedding model absent from /models)", async () => {
+    const fakeServer = await startFakeOpenRouterServer(["openai/gpt-4o-mini"]);
+    try {
+      const cwd = await makeWorkspace("repo-expert-cli-setup-preflight-openrouter-");
+      const repoDir = path.join(cwd, "repo");
+      await mkdirWorkspaceDir(repoDir, { recursive: true });
+      await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+      const config = [
+        "provider:",
+        "  model: openai/gpt-4o-mini",
+        `  base_url: ${fakeServer.baseUrl}`,
+        "  embedding_model: openai/text-embedding-3-small",
+        "repos:",
+        "  my-app:",
+        `    path: ${repoDir}`,
+        "    description: test repo",
+      ].join("\n");
+      await writeWorkspaceFile(path.join(cwd, "config.yaml"), config, "utf8");
+
+      // No --skip-preflight and no REPO_EXPERT_TEST_FAKE_PROVIDER: this exercises the real
+      // preflight (GET /models + POST /embeddings) and the real indexing embedder against
+      // the fake local endpoint. Uses async `spawn` (not the `runCli` spawnSync helper):
+      // spawnSync would block this test process's event loop, starving the in-process fake
+      // HTTP server of the chance to accept/answer the child's requests.
+      const child = spawn(tsxBinPath(), [cliEntryPath, "setup", "--config", "config.yaml", "--no-bootstrap"], {
+        cwd,
+        env: { ...process.env, LLM_API_KEY: "sk-test" },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+      child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+      const code = await new Promise<number | null>((resolve) => {
+        child.on("exit", (exitCode) => { resolve(exitCode); });
+      });
+
+      expect(code).toBe(0);
+      expect(stdout).toContain("Setup complete.");
+      expect(stderr).not.toContain("Embedding model");
+    } finally {
+      await fakeServer.close();
+    }
+  });
+
   it("supports setup --reindex and emits JSON timings", async () => {
     const cwd = await makeWorkspace("repo-expert-cli-setup-reindex-");
     const repoDir = path.join(cwd, "repo");
@@ -1505,6 +2205,53 @@ describe("cli contract", () => {
     expect(payload.results[0].mode).toBe("reindex_full");
     expect(payload.results[0].indexMs).toBeGreaterThanOrEqual(0);
     expect(payload.results[0].totalMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("purges existing passages before reloading during --reindex (no stale/duplicate content)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-reindex-purge-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "agent-1",
+          repoName: "my-app",
+          passages: { "a.ts": ["p-1"] },
+          lastBootstrap: null,
+          lastSyncCommit: "abc123",
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const reindexResult = runCli(
+      ["setup", "--config", "config.yaml", "--reindex", "--no-bootstrap"],
+      cwd,
+      { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" },
+    );
+    expect(reindexResult.status).toBe(0);
+    expect(reindexResult.stdout.toLowerCase()).toContain("purging existing passages");
+  });
+
+  it("does not log a purge step on a brand-new create (nothing to purge)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-create-no-purge-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeWorkspaceFile(path.join(repoDir, "a.ts"), "export const a = 1;\n", "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(
+      ["setup", "--config", "config.yaml", "--no-bootstrap"],
+      cwd,
+      { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" },
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout.toLowerCase()).not.toContain("purging existing passages");
   });
 
   it("recovers setup after partial failure and resumes on next run", async () => {
@@ -1605,5 +2352,87 @@ describe("cli contract", () => {
     };
     expect(payload.results[0].filesFound).toBe(120);
     expect(payload.results[0].totalMs).toBeLessThan(12_000);
+  });
+
+  it("reconcile detects a state-file agent missing from the store, even with matching passage counts", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-reconcile-missing-agent-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    await writeConfig(cwd, "my-app", repoDir);
+    const state = {
+      stateVersion: 2,
+      agents: {
+        "my-app": {
+          agentId: "ghost-agent",
+          repoName: "my-app",
+          passages: {},
+          lastBootstrap: null,
+          lastSyncCommit: null,
+          lastSyncAt: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await writeWorkspaceFile(path.join(cwd, ".repo-expert-state.json"), JSON.stringify(state), "utf8");
+
+    const jsonResult = runCli(["reconcile", "--json"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_FAKE_PROVIDER_MISSING_AGENTS: "ghost-agent",
+    });
+    expect(jsonResult.status).toBe(1);
+    const payload = JSON.parse(jsonResult.stdout) as Array<{ agentMissingFromStore: boolean; inSync: boolean }>;
+    expect(payload[0].agentMissingFromStore).toBe(true);
+    expect(payload[0].inSync).toBe(false);
+
+    const textResult = runCli(["reconcile"], cwd, {
+      REPO_EXPERT_TEST_FAKE_PROVIDER: "1",
+      REPO_EXPERT_TEST_FAKE_PROVIDER_MISSING_AGENTS: "ghost-agent",
+    });
+    expect(textResult.status).toBe(1);
+    expect(textResult.stdout).toContain("drift detected");
+    expect(textResult.stdout.toLowerCase()).toContain("missing from store registry");
+  });
+
+  it("indexes a file above the old 50 KB gate and reports files skipped over the new hard cap (--json)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-large-file-json-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    // 60 KB: over the old 50 KB gate, under the new 1024 KB hard cap — must be indexed.
+    await writeWorkspaceFile(path.join(repoDir, "big.ts"), `export const big = "${"x".repeat(60 * 1024)}";\n`, "utf8");
+    // 1100 KB: over the new hard cap — must be skipped, but visibly so.
+    await writeWorkspaceFile(path.join(repoDir, "huge.ts"), `export const huge = "${"x".repeat(1100 * 1024)}";\n`, "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(
+      ["setup", "--config", "config.yaml", "--json", "--no-bootstrap"],
+      cwd,
+      { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" },
+    );
+
+    expect(result.status).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      results: Array<{ filesFound: number; filesSkipped: number }>;
+    };
+    expect(payload.results[0].filesFound).toBe(1);
+    expect(payload.results[0].filesSkipped).toBe(1);
+  });
+
+  it("prints a visible warning naming files skipped over the new hard cap (non-JSON)", async () => {
+    const cwd = await makeWorkspace("repo-expert-cli-setup-large-file-warn-");
+    const repoDir = path.join(cwd, "repo");
+    await mkdirWorkspaceDir(repoDir, { recursive: true });
+    initGitRepo(repoDir);
+    await writeWorkspaceFile(path.join(repoDir, "huge.ts"), `export const huge = "${"x".repeat(1100 * 1024)}";\n`, "utf8");
+    await writeConfig(cwd, "my-app", repoDir);
+
+    const result = runCli(
+      ["setup", "--config", "config.yaml", "--no-bootstrap"],
+      cwd,
+      { REPO_EXPERT_TEST_FAKE_PROVIDER: "1" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("huge.ts");
+    expect(result.stderr.toLowerCase()).toContain("skipped");
   });
 });

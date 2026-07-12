@@ -5,16 +5,23 @@ export interface ReconcilePlan {
   orphanPassageIds: string[];
   /** Passage IDs recorded in the local map but no longer present on the Letta server. */
   missingPassageIds: string[];
+  /** True when the state file has this agent but the store's agent registry does not. */
+  agentMissingFromStore: boolean;
   inSync: boolean;
 }
 
 /**
  * Compare the local passage map against the server's actual passage list.
- * Pure function — no I/O.
+ * Pure function — no I/O. `agentMissingFromStore` (default false) lets the
+ * caller fold in a separate store-registry check: even matching passage
+ * counts aren't "in sync" if the agent itself was never registered (or was
+ * wiped) in the store — that's the state-file/store drift bug, distinct from
+ * ordinary passage drift.
  */
 export function computeReconcilePlan(
   passageMap: PassageMap,
   serverPassages: Array<{ id: string }>,
+  agentMissingFromStore = false,
 ): ReconcilePlan {
   const localIds = new Set(Object.values(passageMap).flat());
   const serverIds = new Set(serverPassages.map((p) => p.id));
@@ -25,7 +32,8 @@ export function computeReconcilePlan(
   return {
     orphanPassageIds,
     missingPassageIds,
-    inSync: orphanPassageIds.length === 0 && missingPassageIds.length === 0,
+    agentMissingFromStore,
+    inSync: orphanPassageIds.length === 0 && missingPassageIds.length === 0 && !agentMissingFromStore,
   };
 }
 

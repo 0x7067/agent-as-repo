@@ -41,6 +41,13 @@ export interface SyncResult {
   symbolFiles: SymbolFileMap;
   symbolRanks: SymbolRankMap;
   lastSyncCommit: string;
+  /**
+   * Wall-clock time this sync completed, stamped here so every caller (CLI
+   * `sync`, `watch`) persists the same value `status` reads — previously
+   * only `watch.ts` stamped this field, leaving CLI-sync users permanently
+   * stuck on "last sync at: never" (finding 6).
+   */
+  lastSyncAt: string;
   filesRemoved: number;
   filesReIndexed: number;
   filesSkippedUnchanged: number;
@@ -262,6 +269,7 @@ export async function syncRepo(params: SyncRepoParams): Promise<SyncResult> {
     symbolFiles: maps.symbols,
     symbolRanks,
     lastSyncCommit: headCommit,
+    lastSyncAt: new Date().toISOString(),
     filesRemoved,
     filesReIndexed,
     filesSkippedUnchanged,

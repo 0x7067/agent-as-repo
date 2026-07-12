@@ -27,6 +27,7 @@ export function addAgentToState(
         lastSyncCommit: null,
         lastSyncAt: null,
         lastConsolidatedCommit: null,
+        lastConsolidatedAt: null,
         createdAt,
       },
     },

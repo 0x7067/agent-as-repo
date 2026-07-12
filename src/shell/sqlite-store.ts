@@ -124,22 +124,66 @@ export class SqlitePassageStore implements PassageStore {
 
   deleteAgent(agentId: string): Promise<void> {
     const wipe = this.db.transaction(() => {
-      const seqs = this.db
-        .prepare("SELECT seq FROM passages WHERE agent_id = ?")
-        .all(agentId) as Array<{ seq: number | bigint }>;
-      if (this.vectorTableReady) {
-        for (let i = 0; i < seqs.length; i += DELETE_CHUNK_SIZE) {
-          const batch = seqs.slice(i, i + DELETE_CHUNK_SIZE);
-          const placeholders = batch.map(() => "?").join(", ");
-          const sql = `DELETE FROM passage_vectors WHERE rowid IN (${placeholders})`;
-          this.db.prepare(sql).run(...batch.map(({ seq }) => BigInt(seq)));
-        }
-      }
-      this.db.prepare("DELETE FROM passages WHERE agent_id = ?").run(agentId);
+      this.wipeAgentPassages(agentId);
       this.db.prepare("DELETE FROM agents WHERE agent_id = ?").run(agentId);
+      this.maybeResetEmbeddingDimension();
     });
     wipe();
     return Promise.resolve();
+  }
+
+  /**
+   * Purge an agent's passages (and dependent vector rows) without removing
+   * its `agents` row. Used by `setup --reindex` so a fresh load never leaves
+   * stale/duplicate rows behind (see `deleteAgent` for the full-teardown
+   * variant that also drops the agent record).
+   */
+  deletePassagesForAgent(agentId: string): Promise<void> {
+    const wipe = this.db.transaction(() => {
+      this.wipeAgentPassages(agentId);
+      this.maybeResetEmbeddingDimension();
+    });
+    wipe();
+    return Promise.resolve();
+  }
+
+  /** Shared wipe logic for `deleteAgent` and `deletePassagesForAgent`; must run inside a transaction. */
+  private wipeAgentPassages(agentId: string): void {
+    const seqs = this.db
+      .prepare("SELECT seq FROM passages WHERE agent_id = ?")
+      .all(agentId) as Array<{ seq: number | bigint }>;
+    if (this.vectorTableReady) {
+      for (let i = 0; i < seqs.length; i += DELETE_CHUNK_SIZE) {
+        const batch = seqs.slice(i, i + DELETE_CHUNK_SIZE);
+        const placeholders = batch.map(() => "?").join(", ");
+        const sql = `DELETE FROM passage_vectors WHERE rowid IN (${placeholders})`;
+        this.db.prepare(sql).run(...batch.map(({ seq }) => BigInt(seq)));
+      }
+    }
+    this.db.prepare("DELETE FROM passages WHERE agent_id = ?").run(agentId);
+  }
+
+  /**
+   * The embedding dimension is a single DB-wide meta value (one shared
+   * `passage_vectors` table), so it can only be re-derived once NO passages
+   * remain for ANY agent. When a wipe empties the store, forget the stored
+   * dimension and drop the vector table so the next write re-creates both
+   * from whatever the (possibly new) embedding engine returns — this is what
+   * lets `setup --reindex` recover from an embedding-engine switch instead
+   * of failing every write against the stale dimension. While other agents
+   * still hold passages the old dimension stays enforced by design: one
+   * vec0 table cannot mix dimensions, so switching engines in a multi-agent
+   * store requires reindexing every agent. Must run inside a transaction,
+   * after the deletes.
+   */
+  private maybeResetEmbeddingDimension(): void {
+    const remaining = (
+      this.db.prepare("SELECT COUNT(*) AS count FROM passages").get() as { count: number }
+    ).count;
+    if (remaining > 0) return;
+    this.db.prepare("DELETE FROM meta WHERE key = ?").run(DIMENSION_META_KEY);
+    this.db.exec("DROP TABLE IF EXISTS passage_vectors");
+    this.vectorTableReady = false;
   }
 
   listAgents(): Promise<string[]> {

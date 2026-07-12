@@ -95,4 +95,37 @@ describe("consolidateAgentMemory", () => {
     expect(result.changed).toBe(true);
     expect(logged.join("\n")).not.toContain("blocks unchanged");
   });
+
+  it("reports per-block modified/unchanged status when only one block changes", async () => {
+    let callCount = 0;
+    const getBlock = vi.fn().mockImplementation((_agentId: string, label: string) => {
+      callCount++;
+      const isPost = callCount > 2;
+      if (label === "architecture") {
+        return Promise.resolve({ value: isPost ? "revised-architecture" : "original-architecture", limit: 5000 });
+      }
+      return Promise.resolve({ value: "same-conventions", limit: 5000 });
+    });
+    const consolidateMemory = vi.fn().mockResolvedValue();
+    const logged: string[] = [];
+    const provider = makeMockProvider({ getBlock, consolidateMemory });
+
+    const result = await consolidateAgentMemory({
+      provider,
+      agentId: "agent-1",
+      changedFiles: ["src/a.ts"],
+      syncResult,
+      blockCharLimit: 5000,
+      log: (m) => logged.push(m),
+    });
+
+    expect(result.consolidated).toBe(true);
+    expect(result.changed).toBe(true);
+    expect(result.blockChanges).toEqual([
+      { label: "architecture", changed: true },
+      { label: "conventions", changed: false },
+    ]);
+    expect(logged.join("\n")).toContain("architecture: modified");
+    expect(logged.join("\n")).toContain("conventions: unchanged");
+  });
 });

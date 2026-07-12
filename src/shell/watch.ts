@@ -188,6 +188,13 @@ export async function watchRepos(params: WatchParams): Promise<void> {
     await stateWriteChain;
   }
 
+  async function persistLastConsolidatedAt(repoName: string): Promise<void> {
+    stateWriteChain = stateWriteChain.then(() =>
+      updateAndSaveState(statePath, repoName, { lastConsolidatedAt: new Date().toISOString() }),
+    ).catch(() => {});
+    await stateWriteChain;
+  }
+
   async function resolveChangedFiles(params_: {
     repoConfig: RepoConfig;
     agentInfo: AgentState;
@@ -356,9 +363,12 @@ export async function watchRepos(params: WatchParams): Promise<void> {
           symbolRankEvidence: formatTopSymbolsEvidence(result.symbolFiles, result.symbolRanks),
           log,
         });
-        if (consolidation.consolidated && consolidation.changed) {
-          await persistLastConsolidatedCommit(repoName, currentHead);
-          log(`[${repoName}] consolidated architecture/conventions memory blocks`);
+        if (consolidation.consolidated) {
+          await persistLastConsolidatedAt(repoName);
+          if (consolidation.changed) {
+            await persistLastConsolidatedCommit(repoName, currentHead);
+            log(`[${repoName}] consolidated architecture/conventions memory blocks`);
+          }
         }
       }
 

@@ -10,22 +10,35 @@ export interface ReconcileResult {
   orphanPassageIds: string[];
   /** Passage IDs recorded locally that no longer exist on the server. */
   missingPassageIds: string[];
+  /** True when the state file has this agent but the store's agent registry does not (state/store drift). */
+  agentMissingFromStore: boolean;
   inSync: boolean;
 }
 
-/** Fetch actual server passages and compare against the local passage map. */
+/**
+ * Fetch actual server passages and compare against the local passage map.
+ * Also checks the store's agent registry directly (via the optional
+ * `agentExists`) so drift is caught even when passage counts happen to
+ * match — the exact case that let a wiped-then-reindexed store's missing
+ * `agents` row go undetected before. Providers without `agentExists` are
+ * assumed to have the agent (no change from prior behavior).
+ */
 export async function reconcileAgent(
   provider: AgentProvider,
   agent: AgentState,
 ): Promise<ReconcileResult> {
-  const serverPassages = await provider.listPassages(agent.agentId);
-  const plan = computeReconcilePlan(agent.passages, serverPassages);
+  const [serverPassages, existsInStore] = await Promise.all([
+    provider.listPassages(agent.agentId),
+    provider.agentExists ? provider.agentExists(agent.agentId) : Promise.resolve(true),
+  ]);
+  const plan = computeReconcilePlan(agent.passages, serverPassages, !existsInStore);
   return {
     repoName: agent.repoName,
     localPassageCount: Object.values(agent.passages).flat().length,
     serverPassageCount: serverPassages.length,
     orphanPassageIds: plan.orphanPassageIds,
     missingPassageIds: plan.missingPassageIds,
+    agentMissingFromStore: plan.agentMissingFromStore,
     inSync: plan.inSync,
   };
 }

@@ -86,6 +86,39 @@ export interface McpCheckResult {
   issues: string[];
 }
 
+/** Which of the two config locations `mcp-check`/`mcp-install` resolved to. */
+export type McpConfigLocation = "local" | "global";
+
+export interface McpConfigSelection {
+  location: McpConfigLocation;
+  configPath: string;
+}
+
+/**
+ * Decide which Claude Code config file `mcp-check` should read, mirroring
+ * `mcp-install`'s `--local`/`--global` flags (finding 8). `mcp-install
+ * --local` writes `./.claude.json`, but `mcp-check` used to only ever read
+ * `~/.claude.json`, so a local install could never validate. When neither
+ * flag is passed, prefer the local file if one exists (it's the more
+ * specific, more likely intended target), falling back to the traditional
+ * global location — reporting back which one was actually used.
+ */
+export function selectMcpConfigFile(
+  opts: { local?: boolean; global?: boolean },
+  paths: { localPath: string; globalPath: string },
+  existence: { localExists: boolean; globalExists: boolean },
+): McpConfigSelection | null {
+  if (opts.local) {
+    return existence.localExists ? { location: "local", configPath: paths.localPath } : null;
+  }
+  if (opts.global) {
+    return existence.globalExists ? { location: "global", configPath: paths.globalPath } : null;
+  }
+  if (existence.localExists) return { location: "local", configPath: paths.localPath };
+  if (existence.globalExists) return { location: "global", configPath: paths.globalPath };
+  return null;
+}
+
 function checkCommandAndArgs(entry: McpServerEntry, launch: McpLaunchSpec, issues: string[]): void {
   const args = entry.args ?? [];
 

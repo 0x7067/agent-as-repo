@@ -90,6 +90,30 @@ export function buildConsolidationPrompt(input: ConsolidationPromptInput): strin
   ].join("\n");
 }
 
+/** The two memory blocks a consolidation turn may rewrite. */
+export const CONSOLIDATION_BLOCK_LABELS = ["architecture", "conventions"] as const;
+
+export interface ConsolidationBlockChange {
+  label: (typeof CONSOLIDATION_BLOCK_LABELS)[number];
+  changed: boolean;
+}
+
+/**
+ * Byte-compare each consolidation-eligible block before/after a consolidation
+ * turn, so callers can report exactly which block(s) the LLM actually
+ * touched instead of a single aggregate "changed" flag (a 20s LLM call that
+ * rewrites nothing looked identical to one that touched everything).
+ */
+export function diffConsolidationBlocks(
+  pre: Record<string, string>,
+  post: Record<string, string>,
+): ConsolidationBlockChange[] {
+  return CONSOLIDATION_BLOCK_LABELS.map((label) => ({
+    label,
+    changed: pre[label] !== post[label],
+  }));
+}
+
 /** Sync outcome fields consulted when deciding whether to consolidate. */
 export interface ConsolidationDecisionInput {
   filesReIndexed: number;

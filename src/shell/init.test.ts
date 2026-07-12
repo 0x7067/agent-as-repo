@@ -227,6 +227,16 @@ describe("runInit", { concurrent: false }, () => {
     expect(configContent).not.toContain("embedding_engine");
   });
 
+  it("rejects when prompts are disallowed and no repo path is supplied (finding 7 guard)", async () => {
+    const workspace = await makeTempDir(INIT_WORKSPACE_PREFIX);
+    process.chdir(workspace);
+    const rl = makeRl([]);
+
+    await expect(runInit(rl, { allowPrompts: false, assumeYes: true })).rejects.toThrow("Missing repo path");
+    expect(process.exitCode).toBe(1);
+    expect(rl.question).not.toHaveBeenCalled();
+  });
+
   it("honors an --embedding-engine flag override without prompting", async () => {
     const workspace = await makeTempDir(INIT_WORKSPACE_PREFIX);
     const repoDir = path.join(workspace, "repo");

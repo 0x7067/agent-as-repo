@@ -168,7 +168,10 @@ function checkNativeModules(
       message:
         `better-sqlite3/sqlite-vec failed to load or query (${detail}). ` +
         `This is usually a Node ABI mismatch or a skipped native build step: ` +
-        `confirm you're on Node ${String(MIN_NODE_MAJOR)}+ and run "pnpm approve-builds" then "pnpm install" again.`,
+        `confirm you're on Node ${String(MIN_NODE_MAJOR)}+ and run "pnpm approve-builds" then "pnpm install" again. ` +
+        `If a prior "pnpm install"/"pnpm approve-builds" already built the addon and a later ` +
+        `"pnpm run ..." (pnpm 10 + node-linker=hoisted) wiped or left it unbuilt, rebuild it directly: ` +
+        `cd node_modules/better-sqlite3 && npx node-gyp rebuild --release`,
     };
   } finally {
     db?.close();

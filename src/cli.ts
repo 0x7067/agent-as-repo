@@ -3,21 +3,23 @@
 import "dotenv/config";
 import { Command } from "commander";
 import path from "node:path";
+import type * as NodeFsPromises from "node:fs/promises";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { loadConfig } from "./shell/config-loader.js";
 import { runInit } from "./shell/init.js";
-import { checkLlmEndpoint, checkModelAvailable, runAllChecks, runDoctorFixes } from "./shell/doctor.js";
+import { checkEmbeddingModelAvailable, checkLlmEndpoint, checkModelAvailable, isLocalOllamaEndpoint, runAllChecks, runDoctorFixes } from "./shell/doctor.js";
 import { formatSelfChecks, runSelfChecks } from "./shell/self-check.js";
 import { completionFileName, generateCompletionScript, type CompletionShell } from "./core/completion.js";
+import { nonInteractiveInitError } from "./core/init.js";
 import { computeDoctorExitCode, formatDoctorReport } from "./core/doctor.js";
 import { ConfigError, formatConfigError } from "./core/config.js";
 import { collectFiles } from "./shell/file-collector.js";
 import { StateFileError, loadState, saveState } from "./shell/state-store.js";
 import { createRepoAgent, loadPassages } from "./shell/agent-factory.js";
 import { bootstrapAgent } from "./shell/bootstrap.js";
-import type { AgentProvider, CreateAgentParams, SendMessageOptions } from "./ports/agent-provider.js";
+import type { AgentProvider, CreateAgentParams, RetrievedPassage, SendMessageOptions } from "./ports/agent-provider.js";
 import { LocalProvider } from "./shell/local-provider.js";
 import { createRepoAccess } from "./shell/repo-tools.js";
 import { formatTopSymbolsEvidence } from "./core/symbol-summary.js";
@@ -59,10 +61,14 @@ import { readPackageVersion } from "./shell/package-version.js";
 import { isMainModule } from "./shell/is-main-module.js";
 import { DEFAULT_WATCH_CONFIG } from "./core/watch.js";
 import { generatePlist, PLIST_LABEL } from "./core/daemon.js";
-import { generateMcpEntry, checkMcpEntry, resolveMcpLaunchSpec, type McpLaunchSpec, type McpProviderConfig } from "./core/mcp-config.js";
-import { buildPostSetupNextSteps, getSetupMode } from "./core/setup.js";
-import { MAX_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Chunk, type ChunkingStrategy, type Config, type FileInfo, type RepoConfig, type SymbolFileMap } from "./core/types.js";
+import { generateMcpEntry, checkMcpEntry, resolveMcpLaunchSpec, selectMcpConfigFile, type McpCheckResult, type McpConfigLocation, type McpLaunchSpec, type McpProviderConfig, type McpServerEntry } from "./core/mcp-config.js";
+import { isPathIgnoredByGitignore } from "./core/gitignore.js";
+import { buildPostSetupNextSteps, getSetupMode, resolveEffectiveSetupMode } from "./core/setup.js";
+import { MAX_INDEXABLE_FILE_SIZE_KB, MEMORY_BLOCK_LIMIT, type AgentState, type AppState, type Chunk, type ChunkingStrategy, type Config, type FileInfo, type RepoConfig, type SkippedFile, type SymbolFileMap } from "./core/types.js";
 import { reconcileAgent, fixReconcileDrift, type ReconcileResult } from "./shell/reconcile.js";
+import { resolveRepoTarget } from "./core/repo-target.js";
+import { renderSpinnerFrame, renderStaticSpinnerLine } from "./core/spinner.js";
+import { formatRetrievedPassages } from "./core/retrieved-passages.js";
 import type { LocalRuntimeOptions } from "./shell/local-provider.js";
 import type { SymbolLookupPort } from "./shell/agent-tools.js";
 import type { BlockStorage } from "./shell/block-storage.js";
@@ -114,6 +120,7 @@ interface AskOpts {
   askTimeoutMs?: string;
   maxSteps?: string;
   config?: string;
+  verbose?: boolean;
 }
 
 interface SyncOpts {
@@ -128,6 +135,11 @@ interface SyncOpts {
 interface RepoOpts {
   repo?: string;
   json?: boolean;
+}
+
+interface ExportOpts {
+  repo?: string;
+  output?: string;
 }
 
 interface OnboardOpts {
@@ -297,6 +309,26 @@ class FakeProvider implements AgentProvider {
     return Promise.resolve();
   }
 
+  /**
+   * FakeProvider is in-memory per-process, so it can't reflect real
+   * cross-process store persistence. Default to "exists" (matches prior
+   * behavior for every test that doesn't care about this) and let tests opt
+   * into simulating a store-vs-state drift via
+   * REPO_EXPERT_TEST_FAKE_PROVIDER_MISSING_AGENTS (comma-separated agent ids).
+   */
+  agentExists(agentId: string): Promise<boolean> {
+    const missing = (process.env["REPO_EXPERT_TEST_FAKE_PROVIDER_MISSING_AGENTS"] ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    return Promise.resolve(!missing.includes(agentId));
+  }
+
+  purgePassages(agentId: string): Promise<void> {
+    this.passagesByAgent[agentId] = [];
+    return Promise.resolve();
+  }
+
   async storePassage(agentId: string, text: string): Promise<string> {
     const delayMs = Number.parseInt(process.env["REPO_EXPERT_TEST_DELAY_STORE_MS"] ?? "0", 10);
     if (!Number.isNaN(delayMs) && delayMs > 0) {
@@ -305,6 +337,9 @@ class FakeProvider implements AgentProvider {
     if (process.env["REPO_EXPERT_TEST_FAIL_LOAD_ONCE"] === "1") {
       process.env["REPO_EXPERT_TEST_FAIL_LOAD_ONCE"] = "0";
       throw new Error("simulated load failure");
+    }
+    if (process.env["REPO_EXPERT_TEST_FAIL_LOAD_ALWAYS"] === "1") {
+      throw new Error("simulated load failure (every chunk)");
     }
     if (!Object.hasOwn(this.passagesByAgent, agentId)) this.passagesByAgent[agentId] = [];
     const passages = getOwnRecordValue(this.passagesByAgent, agentId);
@@ -324,6 +359,13 @@ class FakeProvider implements AgentProvider {
 
   listPassages(agentId: string): Promise<Array<{ id: string; text: string }>> {
     return Promise.resolve(this.passagesByAgent[agentId] ?? []);
+  }
+
+  /** Deterministic descending fake score by position — good enough for `ask --verbose` tests, no real search behind it. */
+  searchPassages(agentId: string, _query: string, topK: number): Promise<RetrievedPassage[]> {
+    const passages = this.passagesByAgent[agentId] ?? [];
+    const scored = passages.map((passage, index) => ({ ...passage, score: Number((1 - index * 0.1).toFixed(3)) }));
+    return Promise.resolve(scored.slice(0, topK));
   }
 
   getBlock(agentId: string, label: string): Promise<{ value: string; limit: number }> {
@@ -373,6 +415,9 @@ class FakeProvider implements AgentProvider {
     if (process.env["REPO_EXPERT_TEST_ECHO_PROMPT"] === "1") {
       console.log(`[fake-consolidate-prompt]${prompt}[/fake-consolidate-prompt]`);
     }
+    // Test-only escape hatch to exercise the true no-op path (blocks
+    // byte-identical before/after) without a real LLM leaving them alone.
+    if (process.env["REPO_EXPERT_TEST_CONSOLIDATE_NOOP"] === "1") return;
     await this.updateBlock(agentId, "architecture", "consolidated architecture");
     await this.updateBlock(agentId, "conventions", "consolidated conventions");
   }
@@ -412,22 +457,29 @@ async function runSetupPreflight(config: Config): Promise<SetupPreflightResult> 
 
   const endpointResult = await checkLlmEndpoint(baseUrl);
   if (endpointResult.status !== "pass") {
-    errors.push(`LLM endpoint unreachable at ${baseUrl} — is Ollama running? Try: ollama serve`);
+    const hint = isLocalOllamaEndpoint(baseUrl)
+      ? "is Ollama running? Try: ollama serve"
+      : "check the endpoint URL, network connectivity, and API key.";
+    errors.push(`LLM endpoint unreachable at ${baseUrl} — ${hint}`);
     return { ok: false, errors, warnings };
   }
 
   const modelResult = await checkModelAvailable(baseUrl, config.provider.model, "LLM model");
   if (modelResult.status === "fail") {
-    errors.push(`Model "${config.provider.model}" not found at ${baseUrl} — try: ollama pull ${config.provider.model}`);
+    errors.push(modelResult.message);
   } else if (modelResult.status === "warn") {
     warnings.push(modelResult.message);
   }
 
+  // Embedding models are checked with a real POST /embeddings probe rather than GET /models:
+  // remote endpoints like OpenRouter never list embedding models under /models (only chat
+  // models), so a models-list-based check false-fails there even when the embedding model
+  // works fine. transformersjs is a local, in-process engine with no endpoint to probe.
   if (config.provider.embeddingEngine === "http") {
     const embeddingModel = config.provider.embeddingModel;
-    const embeddingResult = await checkModelAvailable(baseUrl, embeddingModel, "Embedding model");
+    const embeddingResult = await checkEmbeddingModelAvailable(baseUrl, embeddingModel, process.env["LLM_API_KEY"], "Embedding model");
     if (embeddingResult.status === "fail") {
-      errors.push(`Embedding model "${embeddingModel}" not found at ${baseUrl} — try: ollama pull ${embeddingModel}`);
+      errors.push(embeddingResult.message);
     } else if (embeddingResult.status === "warn") {
       warnings.push(embeddingResult.message);
     }
@@ -583,14 +635,19 @@ async function consolidateRepoAgent(params: {
     return state;
   }
 
+  // Stamp lastConsolidatedAt on every actual run (changed or not) — it answers
+  // "when did this last run", distinct from lastConsolidatedCommit, which only
+  // stamps when a run produced a real change.
+  state = updateAgentField(state, repoName, { lastConsolidatedAt: new Date().toISOString() });
+  if (result.changed && headCommit !== null) {
+    state = updateAgentField(state, repoName, { lastConsolidatedCommit: headCommit });
+  }
+  await saveState(STATE_FILE, state);
+
   if (result.changed) {
-    if (headCommit !== null) {
-      state = updateAgentField(state, repoName, { lastConsolidatedCommit: headCommit });
-      await saveState(STATE_FILE, state);
-    }
     console.log(`  Done.`);
   }
-  // else: "consolidation: blocks unchanged" was already logged inside consolidateAgentMemory.
+  // else: per-block unchanged status was already logged inside consolidateAgentMemory.
 
   return state;
 }
@@ -656,6 +713,26 @@ function requireAgent(state: AppState, repoName: string): AgentState | null {
 
 function getOwnRecordValue<T>(record: Record<string, T>, key: string): T | undefined {
   return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+/**
+ * Reconcile a command's optional positional repo argument against its
+ * `--repo` flag (kept for back-compat). Prints and sets a non-zero exit code
+ * on a conflict. Returns `{ ok: false }` in that case so callers can bail
+ * without confusing a real conflict with the legitimate "no repo given, use
+ * all agents" case (both would otherwise be `undefined`).
+ */
+function resolveRepoArgOrExit(
+  positional: string | undefined,
+  flag: string | undefined,
+): { ok: true; repo: string | undefined } | { ok: false } {
+  const target = resolveRepoTarget(positional, flag);
+  if (target.error) {
+    console.error(target.error);
+    process.exitCode = 1;
+    return { ok: false };
+  }
+  return { ok: true, repo: target.repo };
 }
 
 async function confirmDestroy(existing: string[]): Promise<boolean> {
@@ -788,7 +865,11 @@ function noInputEnabled(): boolean {
 }
 
 function interactiveInputAvailable(): boolean {
-  return process.stdin.isTTY && process.stdout.isTTY;
+  // Explicit `=== true` (not a bare `&&`) so this always yields a real boolean:
+  // `isTTY` is `undefined` on piped/non-TTY streams, and an `undefined` value
+  // handed to a destructured option with a default (e.g. `allowPrompts = true`)
+  // silently falls back to that default instead of being treated as falsy.
+  return process.stdin.isTTY === true && process.stdout.isTTY === true;
 }
 
 function readDebugEnabled(argv: string[]): boolean {
@@ -796,12 +877,26 @@ function readDebugEnabled(argv: string[]): boolean {
 }
 
 function question(rl: ReadlineInterface, prompt: string): Promise<string> {
-  return new Promise((resolve) => {
-    rl.question(prompt, resolve);
+  return new Promise((resolve, reject) => {
+    // If stdin ends (EOF) before the question is answered, readline's
+    // `question()` callback is simply never invoked — without this listener
+    // the returned promise would hang forever unsettled, and a process with
+    // no other pending work then exits 0 with the rejection silently
+    // dropped (finding 7's "swallowed readline rejection").
+    const onClose = (): void => {
+      reject(new Error("stdin closed before answering prompt"));
+    };
+    rl.once("close", onClose);
+    rl.question(prompt, (answer) => {
+      rl.removeListener("close", onClose);
+      resolve(answer);
+    });
   });
 }
 
 const ASK_DEFAULT_TIMEOUT_MS = 60_000;
+/** Passages shown by `ask --verbose`'s retrieval preview before the answer. */
+const VERBOSE_RETRIEVAL_TOP_K = 5;
 /** Onboarding walks the full memory + archival search, so it gets a longer budget than `ask` (consistent with setup's bootstrap-timeout-ms default). */
 const ONBOARD_DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -913,6 +1008,12 @@ async function runSingleAsk(repo: string | undefined, question: string | undefin
 
   const askConfig = await loadConfigSafe(path.resolve(opts.config ?? "config.yaml"));
   const provider = createProviderForCommands(askConfig, createSymbolLookupFromState(state));
+
+  if (opts.verbose) {
+    const retrieved = (await provider.searchPassages?.(agentInfo.agentId, question, VERBOSE_RETRIEVAL_TOP_K)) ?? [];
+    console.error(formatRetrievedPassages(retrieved));
+  }
+
   const askSettings = await buildAskSettings(opts);
   const stop = startSpinner(`Asking ${repo}...`);
   try {
@@ -926,10 +1027,15 @@ async function runSingleAsk(repo: string | undefined, question: string | undefin
 }
 
 function startSpinner(label: string): () => void {
-  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  if (!process.stderr.isTTY) {
+    // Piped/non-interactive output (CI logs, redirected files): print one
+    // static line instead of flooding the log with animation frames.
+    process.stderr.write(renderStaticSpinnerLine(label));
+    return () => {};
+  }
   let i = 0;
   const id = setInterval(() => {
-    process.stderr.write(`\r${frames[i++ % frames.length]} ${label}`);
+    process.stderr.write(renderSpinnerFrame(label, i++));
   }, 80);
   return () => {
     clearInterval(id);
@@ -969,6 +1075,21 @@ program
       process.exitCode = 1;
       return;
     }
+    const allowPrompts = !noInputEnabled() && interactiveInputAvailable();
+    // Fail fast (finding 7): piped/non-TTY stdin with no --repo-path used to
+    // silently consume buffered answer lines, then exit 0 having written
+    // nothing once stdin hit EOF mid-prompt. Bail before even opening a
+    // readline interface when we can already tell prompting won't work.
+    const guardError = nonInteractiveInitError({
+      allowPrompts,
+      repoPathProvided: Boolean(opts.repoPath?.trim()),
+      noInputFlagSet: noInputEnabled(),
+    });
+    if (guardError) {
+      console.error(guardError);
+      process.exitCode = 1;
+      return;
+    }
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     try {
       const initOptions = {
@@ -978,13 +1099,21 @@ program
         ...(opts.baseUrl === undefined ? {} : { baseUrl: opts.baseUrl }),
         ...(opts.embeddingEngine === undefined ? {} : { embeddingEngine: opts.embeddingEngine }),
         assumeYes: Boolean(opts.yes),
-        allowPrompts: !noInputEnabled() && interactiveInputAvailable(),
+        allowPrompts,
       };
       await runInit({ question: (prompt) => question(rl, prompt) }, {
         ...initOptions,
       });
-    } catch {
-      // runInit sets process.exitCode and logs errors
+    } catch (error) {
+      // runInit already prints its own error + sets process.exitCode for its
+      // known failure paths. This is a safety net for anything that doesn't
+      // (e.g. a readline rejection from stdin closing mid-prompt) so no path
+      // can exit 0 without either completing or printing an error.
+      if (!process.exitCode) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`init failed: ${message}`);
+        process.exitCode = 1;
+      }
     } finally {
       rl.close();
     }
@@ -1062,7 +1191,9 @@ program
     }
 
     const log = opts.json ? (_: string) => {} : (line: string) => { console.log(line); };
-    const warn = opts.json ? (_: string) => {} : (line: string) => { console.warn(line); };
+    // Warnings go to stderr in BOTH modes: they never corrupt the JSON on stdout,
+    // and silencing them in --json mode previously hid "N/N chunks failed to load" entirely.
+    const warn = (line: string): void => { console.warn(line); };
     const loadRetries = parseNonNegativeInt(opts.loadRetries, 2);
     const bootstrapRetries = parseNonNegativeInt(opts.bootstrapRetries, 2);
     const loadTimeoutMs = parseNonNegativeInt(opts.loadTimeoutMs, 300_000);
@@ -1102,10 +1233,22 @@ program
       }
 
       const existingAgent = getOwnRecordValue(state.agents, repoName);
-      const mode = getSetupMode(existingAgent, opts.bootstrap, {
+      let mode = getSetupMode(existingAgent, opts.bootstrap, {
         forceResume: Boolean(opts.resume),
         forceReindex: Boolean(opts.reindex),
       });
+
+      if (existingAgent !== undefined) {
+        const existsInStore = (await provider.agentExists?.(existingAgent.agentId)) ?? true;
+        const resolvedMode = resolveEffectiveSetupMode(mode, existsInStore);
+        if (resolvedMode !== mode) {
+          warn(
+            `Agent for "${repoName}" (${existingAgent.agentId}) is in state but missing from the store — ` +
+              `self-healing by recreating it.`,
+          );
+        }
+        mode = resolvedMode;
+      }
 
       if (mode === "skip") {
         if (existingAgent === undefined) {
@@ -1131,7 +1274,9 @@ program
       let indexMs = 0;
       let bootstrapMs = 0;
       let filesFound = 0;
+      let filesSkipped = 0;
       let chunksLoaded = 0;
+      let chunksFailed = 0;
 
       let agentId: string;
       try {
@@ -1158,13 +1303,24 @@ program
 
         if (mode === "create" || mode === "resume_full" || mode === "reindex_full") {
           const indexStart = Date.now();
+          // A full (re)load is about to write every chunk fresh — purge any passages already
+          // under this agentId first so a reindex (or a redo of an interrupted resume/self-heal)
+          // never leaves stale/duplicate rows behind. No-op when nothing exists yet.
+          if (mode !== "create") {
+            log(`  Purging existing passages before full ${mode === "reindex_full" ? "reindex" : "reload"}...`);
+          }
+          await provider.purgePassages?.(agentId);
           log(`  Collecting files from ${repoConfig.path}...`);
-          const files = await collectFiles(repoConfig);
+          const skippedFiles: SkippedFile[] = [];
+          const files = await collectFiles(repoConfig, undefined, undefined, (skip) => skippedFiles.push(skip));
           filesFound = files.length;
+          filesSkipped = skippedFiles.length;
           log(`  Found ${String(files.length)} files`);
+          if (skippedFiles.length > 0) {
+            warn(`  ${String(skippedFiles.length)} files skipped (> ${String(MAX_INDEXABLE_FILE_SIZE_KB)} KB): ${skippedFiles.map((f) => `${f.path} (${f.sizeKb.toFixed(1)} KB)`).join(", ")}`);
+          }
 
           const { chunks, symbolFiles } = buildBulkIndexArtifacts(files, chunkingStrategy);
-          chunksLoaded = chunks.length;
           log(`  Loading ${String(chunks.length)} passages...`);
           const loadResult = await withRetry(
             `loading passages for "${repoName}"`,
@@ -1177,8 +1333,17 @@ program
             warn,
           );
           if (chunks.length > 0 && !opts.json) process.stdout.write("\n");
+          // Report reality, not intent: chunksLoaded is the count that actually landed
+          // in the store, so JSON consumers can't mistake a failed load for a full one.
+          chunksFailed = loadResult.failedChunks;
+          chunksLoaded = chunks.length - loadResult.failedChunks;
           if (loadResult.failedChunks > 0) {
             warn(`${String(loadResult.failedChunks)}/${String(chunks.length)} chunks failed to load`);
+            if (loadResult.failedChunks === chunks.length) {
+              throw new Error(
+                `All ${String(chunks.length)} chunks failed to load for "${repoName}" — aborting setup for this repo.`,
+              );
+            }
           }
           const fileHashes = Object.fromEntries(
             files.map((file) => [file.path, hashFileContent(file.content)]),
@@ -1224,7 +1389,9 @@ program
           mode,
           agentId,
           filesFound,
+          filesSkipped,
           chunksLoaded,
+          chunksFailed,
           createMs,
           indexMs,
           bootstrapMs,
@@ -1238,6 +1405,9 @@ program
           status: "error",
           mode,
           error: message,
+          filesFound,
+          chunksLoaded,
+          chunksFailed,
           totalMs: Date.now() - repoStart,
         });
         process.exitCode = 1;
@@ -1246,6 +1416,8 @@ program
 
     if (opts.json) {
       console.log(JSON.stringify({ results: setupResults }, null, 2));
+    } else if (setupResults.some((r) => r["status"] === "error")) {
+      console.error("Setup did not complete for all repos — see errors above.");
     } else {
       console.log("Setup complete.");
       const exampleRepoName = repoNames[0] ?? "my-repo";
@@ -1298,6 +1470,7 @@ program
   .option("--ask-timeout-ms <ms>", "Timeout for single-agent asks (ms)")
   .option("--max-steps <n>", "Maximum agent reasoning/tool steps per ask")
   .option("--config <path>", "Optional config file path for ask defaults")
+  .option("--verbose", "Print retrieved passages (path + snippet + score) to stderr before the answer")
   .action(async (repo: string | undefined, question: string | undefined, opts: AskOpts) => {
     if (opts.all) {
       await runBroadcastAsk(repo, opts);
@@ -1405,7 +1578,10 @@ program
       if (changedFiles.length === 0) {
         log(`  No changes to sync.`);
         if (!opts.dryRun) {
-          state = updateAgentField(state, repoName, { lastSyncCommit: headCommit });
+          state = updateAgentField(state, repoName, {
+            lastSyncCommit: headCommit,
+            lastSyncAt: new Date().toISOString(),
+          });
           await saveState(STATE_FILE, state);
         }
         syncResults.push({ repoName, status: "ok", dryRun: Boolean(opts.dryRun), changedFiles: 0 });
@@ -1458,7 +1634,7 @@ program
           }
         },
         headCommit,
-        maxFileSizeKb: MAX_FILE_SIZE_KB,
+        maxFileSizeKb: MAX_INDEXABLE_FILE_SIZE_KB,
         ...(pathAliases === undefined ? {} : { pathAliases }),
         ...(isTTY ? {
           onProgress: (completed: number, total: number, filePath: string) => {
@@ -1485,6 +1661,7 @@ program
         symbolFiles: result.symbolFiles,
         symbolRanks: result.symbolRanks,
         lastSyncCommit: result.lastSyncCommit,
+        lastSyncAt: result.lastSyncAt,
       });
       await saveState(STATE_FILE, state);
 
@@ -1507,10 +1684,13 @@ program
           symbolRankEvidence: formatTopSymbolsEvidence(result.symbolFiles, result.symbolRanks),
           log,
         });
-        if (consolidation.consolidated && consolidation.changed) {
-          state = updateAgentField(state, repoName, { lastConsolidatedCommit: headCommit });
+        if (consolidation.consolidated) {
+          state = updateAgentField(state, repoName, { lastConsolidatedAt: new Date().toISOString() });
+          if (consolidation.changed) {
+            state = updateAgentField(state, repoName, { lastConsolidatedCommit: headCommit });
+          }
           await saveState(STATE_FILE, state);
-          log(`  Consolidated architecture/conventions memory blocks.`);
+          if (consolidation.changed) log(`  Consolidated architecture/conventions memory blocks.`);
         }
       }
 
@@ -1553,7 +1733,10 @@ program
     const rows: Array<{
       repoName: string;
       agentId: string;
-      files: number;
+      // Distinct from setup's "Found N files": this counts files that produced
+      // at least one indexed passage, which can be lower (empty files, files
+      // skipped for size, files whose only content was filtered out).
+      filesWithPassages: number;
       passages: number;
       bootstrapped: boolean;
       serverPassages?: number;
@@ -1561,7 +1744,7 @@ program
     }> = entries.map(([repoName, agent]) => ({
       repoName,
       agentId: agent.agentId,
-      files: Object.keys(agent.passages).length,
+      filesWithPassages: Object.keys(agent.passages).length,
       passages: Object.values(agent.passages).flat().length,
       bootstrapped: Boolean(agent.lastBootstrap),
     }));
@@ -1586,10 +1769,10 @@ program
       if (opts.live) {
         const driftTag = row.drift ? " [drift]" : "";
         console.log(
-          `  ${row.repoName}: agent=${row.agentId} files=${String(row.files)} passages=${String(row.passages)} server=${String(row.serverPassages)}${driftTag} bootstrapped=${bootstrap}`,
+          `  ${row.repoName}: agent=${row.agentId} files_with_passages=${String(row.filesWithPassages)} passages=${String(row.passages)} server=${String(row.serverPassages)}${driftTag} bootstrapped=${bootstrap}`,
         );
       } else {
-        console.log(`  ${row.repoName}: agent=${row.agentId} files=${String(row.files)} passages=${String(row.passages)} bootstrapped=${bootstrap}`);
+        console.log(`  ${row.repoName}: agent=${row.agentId} files_with_passages=${String(row.filesWithPassages)} passages=${String(row.passages)} bootstrapped=${bootstrap}`);
       }
     }
   });
@@ -1643,22 +1826,37 @@ program
   });
 
 program
-  .command("export")
+  .command("export [repo]")
   .description("Export agent memory to markdown")
   .option("--repo <name>", "Export a single repo agent")
-  .action(async (opts: RepoOpts) => {
+  .option("--output <file>", "Write the export to a file instead of stdout")
+  .action(async (repoArg: string | undefined, opts: ExportOpts) => {
+    const target = resolveRepoArgOrExit(repoArg, opts.repo);
+    if (!target.ok) return;
+
     const state = await loadState(STATE_FILE);
     const exportConfig = await loadConfigSafe(path.resolve("config.yaml"));
     const provider = createProvider(exportConfig);
-    const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
+    const repoNames = target.repo ? [target.repo] : Object.keys(state.agents);
 
+    const exported: string[] = [];
     for (const repoName of repoNames) {
       const agentInfo = requireAgent(state, repoName);
       if (!agentInfo) return;
 
       const md = await exportAgent(provider, repoName, agentInfo.agentId);
-      console.log(md);
+      exported.push(md);
     }
+
+    if (opts.output) {
+      const fs = await import("node:fs/promises");
+      const outputPath = path.resolve(opts.output);
+      await fs.writeFile(outputPath, `${exported.join("\n\n")}\n`, "utf8");
+      console.log(`Export written to ${outputPath}`);
+      return;
+    }
+
+    for (const md of exported) console.log(md);
   });
 
 program
@@ -1683,14 +1881,17 @@ program
   });
 
 program
-  .command("destroy")
+  .command("destroy [repo]")
   .description("Delete agents")
   .option("--repo <name>", "Destroy a single repo agent")
   .option("--force", "Skip confirmation prompt")
   .option("--dry-run", "Preview agents that would be deleted")
-  .action(async (opts: DestroyOpts) => {
+  .action(async (repoArg: string | undefined, opts: DestroyOpts) => {
+    const target = resolveRepoArgOrExit(repoArg, opts.repo);
+    if (!target.ok) return;
+
     const state = await loadState(STATE_FILE);
-    const repoNames = opts.repo ? [opts.repo] : Object.keys(state.agents);
+    const repoNames = target.repo ? [target.repo] : Object.keys(state.agents);
     const existing = repoNames.filter((n) => Object.hasOwn(state.agents, n));
 
     if (existing.length === 0) {
@@ -1772,8 +1973,11 @@ program
         serverPassageCount: r.serverPassageCount,
         orphanCount: r.orphanPassageIds.length,
         missingCount: r.missingPassageIds.length,
+        agentMissingFromStore: r.agentMissingFromStore,
         inSync: r.inSync,
-        fixed: Boolean(opts.fix) && !r.inSync,
+        // reconcile --fix only cleans passage-level drift; a missing agent registry row
+        // can only be self-healed by "repo-expert setup".
+        fixed: Boolean(opts.fix) && (r.orphanPassageIds.length > 0 || r.missingPassageIds.length > 0),
         ...(opts.verbose ? { orphanPassageIds: r.orphanPassageIds, missingPassageIds: r.missingPassageIds } : {}),
       }));
       console.log(JSON.stringify(jsonResults, null, 2));
@@ -1786,13 +1990,18 @@ program
         console.log(`${result.repoName}: in sync (${String(result.serverPassageCount)} passages)`);
       } else {
         console.log(`${result.repoName}: drift detected`);
+        if (result.agentMissingFromStore) {
+          console.log(`  agent missing from store registry — run "repo-expert setup" to self-heal.`);
+        }
         if (result.orphanPassageIds.length > 0) {
           console.log(`  orphan passages (on server, not in local map): ${String(result.orphanPassageIds.length)}`);
         }
         if (result.missingPassageIds.length > 0) {
           console.log(`  missing passages (in local map, not on server): ${String(result.missingPassageIds.length)}`);
         }
-        if (opts.fix) console.log(`  fixed.`);
+        if (opts.fix && (result.orphanPassageIds.length > 0 || result.missingPassageIds.length > 0)) {
+          console.log(`  fixed.`);
+        }
       }
     }
 
@@ -1976,6 +2185,8 @@ interface McpInstallOpts {
 }
 
 interface McpCheckOpts {
+  global?: boolean;
+  local?: boolean;
   json?: boolean;
   config: string;
 }
@@ -2056,6 +2267,39 @@ program
     }
   });
 
+/**
+ * Finding 8: the config `mcp-install` writes carries LLM_API_KEY in
+ * plaintext, and a local install (`./.claude.json`) is easy to commit by
+ * accident — warn on both, on top of whatever provider-config warnings
+ * `resolveMcpProviderConfig` already produced.
+ */
+async function buildMcpInstallWarnings(params: {
+  local: boolean | undefined;
+  entry: McpServerEntry;
+  configFile: string;
+  baseWarnings: string[];
+  fs: typeof NodeFsPromises;
+}): Promise<string[]> {
+  const { local, entry, configFile, baseWarnings, fs } = params;
+  const warnings = [...baseWarnings];
+
+  const apiKey = entry.env["LLM_API_KEY"];
+  if (typeof apiKey === "string" && apiKey.length > 0) {
+    warnings.push(`${configFile} now contains your LLM_API_KEY in plaintext — treat it like a secret.`);
+  }
+
+  if (local) {
+    const gitignoreContent = await fs.readFile(path.resolve(".gitignore"), "utf8").catch(() => "");
+    if (!isPathIgnoredByGitignore(gitignoreContent, ".claude.json")) {
+      warnings.push(
+        '.claude.json is not covered by .gitignore — add it (e.g. "echo .claude.json >> .gitignore") to avoid committing your LLM API key.',
+      );
+    }
+  }
+
+  return warnings;
+}
+
 program
   .command("mcp-install")
   .description("Add the repo-expert MCP server entry to Claude Code config")
@@ -2102,9 +2346,17 @@ program
 
     await fs.writeFile(configFile, JSON.stringify(config, null, 2) + "\n", "utf8");
     console.log(`MCP entry written to ${configFile}`);
-    if (warnings.length > 0) {
+
+    const installWarnings = await buildMcpInstallWarnings({
+      local: opts.local,
+      entry,
+      configFile,
+      baseWarnings: warnings,
+      fs,
+    });
+    if (installWarnings.length > 0) {
       console.log("Warnings:");
-      for (const warning of warnings) {
+      for (const warning of installWarnings) {
         console.log(`  - ${warning}`);
       }
     }
@@ -2112,31 +2364,120 @@ program
     console.log('Tip: run "repo-expert install-instructions" to point Claude Code at these tools from CLAUDE.md/AGENTS.md.');
   });
 
+/**
+ * Finding 8: `mcp-install --local` writes `./.claude.json`, but `mcp-check`
+ * used to only ever read `~/.claude.json`, so a local install could never
+ * validate. Auto-detect which one to use (mirroring --local/--global on
+ * `mcp-install`) and report which was found; prints its own "not found"
+ * error (mirroring the pre-existing ENOENT message) since every caller
+ * needs the same message shape.
+ */
+async function resolveMcpCheckConfigFile(
+  opts: { local?: boolean; global?: boolean },
+  fs: typeof NodeFsPromises,
+  home: string,
+): Promise<{ configFile: string; location: McpConfigLocation } | null> {
+  const localPath = path.resolve(".claude.json");
+  const globalPath = path.join(home, ".claude.json");
+  const fileExists = async (candidate: string): Promise<boolean> =>
+    fs.access(candidate).then(() => true, () => false);
+
+  const selection = selectMcpConfigFile(
+    opts,
+    { localPath, globalPath },
+    { localExists: await fileExists(localPath), globalExists: await fileExists(globalPath) },
+  );
+  if (selection !== null) return { configFile: selection.configPath, location: selection.location };
+
+  if (opts.local) {
+    console.error(`Config file not found: ${localPath}`);
+  } else if (opts.global) {
+    console.error(`Config file not found: ${globalPath}`);
+  } else {
+    console.error(`Config file not found. Checked ${localPath} and ${globalPath}.`);
+  }
+  return null;
+}
+
+/** Reads and parses a Claude Code config file, logging the same actionable errors `mcp-check` always has (missing / invalid JSON). */
+async function readMcpConfigFile(
+  fs: typeof NodeFsPromises,
+  configFile: string,
+): Promise<Record<string, unknown> | null> {
+  const rawConfig = await fs.readFile(configFile, "utf8").catch((error: unknown) => {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+      console.error(`Config file not found: ${configFile}`);
+      return;
+    }
+    throw error;
+  });
+  if (rawConfig === undefined) return null;
+
+  try {
+    return JSON.parse(rawConfig) as Record<string, unknown>;
+  } catch {
+    console.error(`Failed to parse ${configFile}: invalid JSON.`);
+    return null;
+  }
+}
+
+/** Prints the human-readable (non-`--json`) `mcp-check` report; sets `process.exitCode = 1` on issues. */
+function printMcpCheckTextReport(params: {
+  location: McpConfigLocation;
+  configFile: string;
+  warnings: string[];
+  result: McpCheckResult;
+}): void {
+  const { location, configFile, warnings, result } = params;
+  console.log(`Checking ${location} config: ${configFile}`);
+
+  if (warnings.length > 0) {
+    console.log("Warnings:");
+    for (const warning of warnings) {
+      console.log(`  - ${warning}`);
+    }
+  }
+
+  if (result.ok) {
+    console.log("MCP config looks good.");
+    return;
+  }
+
+  console.error("Issues found:");
+  for (const issue of result.issues) {
+    console.error(`  - ${issue}`);
+  }
+  console.error('\nRun "repo-expert mcp-install" to fix.');
+  process.exitCode = 1;
+}
+
 program
   .command("mcp-check")
   .description("Validate existing MCP server entry in Claude Code config")
+  .option("--global", "Check global ~/.claude.json only")
+  .option("--local", "Check local ./.claude.json only")
   .option("--json", "Output check result as JSON")
   .option("--config <path>", "Config file path", "config.yaml")
   .action(async (opts: McpCheckOpts) => {
+    if (opts.global && opts.local) {
+      console.error("Choose either --global or --local, not both.");
+      process.exitCode = 1;
+      return;
+    }
+
     const fs = await import("node:fs/promises");
     const os = await import("node:os");
     const home = os.default.homedir();
-    const configFile = path.join(home, ".claude.json");
 
-    const rawConfig = await fs.readFile(configFile, "utf8").catch((error: unknown) => {
-      if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
-        console.error(`Config file not found: ${configFile}`);
-        process.exitCode = 1;
-        return;
-      }
-      throw error;
-    });
-    if (rawConfig === undefined) return;
-    let config: Record<string, unknown>;
-    try {
-      config = JSON.parse(rawConfig) as Record<string, unknown>;
-    } catch {
-      console.error(`Failed to parse ${configFile}: invalid JSON.`);
+    const resolved = await resolveMcpCheckConfigFile(opts, fs, home);
+    if (resolved === null) {
+      process.exitCode = 1;
+      return;
+    }
+    const { configFile, location } = resolved;
+
+    const config = await readMcpConfigFile(fs, configFile);
+    if (config === null) {
       process.exitCode = 1;
       return;
     }
@@ -2149,29 +2490,13 @@ program
     const result = checkMcpEntry(entry, launch, providerConfig);
 
     if (opts.json) {
-      const payload = warnings.length > 0 ? { ...result, warnings } : result;
+      const payload = { ...result, location, configPath: configFile, ...(warnings.length > 0 ? { warnings } : {}) };
       console.log(JSON.stringify(payload, null, 2));
       if (!result.ok) process.exitCode = 1;
       return;
     }
 
-    if (warnings.length > 0) {
-      console.log("Warnings:");
-      for (const warning of warnings) {
-        console.log(`  - ${warning}`);
-      }
-    }
-
-    if (result.ok) {
-      console.log("MCP config looks good.");
-    } else {
-      console.error("Issues found:");
-      for (const issue of result.issues) {
-        console.error(`  - ${issue}`);
-      }
-      console.error('\nRun "repo-expert mcp-install" to fix.');
-      process.exitCode = 1;
-    }
+    printMcpCheckTextReport({ location, configFile, warnings, result });
   });
 
 program

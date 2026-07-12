@@ -160,3 +160,51 @@ asks verified against source + 1 adversarial ask + `--fast` → commit-canary `s
 → retrieval check → `reconcile` → `consolidate` → `export` → `onboard` →
 `destroy --dry-run`. Grounding was verified by reading the target repos' actual
 source; store contents were verified by direct sqlite queries where needed.
+
+## Outcomes (follow-up session, same day)
+
+All 14 findings were addressed on `claude/repo-experts-e2e-followup-n3y8yd`,
+TDD red-green per item, and findings 1–8 were re-verified against their
+original repro commands with live OpenRouter calls (fresh isolated
+workspaces; verdicts below are from that verification pass, not just unit
+tests). Suite: 1381 passed / 1 skipped; `eval/bench.ts` deterministic gates
+all pass.
+
+| # | Finding | Status | Fix / verification |
+|---|---|---|---|
+| 1 | >50 KB silent exclusion | **Fixed** | Large files are indexed (new `MAX_INDEXABLE_FILE_SIZE_KB = 1024` hard cap with visible skip warning replaces the 50 KB gate); `read_file` reads them with a windowing hint past the cap. Verified: sinatra `base.rb` → 49 passages, grounded route answers verbatim vs source. |
+| 2 | `--reindex` duplication / stale scope | **Fixed** | Reindex purges the agent's passages (and vectors) before loading; counts reported reflect the store. Verified: 814 → 68 (lib-scoped) → 814 restored, exact, zero duplication; no stale rack-protection rows. |
+| 3 | State/store drift bricks MCP; total load failure exits 0 | **Fixed** | `setup` self-heals a state-file agent missing from the store; `doctor`/`reconcile` detect the drift; N/N chunk-load failure exits 1 with no "Setup complete" in both text and `--json` (JSON now reports real `chunksLoaded` + `chunksFailed`). Verified incl. MCP `agent_list` post-heal. |
+| 4 | Hallucination on absent features / ungrounded bootstrap+onboard | **Fixed** | Persona + agentic guidance gained a negative-space rule and a tool-failure disclosure rule; bootstrap memory blocks and `onboard` output are post-validated against the passage index (`src/core/grounding.ts`): unresolvable file references dropped, `path/to/` artifacts stripped. Verified with repeated probes: gin fake-rate-limiter 5/5 honest, express fake `lib/router/index.js` 5/5 honest, WebSocket + `flask create` honest, real-feature control answered correctly (no over-refusal), flask onboard paths all real+indexed. |
+| 5 | Embedding preflight false-fails on OpenRouter | **Fixed** | Preflight/doctor probe `POST /embeddings` with a tiny input instead of `GET /models`; `ollama pull`/`ollama serve` hints only for local Ollama endpoints; transformersjs skips the endpoint probe. Verified: doctor exit 0 on healthy OpenRouter, neutral hint on bad model id. |
+| 6 | `sync` never sets `lastSyncAt` | **Fixed** | `syncRepo` stamps `lastSyncAt` in its result; CLI persists it (incl. the no-change short-circuit). Verified via `status`. |
+| 7 | `init` silent failure on piped stdin | **Fixed** | Root cause was twofold: `isTTY === undefined` silently re-enabled prompts via a destructuring default, and the readline promise never rejected on EOF. Now fails fast with "stdin is not a TTY — use --yes --repo-path …", exit 1; a catch-all prevents any init path from exiting 0 silently. |
+| 8 | `mcp-install --local` / `mcp-check` mismatch + plaintext key | **Fixed** | `mcp-check` gained `--local`/`--global` and auto-detects `./.claude.json`; `mcp-install` warns about the plaintext key and (for `--local`) about missing `.gitignore` coverage. |
+| 9 | Positional-vs-`--repo` inconsistency | **Fixed** | `export`/`destroy` accept an optional positional `[repo]` (flag kept for back-compat; clear error on conflict). |
+| 10 | `list` "files" label | **Fixed** | Relabeled `files with passages` (JSON field `filesWithPassages`). |
+| 11 | `consolidate` gives no change signal | **Fixed** | Per-block modified/unchanged reporting; `lastConsolidatedAt` stamped in state and shown by `status`. |
+| 12 | Spinner floods non-TTY; `export`/`ask` ergonomics | **Fixed** | Static line when stdout isn't a TTY; `export --output <file>`; `ask --verbose` prints retrieved passages (path/snippet/score) to stderr for grounding audits. |
+| 13 | Paraphrase/no-term retrieval quality | **Deferred** | By design, informed by data: the transformers.js A/B (see follow-up plan doc) shows a real embedding model already lifts paraphrase Recall@1 0.0→0.2 and no-term 0.0→0.5 vs the CI hash stub, with fused MRR 0.698→0.810. A retrieval-algorithm change should be designed against those numbers, not patched blind. |
+| 14 | pnpm 10 / better-sqlite3 dev-env trap | **Fixed** | Documented in CONTRIBUTING.md; `self-check`'s native-module failure hint now includes the `node-gyp rebuild` recovery. |
+
+New bugs found (and fixed) during the follow-up session's transformers.js
+testing, beyond the original list:
+
+- **`setup --json` swallowed total indexing failure** — `chunksLoaded` was the
+  attempted count, warnings were silenced in JSON mode, and `failedChunks`
+  never appeared in the output; automation gating on `--json` was blind to a
+  0-row setup. Fixed with finding 3.
+- **Engine-switch reindex was a no-op** — after switching embedding engines,
+  every write failed the store's dimension guard and `--reindex` reported
+  success while changing nothing. The reindex purge now resets the stored
+  embedding dimension when the store empties, so the fresh load re-derives it.
+- **Models answer from pretrained knowledge when retrieval tools error**
+  (e.g. dimension mismatch) — looks convincingly grounded on well-known OSS
+  repos. Added a persona rule requiring disclosure of failed tool calls.
+
+Residual nuance, since fixed in the same session: after scoping an index
+down (e.g. `base_path: lib`), questions about now-excluded subprojects were
+answered from legitimately in-scope references without noting the subproject
+isn't indexed. The persona now discloses the indexed subtree (`base_path`)
+and instructs saying out-of-scope parts are not indexed — verified live
+(lib-scoped sinatra asked about rack-protection now answers "not indexed").

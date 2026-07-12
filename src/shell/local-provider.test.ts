@@ -15,6 +15,7 @@ function makeMockStore() {
     initAgent: vi.fn().mockResolvedValue(),
     deleteAgent: vi.fn().mockResolvedValue(),
     listAgents: vi.fn().mockResolvedValue([]),
+    deletePassagesForAgent: vi.fn().mockResolvedValue(),
     writePassage: vi.fn().mockResolvedValue(),
     writePassages: vi.fn().mockResolvedValue(),
     readPassage: vi.fn().mockResolvedValue(""),
@@ -111,6 +112,28 @@ describe("LocalProvider", () => {
     });
   });
 
+  describe("agentExists", () => {
+    it("returns true when the store's agent list contains the agent id", async () => {
+      mockStore.listAgents.mockResolvedValue(["myrepo", "other-repo"]);
+
+      await expect(provider.agentExists("myrepo")).resolves.toBe(true);
+    });
+
+    it("returns false when the store's agent list does not contain the agent id", async () => {
+      mockStore.listAgents.mockResolvedValue(["other-repo"]);
+
+      await expect(provider.agentExists("myrepo")).resolves.toBe(false);
+    });
+  });
+
+  describe("purgePassages", () => {
+    it("delegates to the store's deletePassagesForAgent", async () => {
+      await provider.purgePassages("myrepo");
+
+      expect(mockStore.deletePassagesForAgent).toHaveBeenCalledWith("myrepo");
+    });
+  });
+
   describe("storePassage", () => {
     it("writes the passage under a generated UUID and returns the UUID", async () => {
       const passageId = await provider.storePassage("myrepo", "some passage text");
@@ -175,6 +198,23 @@ describe("LocalProvider", () => {
       expect(passages).toEqual([
         { id: "uuid-1", text: "passage one" },
         { id: "uuid-2", text: "passage two" },
+      ]);
+    });
+  });
+
+  describe("searchPassages", () => {
+    it("delegates to store.semanticSearch and maps id/text/score", async () => {
+      mockStore.semanticSearch.mockResolvedValue([
+        { id: "uuid-1", text: "FILE: src/a.ts\nconst x = 1;", score: 0.92 },
+        { id: "uuid-2", text: "FILE: src/b.ts\nconst y = 2;", score: 0.5 },
+      ]);
+
+      const results = await provider.searchPassages("myrepo", "how does auth work?", 5);
+
+      expect(mockStore.semanticSearch).toHaveBeenCalledWith("myrepo", "how does auth work?", 5);
+      expect(results).toEqual([
+        { id: "uuid-1", text: "FILE: src/a.ts\nconst x = 1;", score: 0.92 },
+        { id: "uuid-2", text: "FILE: src/b.ts\nconst y = 2;", score: 0.5 },
       ]);
     });
   });

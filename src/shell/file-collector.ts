@@ -1,5 +1,5 @@
 import path from "node:path";
-import { MAX_FILE_SIZE_KB, type RepoConfig, type FileInfo } from "../core/types.js";
+import { MAX_INDEXABLE_FILE_SIZE_KB, type RepoConfig, type FileInfo, type SkippedFile } from "../core/types.js";
 import type { FileSystemPort } from "../ports/filesystem.js";
 import { nodeFileSystem } from "./adapters/node-filesystem.js";
 
@@ -7,6 +7,7 @@ export async function collectFiles(
   config: RepoConfig,
   fs: FileSystemPort = nodeFileSystem,
   onFileError?: (filePath: string, error: Error) => void,
+  onSkip?: (skipped: SkippedFile) => void,
 ): Promise<FileInfo[]> {
   const cwd = config.basePath ? path.join(config.path, config.basePath) : config.path;
   const patterns = config.extensions.map((ext) => `**/*${ext}`);
@@ -29,9 +30,11 @@ export async function collectFiles(
       const stat = await fs.stat(absPath);
       const sizeKb = stat.size / 1024;
 
-      if (sizeKb <= MAX_FILE_SIZE_KB) {
+      if (sizeKb <= MAX_INDEXABLE_FILE_SIZE_KB) {
         const content = await fs.readFile(absPath, "utf8");
         files.push({ path: relPath, content, sizeKb });
+      } else {
+        onSkip?.({ path: relPath, sizeKb });
       }
     } catch (error_) {
       const error = error_ instanceof Error ? error_ : new Error(String(error_));

@@ -17,6 +17,7 @@ function makeMockStore() {
     initAgent: vi.fn().mockResolvedValue(),
     deleteAgent: vi.fn().mockResolvedValue(),
     listAgents: vi.fn().mockResolvedValue([]),
+    deletePassagesForAgent: vi.fn().mockResolvedValue(),
     writePassage: vi.fn().mockResolvedValue(),
     writePassages: vi.fn().mockResolvedValue(),
     readPassage: vi.fn().mockResolvedValue(""),

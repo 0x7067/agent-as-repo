@@ -5,6 +5,7 @@ import {
   suggestIgnoreDirs,
   detectRepoName,
   generateConfigYaml,
+  nonInteractiveInitError,
 } from "./init.js";
 
 const INDEX_TS_PATH = "src/index.ts";
@@ -90,6 +91,7 @@ describe("detectExtensions", () => {
       "video.mkv",
       "doc.pdf", "doc.doc", "doc.docx", "sheet.xls", "sheet.xlsx",
       "pkg.lock", "build.map",
+      "proj.pbxproj", "proj.xcworkspacedata", "Package.resolved", "hook.sample",
     ];
     const files = [...excluded, APP_TS_PATH];
     const result = detectExtensions(files);
@@ -276,5 +278,38 @@ describe("generateConfigYaml", () => {
       ignoreDirs: [],
     });
     expect(output).toContain(`path: ${APP_REPO_PATH}`);
+  });
+});
+
+describe("nonInteractiveInitError", () => {
+  it("allows proceeding when prompts are available", () => {
+    expect(
+      nonInteractiveInitError({ allowPrompts: true, repoPathProvided: false, noInputFlagSet: false }),
+    ).toBeNull();
+  });
+
+  it("allows proceeding when a repo path was already supplied via flag, even without prompts", () => {
+    expect(
+      nonInteractiveInitError({ allowPrompts: false, repoPathProvided: true, noInputFlagSet: false }),
+    ).toBeNull();
+  });
+
+  it("reports a TTY-specific error when stdin isn't a TTY and no repo path was given (finding 7)", () => {
+    const message = nonInteractiveInitError({
+      allowPrompts: false,
+      repoPathProvided: false,
+      noInputFlagSet: false,
+    });
+    expect(message).toContain("stdin is not a TTY");
+    expect(message).toContain("--repo-path");
+  });
+
+  it("keeps the existing message when --no-input was explicitly passed", () => {
+    const message = nonInteractiveInitError({
+      allowPrompts: false,
+      repoPathProvided: false,
+      noInputFlagSet: true,
+    });
+    expect(message).toBe("Repository path is required. Pass --repo-path in non-interactive mode.");
   });
 });

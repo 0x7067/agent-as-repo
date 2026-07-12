@@ -125,6 +125,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: { [WATCH_PASSAGE_FILE]: ["p-2"] },
       lastSyncCommit: "def456",
+      lastSyncAt: "2026-01-01T00:00:00.000Z",
       filesRemoved: 0,
       fileHashes: {},
       filesSkippedUnchanged: 0,
@@ -200,6 +201,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: { [WATCH_PASSAGE_FILE]: ["p-2"] },
       lastSyncCommit: "abc123",
+      lastSyncAt: "2026-01-01T00:00:00.000Z",
       filesRemoved: 0,
       fileHashes: {},
       filesSkippedUnchanged: 0,
@@ -353,6 +355,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: { [WATCH_PASSAGE_FILE]: ["p-2"] },
       lastSyncCommit: "def456",
+      lastSyncAt: "2026-01-01T00:00:00.000Z",
       filesRemoved: 0,
       fileHashes: {},
       filesSkippedUnchanged: 0,
@@ -430,6 +433,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: { [WATCH_PASSAGE_FILE]: ["p-2"] },
       lastSyncCommit: "def456",
+      lastSyncAt: "2026-01-01T00:00:00.000Z",
       filesRemoved: 0,
       fileHashes: {},
       filesSkippedUnchanged: 0,
@@ -557,6 +561,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: { [WATCH_PASSAGE_FILE]: ["p-2"] },
       lastSyncCommit: "def456",
+      lastSyncAt: "2026-01-01T00:00:00.000Z",
       filesRemoved: 0,
       fileHashes: {},
       filesSkippedUnchanged: 0,
@@ -600,6 +605,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: {},
       lastSyncCommit: "abc123",
+      lastSyncAt: "2026-01-01T00:00:00.000Z",
       filesRemoved: 0,
       fileHashes: {},
       filesSkippedUnchanged: 0,
@@ -695,6 +701,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: { [WATCH_PASSAGE_FILE]: ["p-2"] },
       lastSyncCommit: "def456",
+      lastSyncAt: "2026-01-01T00:00:00.000Z",
       filesRemoved: 0,
       fileHashes: {},
       filesSkippedUnchanged: 0,
@@ -735,6 +742,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: {},
       lastSyncCommit: "def456",
+      lastSyncAt: "2026-01-01T00:00:00.000Z",
       filesRemoved: 0,
       fileHashes: {},
       filesSkippedUnchanged: 0,
@@ -773,6 +781,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: {},
       lastSyncCommit: "abc123",
+      lastSyncAt: "2026-01-01T00:00:00.000Z",
       filesRemoved: 0,
       fileHashes: {},
       filesSkippedUnchanged: 0,
@@ -821,6 +830,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: {},
       lastSyncCommit: "abc123",
+      lastSyncAt: "2026-01-01T00:00:00.000Z",
       filesRemoved: 0,
       fileHashes: {},
       filesSkippedUnchanged: 0,
@@ -1324,6 +1334,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: {},
       lastSyncCommit: "def456",
+      lastSyncAt: "2026-01-01T00:00:00.000Z",
       filesRemoved: 0,
       fileHashes: {},
       filesSkippedUnchanged: 0,
@@ -1385,6 +1396,7 @@ describe("watchRepos", () => {
     mockedSyncRepo.mockResolvedValue({
       passages: {},
       lastSyncCommit: "def456",
+      lastSyncAt: "2026-01-01T00:00:00.000Z",
       filesRemoved: 0,
       fileHashes: {},
       symbolFiles: {},
@@ -1499,6 +1511,7 @@ function makeConsolidationSyncResult(overrides: Partial<Awaited<ReturnType<typeo
     symbolFiles: {},
     symbolRanks: {},
     lastSyncCommit: "def456",
+    lastSyncAt: "2026-01-01T00:00:00.000Z",
     filesRemoved: 0,
     filesReIndexed: 5,
     filesSkippedUnchanged: 0,
@@ -1595,6 +1608,7 @@ describe("watchRepos - daemon consolidation parity", () => {
     await watchPromise;
 
     expect(currentState.agents[WATCH_REPO_NAME].lastConsolidatedCommit).toBe("def456");
+    expect(currentState.agents[WATCH_REPO_NAME].lastConsolidatedAt).toEqual(expect.any(String));
     expect(log).toHaveBeenCalledWith(expect.stringContaining("consolidated architecture/conventions memory blocks"));
   });
 
@@ -1638,5 +1652,8 @@ describe("watchRepos - daemon consolidation parity", () => {
 
     expect(currentState.agents[WATCH_REPO_NAME].lastConsolidatedCommit).toBeUndefined();
     expect(log).not.toHaveBeenCalledWith(expect.stringContaining("consolidated architecture/conventions memory blocks"));
+    // lastConsolidatedAt still stamps on a no-op run: it answers "did this
+    // last run", separate from lastConsolidatedCommit's "did it change".
+    expect(currentState.agents[WATCH_REPO_NAME].lastConsolidatedAt).toEqual(expect.any(String));
   });
 });

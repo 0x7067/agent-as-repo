@@ -4,6 +4,8 @@ export interface CreateAgentParams {
   description: string;
   persona?: string;
   model: string;
+  /** Config `base_path` when the index covers only a subtree — disclosed in the persona. */
+  basePath?: string;
 }
 
 export interface CreateAgentResult {
@@ -13,6 +15,11 @@ export interface CreateAgentResult {
 export interface Passage {
   id: string;
   text: string;
+}
+
+/** A passage retrieval preview hit: same shape `archival_memory_search` returns, plus an optional relevance score. */
+export interface RetrievedPassage extends Passage {
+  score?: number;
 }
 
 export interface MemoryBlock {
@@ -37,6 +44,20 @@ export interface ConsolidateMemoryOptions {
 export interface AgentProvider {
   createAgent(this: void, params: CreateAgentParams): Promise<CreateAgentResult>;
   deleteAgent(this: void, agentId: string): Promise<void>;
+  /**
+   * Whether `agentId` actually has a row in the underlying store's agent
+   * registry (not just in local state). Optional — callers that skip it
+   * (or implementations that omit it) fall back to trusting local state,
+   * same as before this existed.
+   */
+  agentExists?(this: void, agentId: string): Promise<boolean>;
+  /**
+   * Delete all of an agent's stored passages (and dependent index rows)
+   * without deleting the agent record itself. Used by `setup --reindex` to
+   * purge stale/duplicate content before reloading. Optional for the same
+   * backward-compatibility reason as `agentExists`.
+   */
+  purgePassages?(this: void, agentId: string): Promise<void>;
   storePassage(this: void, agentId: string, text: string): Promise<string>;
   /**
    * Batch write path: stores multiple passages together (fewer embedding
@@ -51,6 +72,14 @@ export interface AgentProvider {
   storePassages?(agentId: string, texts: string[]): Promise<string[]>;
   deletePassage(this: void, agentId: string, passageId: string): Promise<void>;
   listPassages(this: void, agentId: string): Promise<Passage[]>;
+  /**
+   * Preview what `archival_memory_search` would retrieve for a query, without
+   * running a full ask turn — lets `ask --verbose` show retrieved passages
+   * for audit. Optional: implementations without a searchable store may
+   * omit it. Deliberately NOT `this: void` for the same reason as
+   * `storePassages` (class implementations read instance state).
+   */
+  searchPassages?(agentId: string, query: string, topK: number): Promise<RetrievedPassage[]>;
   getBlock(this: void, agentId: string, label: string): Promise<MemoryBlock>;
   updateBlock(this: void, agentId: string, label: string, value: string): Promise<MemoryBlock>;
   sendMessage(this: void, agentId: string, content: string, options?: SendMessageOptions): Promise<string>;

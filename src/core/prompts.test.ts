@@ -49,6 +49,42 @@ describe("buildPersona", () => {
     expect(persona).toContain("archival_memory_search");
     expect(persona).toContain("path_prefix");
   });
+
+  it("instructs disclosure of tool failures instead of answering from prior knowledge", () => {
+    const withDefault = buildPersona(REPO_NAME, "desc");
+    const withCustom = buildPersona(REPO_NAME, "desc", "I am the ultimate expert.");
+    for (const persona of [withDefault, withCustom]) {
+      expect(persona).toContain("tool call fails");
+      expect(persona.toLowerCase()).toContain("disclose");
+      expect(persona).toContain("never answer from general knowledge");
+    }
+  });
+
+  it("discloses a restricted index scope when basePath narrows it", () => {
+    const withDefault = buildPersona(REPO_NAME, "desc", undefined, { indexedScope: "lib" });
+    const withCustom = buildPersona(REPO_NAME, "desc", "I am the ultimate expert.", { indexedScope: "lib" });
+    for (const persona of [withDefault, withCustom]) {
+      expect(persona).toContain("`lib`");
+      expect(persona).toContain("only the");
+      expect(persona.toLowerCase()).toContain("not indexed");
+    }
+  });
+
+  it("omits the scope disclosure when the whole repo is indexed", () => {
+    const persona = buildPersona(REPO_NAME, "desc");
+    expect(persona).not.toContain("only the");
+    expect(persona.toLowerCase()).not.toContain("subtree");
+  });
+
+  it("includes the negative-space grounding rule even with a custom persona", () => {
+    const withDefault = buildPersona(REPO_NAME, "desc");
+    const withCustom = buildPersona(REPO_NAME, "desc", "I am the ultimate expert.");
+    for (const persona of [withDefault, withCustom]) {
+      expect(persona).toContain("does not appear to exist in this repository");
+      expect(persona.toLowerCase()).toContain("no supporting evidence");
+      expect(persona).toContain("Never describe");
+    }
+  });
 });
 
 describe("agenticSearchGuidance", () => {
@@ -59,6 +95,18 @@ describe("agenticSearchGuidance", () => {
     expect(guidance).toContain("read_file");
     expect(guidance).toContain("find_symbol");
     expect(guidance).toContain(ARCHIVAL_MEMORY);
+  });
+
+  it("carries the negative-space grounding rule (guards --fast/agentic asks too)", () => {
+    const guidance = agenticSearchGuidance();
+    expect(guidance).toContain("does not appear to exist in this repository");
+    expect(guidance).toContain("Never describe");
+  });
+
+  it("carries the tool-failure disclosure rule (guards --fast/agentic asks too)", () => {
+    const guidance = agenticSearchGuidance();
+    expect(guidance).toContain("tool call fails");
+    expect(guidance).toContain("never answer from general knowledge");
   });
 });
 
@@ -88,6 +136,11 @@ describe("bootstrap prompts", () => {
   it("architecture prompt joins with newlines", () => {
     const prompt = architectureBootstrapPrompt();
     expect(prompt).toContain("\n");
+  });
+
+  it("architecture prompt warns against inventing unverified directories/files", () => {
+    const prompt = architectureBootstrapPrompt();
+    expect(prompt.toLowerCase()).toContain("do not invent");
   });
 
   it("conventions prompt mentions archival memory search", () => {

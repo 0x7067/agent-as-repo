@@ -56,6 +56,14 @@ describe("createRepoAgent", () => {
     expect(params.name).toBe("repo-expert-my-app");
     expect(params.model).toBe("qwen3-coder:30b");
     expect(params.description).toBe("Test repo");
+    expect(params.basePath).toBeUndefined();
+  });
+
+  it("forwards basePath so the persona can disclose a scoped index", async () => {
+    const provider = makeMockProvider();
+    await createRepoAgent(provider, "my-app", { ...testConfig, basePath: "lib" }, testModelOptions);
+    const [params] = (provider.createAgent as ReturnType<typeof vi.fn>).mock.calls[0] as [CreateAgentParams];
+    expect(params.basePath).toBe("lib");
   });
 });
 

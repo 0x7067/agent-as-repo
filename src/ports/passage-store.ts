@@ -42,6 +42,13 @@ export interface PassageStore {
   initAgent(this: void, agentId: string, manifest: AgentManifest): Promise<void>;
   deleteAgent(this: void, agentId: string): Promise<void>;
   listAgents(this: void): Promise<string[]>;
+  /**
+   * Delete all of an agent's passages (and dependent vector/FTS index rows),
+   * leaving the agent's row in `agents` (and any memory blocks) untouched.
+   * Used by `setup --reindex` to purge stale/duplicate content before the
+   * fresh set is loaded.
+   */
+  deletePassagesForAgent(this: void, agentId: string): Promise<void>;
   writePassage(this: void, agentId: string, passageId: string, text: string): Promise<void>;
   /**
    * Batch write path: embeds all entries' texts together (fewer HTTP round
