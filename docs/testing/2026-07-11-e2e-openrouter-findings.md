@@ -184,7 +184,7 @@ all pass.
 | 10 | `list` "files" label | **Fixed** | Relabeled `files with passages` (JSON field `filesWithPassages`). |
 | 11 | `consolidate` gives no change signal | **Fixed** | Per-block modified/unchanged reporting; `lastConsolidatedAt` stamped in state and shown by `status`. |
 | 12 | Spinner floods non-TTY; `export`/`ask` ergonomics | **Fixed** | Static line when stdout isn't a TTY; `export --output <file>`; `ask --verbose` prints retrieved passages (path/snippet/score) to stderr for grounding audits. |
-| 13 | Paraphrase/no-term retrieval quality | **Deferred** | By design, informed by data: the transformers.js A/B (see follow-up plan doc) shows a real embedding model already lifts paraphrase Recall@1 0.0→0.2 and no-term 0.0→0.5 vs the CI hash stub, with fused MRR 0.698→0.810. A retrieval-algorithm change should be designed against those numbers, not patched blind. |
+| 13 | Paraphrase/no-term retrieval quality | **Fixed (2026-07-12)** | Weighted fused RRF (k=10, vector 2:1 lexical), designed against a per-query diagnosis on an expanded 51-query gold set with the new `--engine http` bench tier: http fused R@1 0.529→0.725, no-term R@1 0.227→0.591; the live misattribution repro no longer reproduces. See `2026-07-12-retrieval-quality-fix.md`. |
 | 14 | pnpm 10 / better-sqlite3 dev-env trap | **Fixed** | Documented in CONTRIBUTING.md; `self-check`'s native-module failure hint now includes the `node-gyp rebuild` recovery. |
 
 New bugs found (and fixed) during the follow-up session's transformers.js

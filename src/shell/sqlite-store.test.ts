@@ -39,6 +39,20 @@ async function makeBatchStore(dir: string, name: string, embed: EmbedTexts): Pro
   return store;
 }
 
+/** Embedder whose dimension can be flipped mid-test, simulating an embedding_engine switch. */
+function makeSwitchableEmbed(): { embed: EmbedTexts; setDimension: (d: number) => void } {
+  let dimension = 8;
+  const embed: EmbedTexts = (texts) =>
+    Promise.resolve(
+      texts.map((text) => {
+        const vector = Array.from({ length: dimension }, () => 0);
+        vector[text.length % dimension] = 1;
+        return vector;
+      }),
+    );
+  return { embed, setDimension: (d: number) => { dimension = d; } };
+}
+
 interface MinimalStatement {
   run: (...args: unknown[]) => unknown;
 }
@@ -414,20 +428,6 @@ describe("SqlitePassageStore", () => {
   });
 
   describe("embedding dimension reset on purge (engine switch)", () => {
-    /** Embedder whose dimension can be flipped mid-test, simulating an embedding_engine switch. */
-    function makeSwitchableEmbed(): { embed: EmbedTexts; setDimension: (d: number) => void } {
-      let dimension = 8;
-      const embed: EmbedTexts = (texts) =>
-        Promise.resolve(
-          texts.map((text) => {
-            const vector = Array.from({ length: dimension }, () => 0);
-            vector[text.length % dimension] = 1;
-            return vector;
-          }),
-        );
-      return { embed, setDimension: (d: number) => { dimension = d; } };
-    }
-
     it("re-derives the dimension after a purge empties the store, so a new engine's dimension loads", async () => {
       const { embed, setDimension } = makeSwitchableEmbed();
       const switchDbPath = path.join(dir, "switch.db");

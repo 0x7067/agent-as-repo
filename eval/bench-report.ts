@@ -6,12 +6,37 @@ import { PROJECT_ROOT, type Engine, type LegName } from "./bench-pipeline.js";
 
 const MRR_SLACK = 0.05;
 
+// Stub-tier smoke floors: paraphrase and no-term fused recall went completely
+// ungated until 2026-07 (the weighted-RRF fix in 64345cc), so a fusion
+// regression to 0.0 in either bucket would have passed CI silently. These
+// floors are just enough for the deterministic hash-bag-of-words stub
+// embedder to express and are not tuned quality targets — real-embedding
+// expectations live in eval/baselines/{transformersjs,http}.json and
+// docs/testing/.
+const PARAPHRASE_FUSED_R1_FLOOR = 0.2; // current: exactly 3/15
+const NO_TERM_FUSED_R5_FLOOR = 0.2; // current: 5/22 ≈ 0.227; R@1 granularity (1/22) is too coarse to floor
+
 export interface GateResult {
   passed: boolean;
   lines: string[];
 }
 
-/** The three deterministic-tier quality gates. Performance never gates. */
+/** A gate over one kind's byKind value: skip when the kind has no queries in this run. */
+function kindFloorLine(
+  label: string,
+  byKind: Record<string, number>,
+  kind: string,
+  floor: number,
+): { ok: boolean; line: string } {
+  if (!(kind in byKind)) {
+    return { ok: true, line: `PASS  ${label} — skipped (no ${kind} queries)` };
+  }
+  const value = byKind[kind] ?? 0;
+  const ok = value >= floor - 1e-9;
+  return { ok, line: `${ok ? "PASS" : "FAIL"}  ${label} = ${value.toFixed(3)} (want >= ${floor.toFixed(3)})` };
+}
+
+/** The five deterministic-tier quality gates. Performance never gates. */
 export function evaluateGates(report: BenchReport): GateResult {
   const identifierR1 = report.legs.fused.recallAt1.byKind["identifier"] ?? 0;
   const identOk = Math.abs(identifierR1 - 1) < 1e-9;
@@ -24,12 +49,27 @@ export function evaluateGates(report: BenchReport): GateResult {
   const hybridMrr = report.legs.fused.mrr.mean;
   const mrrOk = hybridMrr >= bestSingleMrr - MRR_SLACK;
 
+  const paraphrase = kindFloorLine(
+    "paraphrase fused Recall@1",
+    report.legs.fused.recallAt1.byKind,
+    "paraphrase",
+    PARAPHRASE_FUSED_R1_FLOOR,
+  );
+  const noTerm = kindFloorLine(
+    "no-term fused Recall@5",
+    report.legs.fused.recallAt5.byKind,
+    "no-term",
+    NO_TERM_FUSED_R5_FLOOR,
+  );
+
   const lines = [
     `${identOk ? "PASS" : "FAIL"}  identifier Recall@1 = ${identifierR1.toFixed(3)} (want 1.000)`,
     `${r5Ok ? "PASS" : "FAIL"}  hybrid Recall@5 (${hybridR5.toFixed(3)}) >= vector Recall@5 (${vectorR5.toFixed(3)})`,
     `${mrrOk ? "PASS" : "FAIL"}  hybrid MRR (${hybridMrr.toFixed(3)}) >= max(vector, lexical) MRR (${bestSingleMrr.toFixed(3)}) - ${String(MRR_SLACK)}`,
+    paraphrase.line,
+    noTerm.line,
   ];
-  return { passed: identOk && r5Ok && mrrOk, lines };
+  return { passed: identOk && r5Ok && mrrOk && paraphrase.ok && noTerm.ok, lines };
 }
 
 export function markdownSummary(report: BenchReport): string {

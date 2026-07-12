@@ -1,37 +1,37 @@
 {
-  "engine": "deterministic",
-  "gitSha": "64345cc",
+  "engine": "transformersjs",
+  "gitSha": "b71d82f",
   "queryCount": 51,
   "legs": {
     "vector": {
       "recallAt1": {
-        "mean": 0.23529411764705882,
+        "mean": 0.6666666666666666,
         "byKind": {
-          "identifier": 0.6666666666666666,
+          "identifier": 1,
           "error-string": 0.6666666666666666,
           "config-key": 0.5,
-          "paraphrase": 0.2,
-          "no-term": 0
+          "paraphrase": 0.6666666666666666,
+          "no-term": 0.5454545454545454
         }
       },
       "recallAt5": {
-        "mean": 0.47058823529411764,
+        "mean": 0.9411764705882353,
         "byKind": {
-          "identifier": 0.8888888888888888,
+          "identifier": 1,
           "error-string": 1,
-          "config-key": 0.5,
-          "paraphrase": 0.4666666666666667,
-          "no-term": 0.22727272727272727
+          "config-key": 1,
+          "paraphrase": 0.9333333333333333,
+          "no-term": 0.9090909090909091
         }
       },
       "mrr": {
-        "mean": 0.37349895507647907,
+        "mean": 0.7876023663747449,
         "byKind": {
-          "identifier": 0.7777777777777778,
-          "error-string": 0.75,
+          "identifier": 1,
+          "error-string": 0.8333333333333334,
           "config-key": 1,
-          "paraphrase": 0.33001795735129064,
-          "no-term": 0.1294626067559577
+          "paraphrase": 0.7722222222222223,
+          "no-term": 0.6856539705353936
         }
       }
     },
@@ -69,44 +69,44 @@
     },
     "fused": {
       "recallAt1": {
-        "mean": 0.3333333333333333,
-        "byKind": {
-          "identifier": 1,
-          "error-string": 0.6666666666666666,
-          "config-key": 0.5,
-          "paraphrase": 0.2,
-          "no-term": 0.09090909090909091
-        }
-      },
-      "recallAt5": {
-        "mean": 0.5392156862745098,
+        "mean": 0.6274509803921569,
         "byKind": {
           "identifier": 1,
           "error-string": 1,
-          "config-key": 0.75,
+          "config-key": 0.5,
           "paraphrase": 0.6,
-          "no-term": 0.22727272727272727
+          "no-term": 0.45454545454545453
+        }
+      },
+      "recallAt5": {
+        "mean": 0.9215686274509803,
+        "byKind": {
+          "identifier": 1,
+          "error-string": 1,
+          "config-key": 1,
+          "paraphrase": 0.9333333333333333,
+          "no-term": 0.8636363636363636
         }
       },
       "mrr": {
-        "mean": 0.46422938563965593,
+        "mean": 0.755846042120552,
         "byKind": {
           "identifier": 1,
-          "error-string": 0.8333333333333334,
+          "error-string": 1,
           "config-key": 1,
-          "paraphrase": 0.37644026471612674,
-          "no-term": 0.20586794076729767
+          "paraphrase": 0.7355555555555555,
+          "no-term": 0.6143097643097643
         }
       }
     }
   },
   "performance": {
-    "indexWallMs": 82.75358100000005,
+    "indexWallMs": 5823.492131999999,
     "chunkCount": 78,
     "passageCount": 78,
-    "chunksPerSec": 942.5573982109602,
+    "chunksPerSec": 13.394025136806007,
     "dbSizeBytes": 4096,
-    "searchP50Ms": 6.981276999999864,
-    "searchP95Ms": 11.864650000000097
+    "searchP50Ms": 20.574368000000504,
+    "searchP95Ms": 28.51143199999933
   }
 }
