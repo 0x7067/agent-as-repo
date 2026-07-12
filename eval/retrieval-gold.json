@@ -124,16 +124,196 @@
       "expect_files": ["lib/notify/slack.rb"]
     },
     {
-      "id": "noterm-punct",
+      "id": "para-yaml-digest",
+      "kind": "paraphrase",
+      "query": "which chat channel and morning hour finance digests get posted to",
+      "expect_files": ["config/app.yaml"]
+    },
+    {
+      "id": "para-go-rotate",
+      "kind": "paraphrase",
+      "query": "rotating a signing key by feeding in freshly generated entropy",
+      "expect_files": ["pkg/auth/token.go"]
+    },
+    {
+      "id": "para-go-drain",
+      "kind": "paraphrase",
+      "query": "capping how many pending jobs get pulled off the front of the queue each pass",
+      "expect_files": ["pkg/queue/worker.go"]
+    },
+    {
+      "id": "para-py-invoice",
+      "kind": "paraphrase",
+      "query": "padding a numeric invoice code with leading zeros while blocking a wrap-around past the max",
+      "expect_files": ["services/billing/invoice.py"]
+    },
+    {
+      "id": "para-py-driftcalc",
+      "kind": "paraphrase",
+      "query": "just adding up debit amounts against credit amounts and returning the plain gap, no threshold involved",
+      "expect_files": ["services/ledger/drift.py"]
+    },
+    {
+      "id": "para-ts-webhook-pay",
+      "kind": "paraphrase",
+      "query": "retrying a payment delivery to a merchant a few times before giving up",
+      "expect_files": ["src/api/webhook-handler.ts"]
+    },
+    {
+      "id": "para-ts-retry",
+      "kind": "paraphrase",
+      "query": "waiting longer between each retry attempt using exponential growth capped at a ceiling",
+      "expect_files": ["src/util/retry.ts"]
+    },
+    {
+      "id": "para-java-vault",
+      "kind": "paraphrase",
+      "query": "unlocking a locked-away token store before it's allowed to be read from",
+      "expect_files": ["src/main/java/com/acme/auth/TokenVault.java"]
+    },
+    {
+      "id": "para-java-monitor",
+      "kind": "paraphrase",
+      "query": "printing an alarm message to the console once the gap crosses over the allowed limit",
+      "expect_files": ["src/main/java/com/acme/ledger/DriftMonitor.java"]
+    },
+    {
+      "id": "para-rb-charge",
+      "kind": "paraphrase",
+      "query": "adding a flat percentage penalty on top of a late bill's total",
+      "expect_files": ["lib/billing/charge.rb"]
+    },
+    {
+      "id": "noterm-reconcile",
       "kind": "no-term",
-      "query": "!!! ??? ---",
+      "query": "raising a failure when the gap between money owed out and money coming in blows past an allowed limit for a group of records",
       "expect_files": ["src/ledger/reconcile.ts"]
     },
     {
-      "id": "noterm-symbols",
+      "id": "noterm-config",
       "kind": "no-term",
-      "query": "@@@ %%% ^^^ ***",
+      "query": "where the accounting chat handle and the morning broadcast hour live alongside a permitted mismatch ceiling and a fetch size cap",
       "expect_files": ["config/app.yaml"]
+    },
+    {
+      "id": "noterm-runbook",
+      "kind": "no-term",
+      "query": "actions to take overnight once the accounts stop lining up, including who gets paged",
+      "expect_files": ["docs/runbook.md"]
+    },
+    {
+      "id": "noterm-architecture",
+      "kind": "no-term",
+      "query": "why the arithmetic lives apart from anything that talks over a wire",
+      "expect_files": ["docs/architecture-notes.md"]
+    },
+    {
+      "id": "noterm-reconciler-rb",
+      "kind": "no-term",
+      "query": "closing out outstanding records once paired alongside an opposite party, then reporting a running tally",
+      "expect_files": ["lib/ledger/reconciler.rb"]
+    },
+    {
+      "id": "noterm-slack",
+      "kind": "no-term",
+      "query": "shipping a warning line to a shared workspace room through an inbound hook address",
+      "expect_files": ["lib/notify/slack.rb"]
+    },
+    {
+      "id": "noterm-ledger-go",
+      "kind": "no-term",
+      "query": "shifting every last unit from a single holding place into another and leaving the first at nothing",
+      "expect_files": ["pkg/ledger/ledger.go"]
+    },
+    {
+      "id": "noterm-worker-go",
+      "kind": "no-term",
+      "query": "popping a capped number of waiting units off the front of a to-do list",
+      "expect_files": ["pkg/queue/worker.go"]
+    },
+    {
+      "id": "noterm-token-go",
+      "kind": "no-term",
+      "query": "producing the newest generation of a shared secret from fresh randomness",
+      "expect_files": ["pkg/auth/token.go"]
+    },
+    {
+      "id": "noterm-drift-py",
+      "kind": "no-term",
+      "query": "the plain size of imbalance across two opposing money-flow categories, nothing about alarms or limits",
+      "expect_files": ["services/ledger/drift.py"]
+    },
+    {
+      "id": "noterm-thresholds-py",
+      "kind": "no-term",
+      "query": "sorting a shortfall magnitude into a calm, watchful, or urgent bucket",
+      "expect_files": ["services/ledger/thresholds.py"]
+    },
+    {
+      "id": "noterm-emailer-py",
+      "kind": "no-term",
+      "query": "stashing a bundled note for accounting staff into a waiting mailbox",
+      "expect_files": ["services/notify/emailer.py"]
+    },
+    {
+      "id": "noterm-invoice-py",
+      "kind": "no-term",
+      "query": "presenting a fixed-width billing code with digit filler up front, while blocking a wrap-around past a max count",
+      "expect_files": ["services/billing/invoice.py"]
+    },
+    {
+      "id": "noterm-webhook-handler",
+      "kind": "no-term",
+      "query": "trying a purchase notice against a shop's address repeatedly before finally giving up",
+      "expect_files": ["src/api/webhook-handler.ts"]
+    },
+    {
+      "id": "noterm-webhook-retry",
+      "kind": "no-term",
+      "query": "trying a money-back notice against a shop's address repeatedly before finally giving up",
+      "expect_files": ["src/api/webhook-retry.ts"]
+    },
+    {
+      "id": "noterm-session-guard",
+      "kind": "no-term",
+      "query": "creating a brand-new login pass once the existing pass nears its lapse point",
+      "expect_files": ["src/auth/session-guard.ts"]
+    },
+    {
+      "id": "noterm-settings",
+      "kind": "no-term",
+      "query": "translating on-disk naming style into the form the remainder of the program expects internally",
+      "expect_files": ["src/config/settings.ts"]
+    },
+    {
+      "id": "noterm-drift-report",
+      "kind": "no-term",
+      "query": "turning settlement figures into neatly aligned, printable output rows",
+      "expect_files": ["src/ledger/drift-report.ts"]
+    },
+    {
+      "id": "noterm-tokenvault",
+      "kind": "no-term",
+      "query": "a locked-away holder of login passes that refuses reading until opened up",
+      "expect_files": ["src/main/java/com/acme/auth/TokenVault.java"]
+    },
+    {
+      "id": "noterm-driftmonitor",
+      "kind": "no-term",
+      "query": "printing a console alarm once a measured shortfall climbs past its allowed ceiling",
+      "expect_files": ["src/main/java/com/acme/ledger/DriftMonitor.java"]
+    },
+    {
+      "id": "noterm-retry",
+      "kind": "no-term",
+      "query": "waiting progressively longer between repeated tries up to a ceiling",
+      "expect_files": ["src/util/retry.ts"]
+    },
+    {
+      "id": "noterm-charge-rb",
+      "kind": "no-term",
+      "query": "tacking on a fixed-rate surcharge atop an unpaid bill's sum",
+      "expect_files": ["lib/billing/charge.rb"]
     }
   ]
 }
