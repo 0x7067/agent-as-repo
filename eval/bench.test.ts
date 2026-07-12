@@ -1,6 +1,44 @@
 import { afterEach, describe, it, expect } from "vitest";
 import { runBench, evaluateGates, parseArgs, resolveHttpEngineParams } from "./bench.js";
 import { DEFAULT_HTTP_BASE_URL, DEFAULT_HTTP_EMBEDDING_MODEL } from "./bench-pipeline.js";
+import type { BenchReport, EvalAggregate } from "../src/core/eval-metrics.js";
+
+/**
+ * A minimal, self-consistent BenchReport for exercising evaluateGates in
+ * isolation (evaluateGates is pure, so no pipeline run is needed). All three
+ * pre-existing gates are made to pass by construction; tests below mutate
+ * only the fields relevant to the gate under test.
+ */
+function fakeReport(): BenchReport {
+  const zeroAgg: EvalAggregate = { mean: 0, byKind: {} };
+  const passingFusedR1: EvalAggregate = {
+    mean: 1,
+    byKind: { identifier: 1, paraphrase: 0.2, "no-term": 0.0909 },
+  };
+  const passingFusedR5: EvalAggregate = {
+    mean: 1,
+    byKind: { identifier: 1, paraphrase: 0.6, "no-term": 0.2273 },
+  };
+  return {
+    engine: "deterministic",
+    gitSha: "fake",
+    queryCount: 0,
+    legs: {
+      vector: { recallAt1: zeroAgg, recallAt5: zeroAgg, mrr: zeroAgg },
+      lexical: { recallAt1: zeroAgg, recallAt5: zeroAgg, mrr: zeroAgg },
+      fused: { recallAt1: passingFusedR1, recallAt5: passingFusedR5, mrr: zeroAgg },
+    },
+    performance: {
+      indexWallMs: 0,
+      chunkCount: 0,
+      passageCount: 0,
+      chunksPerSec: 0,
+      dbSizeBytes: 0,
+      searchP50Ms: 0,
+      searchP95Ms: 0,
+    },
+  };
+}
 
 /**
  * Smoke test so the bench script can't rot: it runs the whole pipeline
@@ -23,13 +61,51 @@ describe("bench smoke", () => {
     expect(gatesPassed).toBe(true);
   }, 30_000);
 
-  it("evaluateGates reports the three deterministic-tier gates", async () => {
+  it("evaluateGates reports the five deterministic-tier gates", async () => {
     const { report } = await runBench({ limit: 5, quiet: true });
     const gates = evaluateGates(report);
 
-    expect(gates.lines).toHaveLength(3);
+    expect(gates.lines).toHaveLength(5);
     expect(gates.passed).toBe(true);
   }, 30_000);
+
+  it("skips the paraphrase and no-term smoke floors when those kinds are absent from the query slice", async () => {
+    // The first 5 gold queries are all `identifier`; a small --limit run has no
+    // paraphrase/no-term queries at all. Absent must pass (skip), not fail.
+    const { report } = await runBench({ limit: 5, quiet: true });
+    const gates = evaluateGates(report);
+
+    expect(gates.lines.some((line) => /paraphrase/.test(line) && /skipped/.test(line))).toBe(true);
+    expect(gates.lines.some((line) => /no-term/.test(line) && /skipped/.test(line))).toBe(true);
+  }, 30_000);
+});
+
+describe("evaluateGates smoke floors", () => {
+  it("passes all five gates on a well-formed report", () => {
+    const gates = evaluateGates(fakeReport());
+    expect(gates.lines).toHaveLength(5);
+    expect(gates.passed).toBe(true);
+  });
+
+  it("fails the paraphrase gate when paraphrase fused Recall@1 regresses to 0", () => {
+    const report = fakeReport();
+    report.legs.fused.recallAt1.byKind["paraphrase"] = 0;
+
+    const gates = evaluateGates(report);
+
+    expect(gates.passed).toBe(false);
+    expect(gates.lines.some((line) => line.startsWith("FAIL") && /paraphrase/.test(line))).toBe(true);
+  });
+
+  it("fails the no-term gate when no-term fused Recall@5 regresses to 0", () => {
+    const report = fakeReport();
+    report.legs.fused.recallAt5.byKind["no-term"] = 0;
+
+    const gates = evaluateGates(report);
+
+    expect(gates.passed).toBe(false);
+    expect(gates.lines.some((line) => line.startsWith("FAIL") && /no-term/.test(line))).toBe(true);
+  });
 });
 
 describe("parseArgs", () => {
