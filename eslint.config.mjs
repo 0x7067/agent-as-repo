@@ -355,6 +355,7 @@ export default tseslint.config(
 			"src/mcp-server.ts",
 			// tsx runs eval/bench.ts as CJS, where top-level await is unavailable.
 			"eval/bench.ts",
+			"eval/dump-legs.ts",
 		],
 		rules: {
 			"unicorn/prefer-top-level-await": "off",
