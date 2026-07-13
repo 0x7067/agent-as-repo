@@ -1,6 +1,6 @@
 {
   "name": "repo-expert",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Persistent local-first AI memory agents for your git repositories — sqlite-vec + any OpenAI-compatible LLM, exposed via CLI and MCP",
   "bin": {
     "repo-expert": "./dist/bin/cli.mjs",
